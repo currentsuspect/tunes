@@ -104,6 +104,11 @@ export class FetchEngine {
           if (this.state.hasSeen(String(channel.id), ref.messageId)) {
             if (ref.messageId > maxSeen) maxSeen = ref.messageId;
             stats.skippedSeen += 1;
+            const existing = this.state.seenMeta(String(channel.id), ref.messageId);
+            if (existing && !existing.caption && !existing.fileName && (ref.caption || ref.fileName)) {
+              this.state.markSeen(String(channel.id), ref.messageId, existing.sha, ref.caption, ref.fileName);
+              await this.state.save();
+            }
             continue;
           }
 
@@ -124,7 +129,7 @@ export class FetchEngine {
             const got = await this.client.downloadAudioTo(channel.id, ref.messageId, staging.path);
             if (got !== ref.size) throw new RetryableError(`size mismatch: got ${got}, expected ${ref.size}`);
             const { sha, size } = await staging.done(ref.size);
-            this.state.markSeen(String(channel.id), ref.messageId, sha);
+            this.state.markSeen(String(channel.id), ref.messageId, sha, ref.caption, ref.fileName);
             this.state.tallyFetch();
             stats.downloaded += 1;
             stats.bytes += size;

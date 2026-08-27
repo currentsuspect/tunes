@@ -83,7 +83,7 @@ async function main(): Promise<void> {
           }
         }
       }
-      return buildManifest([...probeCache.values()]);
+      return buildManifest([...probeCache.values()], state.allSeenMeta());
     };
 
     const run = async (): Promise<void> => {

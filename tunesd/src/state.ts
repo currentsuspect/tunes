@@ -5,7 +5,8 @@ export interface SeenFile {
   channelId: string;
   messageId: number;
   sha: string;
-  size: number;
+  caption: string | null;
+  fileName: string | null;
   addedAt: string;
 }
 
@@ -14,10 +15,16 @@ export interface ChannelCursor {
   lastScanAt: string | null;
 }
 
+export interface SeenEntry {
+  sha: string;
+  caption: string | null;
+  fileName: string | null;
+}
+
 interface StateFile {
   schema: 1;
   channels: Record<string, ChannelCursor>;
-  seen: Record<string, string>;
+  seen: Record<string, string | SeenEntry>;
   dailyFetched: number;
   dailyDate: string;
 }
@@ -73,16 +80,37 @@ export class State {
   }
 
   hasSeen(channelId: string, messageId: number): boolean {
-    const sha = this.data.seen[this.seenKey(channelId, messageId)];
-    return Boolean(sha);
+    const entry = this.data.seen[this.seenKey(channelId, messageId)];
+    return entry !== undefined;
   }
 
   seenSha(channelId: string, messageId: number): string | null {
-    return this.data.seen[this.seenKey(channelId, messageId)] ?? null;
+    const entry = this.data.seen[this.seenKey(channelId, messageId)];
+    return entry === undefined ? null : (typeof entry === "string" ? entry : entry.sha);
   }
 
-  markSeen(channelId: string, messageId: number, sha: string): void {
-    this.data.seen[this.seenKey(channelId, messageId)] = sha;
+  seenMeta(
+    channelId: string,
+    messageId: number
+  ): { sha: string; caption: string | null; fileName: string | null } | null {
+    const entry = this.data.seen[this.seenKey(channelId, messageId)];
+    if (entry === undefined) return null;
+    if (typeof entry === "string") return { sha: entry, caption: null, fileName: null };
+    return { sha: entry.sha, caption: entry.caption ?? null, fileName: entry.fileName ?? null };
+  }
+
+  markSeen(
+    channelId: string,
+    messageId: number,
+    sha: string,
+    caption: string | null = null,
+    fileName: string | null = null
+  ): void {
+    this.data.seen[this.seenKey(channelId, messageId)] = {
+      sha,
+      caption: caption !== "" ? caption : null,
+      fileName,
+    };
   }
 
   cursorOf(channelId: string): ChannelCursor {
@@ -113,6 +141,19 @@ export class State {
   }
 
   allSeenShas(): string[] {
-    return [...new Set(Object.values(this.data.seen))];
+    return [
+      ...new Set(
+        Object.values(this.data.seen).map((v) => (typeof v === "string" ? v : v.sha))
+      ),
+    ];
+  }
+
+  allSeenMeta(): Map<string, { caption: string | null; fileName: string | null }> {
+    const out = new Map<string, { caption: string | null; fileName: string | null }>();
+    for (const v of Object.values(this.data.seen)) {
+      if (typeof v === "string") continue;
+      if (!out.has(v.sha)) out.set(v.sha, { caption: v.caption ?? null, fileName: v.fileName ?? null });
+    }
+    return out;
   }
 }
