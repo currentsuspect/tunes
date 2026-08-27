@@ -41,9 +41,7 @@ Future<void> main() async {
         androidStopForegroundOnPause: true,
       ),
     );
-    unawaited(
-      AudioService.asyncError.listen((e) => debugPrint('audio_service async error: $e')),
-    );
+    AudioService.asyncError.listen((e) => debugPrint('audio_service async error: $e'));
     debugPrint('audio_service init ok');
   } catch (e) {
     debugPrint('AudioService.init failed (notification disabled): $e');
