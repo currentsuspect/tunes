@@ -197,7 +197,10 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpAndSettle();
 
-    expect(find.text('Bassline'), findsNWidgets(2)); // track row + mini bar both alive
+    expect(
+      find.text('Bassline'),
+      findsNWidgets(2),
+    ); // track row + mini bar both alive
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
     expect(player.index, 0);
     expect(player.playQueueCalls, 1);
