@@ -5,6 +5,7 @@ dist/
 
 # tunesd runtime state — never commit sessions, media, or local config
 tunesd/data/
+tunesd/data-e2e/
 tunesd/config.local*
 tunesd/.env
 

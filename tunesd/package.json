@@ -5,13 +5,21 @@
   "description": "Tunes library daemon — fetch, probe, identity, quality, manifest.",
   "type": "module",
   "scripts": {
+    "serve": "tsx src/cli.ts serve",
+    "once": "tsx src/cli.ts once",
+    "login": "tsx scripts/login.ts",
+    "ids": "tsx scripts/ids.ts",
+    "e2e": "tsx scripts/e2e-fetch.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "tsx": "tsx"
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "teleproto": "^1.229.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }
