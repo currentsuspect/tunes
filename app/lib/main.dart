@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
+import 'core/audio/tune_player.dart';
 import 'core/net/tunes_client.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
@@ -17,13 +19,16 @@ const _tunesdUrl = String.fromEnvironment(
 );
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(const TunesApp());
 }
 
 class TunesApp extends StatelessWidget {
-  const TunesApp({super.key, this.client});
+  const TunesApp({super.key, this.client, this.player});
 
   final TunesClient? client;
+  final TunePlayer? player;
 
   @override
   Widget build(BuildContext context) {
@@ -32,15 +37,21 @@ class TunesApp extends StatelessWidget {
       title: 'tunes',
       debugShowCheckedModeBanner: false,
       theme: buildTunesTheme(mq),
-      home: LibraryHome(client: client ?? TunesClient(_tunesdUrl)),
+      home: LibraryHome(
+        client: client ?? TunesClient(_tunesdUrl),
+        player:
+            player ??
+            MediaKitTunePlayer(trackUrlFor: (sha) => '$_tunesdUrl/track/$sha'),
+      ),
     );
   }
 }
 
 class LibraryHome extends StatefulWidget {
-  const LibraryHome({super.key, required this.client});
+  const LibraryHome({super.key, required this.client, required this.player});
 
   final TunesClient client;
+  final TunePlayer player;
 
   @override
   State<LibraryHome> createState() => _LibraryHomeState();
@@ -56,6 +67,12 @@ class _LibraryHomeState extends State<LibraryHome> {
   void initState() {
     super.initState();
     _tracks = widget.client.fetchManifest();
+  }
+
+  @override
+  void dispose() {
+    widget.player.dispose();
+    super.dispose();
   }
 
   void _reload() {
@@ -100,7 +117,11 @@ class _LibraryHomeState extends State<LibraryHome> {
             ),
             Expanded(
               child: _tab == 0
-                  ? _TracksView(tracks: _tracks, onRetry: _reload)
+                  ? _TracksView(
+                      tracks: _tracks,
+                      onRetry: _reload,
+                      player: widget.player,
+                    )
                   : _NotYetView(label: _tabs[_tab]),
             ),
             Padding(
@@ -118,25 +139,31 @@ class _LibraryHomeState extends State<LibraryHome> {
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.library_music_outlined),
-            label: 'Tracks',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.album_outlined),
-            label: 'Albums',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            label: 'Artists',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.send_outlined),
-            label: 'Channels',
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MiniPlayerBar(player: widget.player),
+          NavigationBar(
+            selectedIndex: _tab,
+            onDestinationSelected: (i) => setState(() => _tab = i),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.library_music_outlined),
+                label: 'Tracks',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.album_outlined),
+                label: 'Albums',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.people_outline),
+                label: 'Artists',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.send_outlined),
+                label: 'Channels',
+              ),
+            ],
           ),
         ],
       ),
@@ -145,10 +172,15 @@ class _LibraryHomeState extends State<LibraryHome> {
 }
 
 class _TracksView extends StatelessWidget {
-  const _TracksView({required this.tracks, required this.onRetry});
+  const _TracksView({
+    required this.tracks,
+    required this.onRetry,
+    required this.player,
+  });
 
   final Future<List<ManifestTrack>> tracks;
   final VoidCallback onRetry;
+  final TunePlayer player;
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +222,10 @@ class _TracksView extends StatelessWidget {
           separatorBuilder: (_, _) => const Divider(),
           itemBuilder: (context, i) {
             final t = tracks[i];
-            return _TrackRow(track: t);
+            return _TrackRow(
+              track: t,
+              onTap: () => player.playQueue(tracks, i),
+            );
           },
         );
       },
@@ -199,47 +234,132 @@ class _TracksView extends StatelessWidget {
 }
 
 class _TrackRow extends StatelessWidget {
-  const _TrackRow({required this.track});
+  const _TrackRow({required this.track, required this.onTap});
 
   final ManifestTrack track;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: Space.sm),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  track.title,
-                  style: TypeScale.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${track.artist} — ${track.album}',
-                  style: TypeScale.body,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(RadiusTokens.control),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: Space.sm,
+          horizontal: Space.xs,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    track.title,
+                    style: TypeScale.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${track.artist} — ${track.album}',
+                    style: TypeScale.body,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: Space.md),
-          _QualityBadge(label: track.qualityLabel),
-          const SizedBox(width: Space.md),
-          Text(
-            track.durationLabel,
-            style: TypeScale.caption.copyWith(
-              fontFeatures: const [FontFeature.tabularFigures()],
+            const SizedBox(width: Space.md),
+            _QualityBadge(label: track.qualityLabel),
+            const SizedBox(width: Space.md),
+            Text(
+              track.durationLabel,
+              style: TypeScale.caption.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _MiniPlayerBar extends StatelessWidget {
+  const _MiniPlayerBar({required this.player});
+
+  final TunePlayer player;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final current = player.current;
+        if (current == null) return const SizedBox.shrink();
+        final max = player.duration.inMilliseconds.toDouble();
+        final value = player.position.inMilliseconds
+            .clamp(0, player.duration.inMilliseconds)
+            .toDouble();
+        return Container(
+          padding: const EdgeInsets.fromLTRB(
+            Space.md,
+            Space.sm,
+            Space.md,
+            Space.sm,
+          ),
+          decoration: const BoxDecoration(
+            color: Tones.surface,
+            border: Border(top: BorderSide(color: Tones.hairline)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      current.title,
+                      style: TypeScale.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      player.playing
+                          ? 'playing · ${current.durationLabel}'
+                          : 'paused · ${current.durationLabel}',
+                      style: TypeScale.caption,
+                    ),
+                  ],
+                ),
+              ),
+              if (max > 0)
+                SizedBox(
+                  width: 120,
+                  child: Slider(
+                    value: value,
+                    max: max,
+                    onChanged: (v) =>
+                        player.seek(Duration(milliseconds: v.round())),
+                  ),
+                ),
+              IconButton(
+                onPressed: player.toggle,
+                icon: Icon(
+                  player.playing
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  size: 30,
+                  color: Tones.primary,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

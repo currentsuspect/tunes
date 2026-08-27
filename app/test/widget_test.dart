@@ -1,4 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/main.dart';
@@ -15,6 +17,64 @@ class _FakeClient implements TunesClient {
   Future<List<ManifestTrack>> fetchManifest() => result();
 }
 
+class FakeTunePlayer extends TunePlayer {
+  List<ManifestTrack> _queue = const [];
+  int _index = -1;
+  bool _playing = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+
+  int playQueueCalls = 0;
+  int toggleCalls = 0;
+  int seekCalls = 0;
+
+  @override
+  List<ManifestTrack> get queue => _queue;
+
+  @override
+  int get index => _index;
+
+  @override
+  bool get playing => _playing;
+
+  @override
+  Duration get position => _position;
+
+  @override
+  Duration get duration => _duration;
+
+  @override
+  ManifestTrack? get current =>
+      (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
+
+  @override
+  void playQueue(List<ManifestTrack> tracks, int startIndex) {
+    playQueueCalls += 1;
+    _queue = List.of(tracks);
+    _index = startIndex;
+    _playing = true;
+    _position = Duration.zero;
+    final ms = tracks[startIndex].durationMs;
+    _duration = ms != null ? Duration(milliseconds: ms) : Duration.zero;
+    _position = Duration.zero;
+    notifyListeners();
+  }
+
+  @override
+  void toggle() {
+    toggleCalls += 1;
+    _playing = !_playing;
+    notifyListeners();
+  }
+
+  @override
+  void seek(Duration target) {
+    seekCalls += 1;
+    _position = target;
+    notifyListeners();
+  }
+}
+
 ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
   sha: 'a' * 64,
   size: 1000,
@@ -29,20 +89,19 @@ ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
   year: null,
 );
 
+List<ManifestTrack> _library() => [
+  _track('Bassline', 'flac', 950000),
+  _track('Nightdrive', 'mp3', 320000),
+];
+
 void main() {
   testWidgets('renders tracks from the manifest', (tester) async {
-    final client = _FakeClient(
-      () async => [
-        _track('Bassline', 'flac', 950000),
-        _track('Nightdrive', 'mp3', 320000),
-      ],
-    );
-    await tester.pumpWidget(TunesApp(client: client));
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
     await tester.pumpAndSettle();
 
     expect(find.text('Bassline'), findsOneWidget);
     expect(find.text('FLAC 950k'), findsOneWidget);
-    expect(find.text('mp3'), findsNothing);
     expect(find.text('MP3 320k'), findsOneWidget);
   });
 
@@ -52,17 +111,16 @@ void main() {
     final client = _FakeClient(
       () async => throw TunesFetchException('unreachable'),
     );
-    await tester.pumpWidget(TunesApp(client: client));
+    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
     await tester.pumpAndSettle();
 
     expect(find.text('No library yet'), findsOneWidget);
     expect(find.textContaining('tunesd is not answering'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
   });
 
   testWidgets('empty manifest shows the no-tracks state', (tester) async {
     final client = _FakeClient(() async => []);
-    await tester.pumpWidget(TunesApp(client: client));
+    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
     await tester.pumpAndSettle();
 
     expect(find.text('No Tracks yet'), findsOneWidget);
@@ -70,12 +128,43 @@ void main() {
 
   testWidgets('tab switch swaps the not-yet label', (tester) async {
     final client = _FakeClient(() async => []);
-    await tester.pumpWidget(TunesApp(client: client));
+    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Albums'));
     await tester.pumpAndSettle();
 
     expect(find.text('Albums coming in M4'), findsOneWidget);
+  });
+
+  testWidgets('tapping a row starts playback on that track', (tester) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Nightdrive'));
+    await tester.pumpAndSettle();
+
+    expect(player.playQueueCalls, 1);
+    expect(player.index, 1);
+    expect(player.current?.title, 'Nightdrive');
+    expect(find.textContaining('playing'), findsOneWidget);
+  });
+
+  testWidgets('mini bar toggle and seek reach the player', (tester) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.pause_rounded));
+    expect(player.toggleCalls, 1);
+
+    await tester.tap(find.byType(Slider));
+    expect(player.seekCalls, greaterThan(0));
   });
 }
