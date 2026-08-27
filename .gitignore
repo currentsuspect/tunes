@@ -1,0 +1,16 @@
+# node
+node_modules/
+dist/
+*.log
+
+# tunesd runtime state — never commit sessions, media, or local config
+tunesd/data/
+tunesd/config.local*
+tunesd/.env
+
+# flutter (app/ has its own .gitignore from flutter create; keep root lean)
+app/build/
+app/.dart_tool/
+
+# deploy artifacts
+tools/dist/
