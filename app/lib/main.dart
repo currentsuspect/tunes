@@ -4,7 +4,10 @@ import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 
 const _gitCommit = String.fromEnvironment('GIT_COMMIT', defaultValue: 'local');
-const _buildNumber = String.fromEnvironment('BUILD_NUMBER', defaultValue: 'local');
+const _buildNumber = String.fromEnvironment(
+  'BUILD_NUMBER',
+  defaultValue: 'local',
+);
 const _channel = String.fromEnvironment('CHANNEL', defaultValue: 'local');
 
 void main() {
@@ -46,7 +49,12 @@ class _LibraryHomeState extends State<LibraryHome> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.lg,
+                Space.lg,
+                0,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -60,7 +68,12 @@ class _LibraryHomeState extends State<LibraryHome> {
               child: Center(child: _EmptyLibrary(label: _tabs[_tab])),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                0,
+                Space.lg,
+                Space.sm,
+              ),
               child: const BuildVitals(),
             ),
           ],
@@ -70,10 +83,22 @@ class _LibraryHomeState extends State<LibraryHome> {
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.library_music_outlined), label: 'Tracks'),
-          NavigationDestination(icon: Icon(Icons.album_outlined), label: 'Albums'),
-          NavigationDestination(icon: Icon(Icons.people_outline), label: 'Artists'),
-          NavigationDestination(icon: Icon(Icons.send_outlined), label: 'Channels'),
+          NavigationDestination(
+            icon: Icon(Icons.library_music_outlined),
+            label: 'Tracks',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.album_outlined),
+            label: 'Albums',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            label: 'Artists',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.send_outlined),
+            label: 'Channels',
+          ),
         ],
       ),
     );
@@ -99,7 +124,11 @@ class _EmptyLibrary extends StatelessWidget {
               color: Tones.surfaceRaised,
               borderRadius: BorderRadius.circular(RadiusTokens.control),
             ),
-            child: const Icon(Icons.music_note_outlined, size: 32, color: Tones.textMuted),
+            child: const Icon(
+              Icons.music_note_outlined,
+              size: 32,
+              color: Tones.textMuted,
+            ),
           ),
           const SizedBox(height: Space.lg),
           Text('No $label yet', style: TypeScale.title),
