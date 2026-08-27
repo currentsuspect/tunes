@@ -28,15 +28,19 @@ Future<void> main() async {
   final player = MediaKitTunePlayer(
     trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
   );
-  await AudioService.init(
-    builder: () => TuneAudioHandler(player),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.currentsuspect.tunes.channel.audio',
-      androidNotificationChannelName: 'Tunes playback',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
-    ),
-  );
+  try {
+    await AudioService.init(
+      builder: () => TuneAudioHandler(player),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.currentsuspect.tunes.channel.audio',
+        androidNotificationChannelName: 'Tunes playback',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  } catch (e) {
+    debugPrint('AudioService.init failed (notification disabled): $e');
+  }
   runApp(TunesApp(client: client, player: player));
 }
 
