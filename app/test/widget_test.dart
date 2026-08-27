@@ -73,6 +73,17 @@ class FakeTunePlayer extends TunePlayer {
     _position = target;
     notifyListeners();
   }
+
+  int stopCalls = 0;
+
+  @override
+  void stop() {
+    stopCalls += 1;
+    _queue = const [];
+    _index = -1;
+    _playing = false;
+    notifyListeners();
+  }
 }
 
 ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
@@ -166,5 +177,47 @@ void main() {
 
     await tester.tap(find.byType(Slider));
     expect(player.seekCalls, greaterThan(0));
+  });
+
+  testWidgets('orientation change keeps the mini bar on the same player', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
+    tester.view.physicalSize = const Size(2400, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Bassline'), findsNWidgets(2)); // track row + mini bar both alive
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    expect(player.index, 0);
+    expect(player.playQueueCalls, 1);
+  });
+
+  testWidgets('stop clears the mini bar', (tester) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+
+    expect(player.stopCalls, 1);
+    expect(find.byIcon(Icons.pause_rounded), findsNothing);
+    expect(find.byIcon(Icons.close_rounded), findsNothing);
   });
 }

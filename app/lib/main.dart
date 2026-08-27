@@ -21,14 +21,18 @@ const _tunesdUrl = String.fromEnvironment(
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  runApp(const TunesApp());
+  final client = TunesClient(_tunesdUrl);
+  final player = MediaKitTunePlayer(
+    trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
+  );
+  runApp(TunesApp(client: client, player: player));
 }
 
 class TunesApp extends StatelessWidget {
-  const TunesApp({super.key, this.client, this.player});
+  const TunesApp({super.key, required this.client, required this.player});
 
-  final TunesClient? client;
-  final TunePlayer? player;
+  final TunesClient client;
+  final TunePlayer player;
 
   @override
   Widget build(BuildContext context) {
@@ -37,12 +41,7 @@ class TunesApp extends StatelessWidget {
       title: 'tunes',
       debugShowCheckedModeBanner: false,
       theme: buildTunesTheme(mq),
-      home: LibraryHome(
-        client: client ?? TunesClient(_tunesdUrl),
-        player:
-            player ??
-            MediaKitTunePlayer(trackUrlFor: (sha) => '$_tunesdUrl/track/$sha'),
-      ),
+      home: LibraryHome(client: client, player: player),
     );
   }
 }
@@ -67,12 +66,6 @@ class _LibraryHomeState extends State<LibraryHome> {
   void initState() {
     super.initState();
     _tracks = widget.client.fetchManifest();
-  }
-
-  @override
-  void dispose() {
-    widget.player.dispose();
-    super.dispose();
   }
 
   void _reload() {
@@ -346,6 +339,15 @@ class _MiniPlayerBar extends StatelessWidget {
                         player.seek(Duration(milliseconds: v.round())),
                   ),
                 ),
+              IconButton(
+                onPressed: player.stop,
+                icon: const Icon(
+                  Icons.close_rounded,
+                  size: 20,
+                  color: Tones.textMuted,
+                ),
+                tooltip: 'Stop playback',
+              ),
               IconButton(
                 onPressed: player.toggle,
                 icon: Icon(

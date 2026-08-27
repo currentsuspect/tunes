@@ -16,6 +16,7 @@ abstract class TunePlayer extends ChangeNotifier {
   void playQueue(List<ManifestTrack> tracks, int startIndex);
   void toggle();
   void seek(Duration target);
+  void stop();
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -88,6 +89,19 @@ class MediaKitTunePlayer extends TunePlayer {
   @override
   void seek(Duration target) {
     _player?.seek(target);
+  }
+
+  @override
+  void stop() {
+    final player = _player;
+    if (player == null) return;
+    player.stop();
+    _queue = const [];
+    _index = -1;
+    _playing = false;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    notifyListeners();
   }
 
   void _attachStreams(Player player) {
