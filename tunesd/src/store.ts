@@ -83,6 +83,36 @@ export class ObjectStore {
     return actual === sha;
   }
 
+  async listObjects(): Promise<Array<{ sha: string; size: number }>> {
+    const { readdir } = await import("node:fs/promises");
+    const root = join(this.rootDir, "objects");
+    const out: Array<{ sha: string; size: number }> = [];
+    let prefixDirs: string[] = [];
+    try {
+      prefixDirs = await readdir(root);
+    } catch {
+      return out;
+    }
+    for (const prefix of prefixDirs) {
+      if (prefix.startsWith(".")) continue;
+      try {
+        const files = await readdir(join(root, prefix));
+        for (const f of files) {
+          if (!/^[0-9a-f]{64}$/.test(f)) continue;
+          try {
+            const s = statSync(join(root, prefix, f));
+            out.push({ sha: f, size: s.size });
+          } catch {
+            // unreadable object: skip, sync layer flags it later
+          }
+        }
+      } catch {
+        // unreadable prefix dir: skip
+      }
+    }
+    return out.sort((a, b) => (a.sha < b.sha ? -1 : 1));
+  }
+
   private async hashFile(p: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const hash = createHash("sha256");

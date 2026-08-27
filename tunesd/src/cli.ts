@@ -5,6 +5,10 @@ import { loadEnv } from "./env.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
+import { buildManifest } from "./manifest.js";
+import { probeFile } from "./probe.js";
+import type { ProbeResult } from "./probe.js";
+import { ManifestServer } from "./serve.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
 import { MtprotoClient } from "./telegram/mtproto.js";
@@ -57,6 +61,31 @@ async function main(): Promise<void> {
     );
     const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log);
 
+    const probeCache = new Map<string, ProbeResult>();
+    const manifestBuilder = async () => {
+      for (const obj of await store.listObjects()) {
+        if (!probeCache.has(obj.sha)) {
+          try {
+            probeCache.set(obj.sha, await probeFile(obj.sha, obj.size, store.pathOf(obj.sha)));
+          } catch {
+            log.warn({ event: "PROBE_FAILED", sha: obj.sha });
+            probeCache.set(obj.sha, {
+              sha: obj.sha,
+              size: obj.size,
+              codec: null,
+              sampleRate: null,
+              channels: null,
+              bitrate: null,
+              durationMs: null,
+              tags: {},
+              probedAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+      return buildManifest([...probeCache.values()]);
+    };
+
     const run = async (): Promise<void> => {
       const result = await engine.runCycle(channels);
       log.info({
@@ -82,6 +111,8 @@ async function main(): Promise<void> {
       process.on("SIGINT", () => shutdown("SIGINT"));
       process.on("SIGTERM", () => shutdown("SIGTERM"));
       log.info({ event: "TUNESD_START", channels: channels.map((c) => c.id) });
+      const server = new ManifestServer(store, manifestBuilder, env.port, log);
+      await server.start();
 
       if (immediate) {
         try {

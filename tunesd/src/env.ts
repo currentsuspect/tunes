@@ -11,6 +11,7 @@ export interface TunesdEnv {
   dataDir: string;
   logLevel: "debug" | "info" | "warn" | "error";
   fetch: FetchDisciplineConfig;
+  port: number;
 }
 
 function loadEnvFile(p: string): void {
@@ -56,5 +57,6 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): TunesdEnv {
     dataDir,
     logLevel: (env["TUNESD_LOG_LEVEL"] ?? "info") as TunesdEnv["logLevel"],
     fetch: { ...defaultFetchDiscipline, ...overrides },
+    port: Number(env["TUNESD_PORT"] ?? 4780),
   };
 }
