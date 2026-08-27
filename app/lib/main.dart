@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -5,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/net/tunes_client.dart';
+import 'core/platform/notifications.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 import 'domain/manifest.dart';
@@ -233,7 +236,10 @@ class _TracksView extends StatelessWidget {
             final t = tracks[i];
             return _TrackRow(
               track: t,
-              onTap: () => player.playQueue(tracks, i),
+              onTap: () {
+                unawaited(requestNotificationPermissionIfNeeded());
+                player.playQueue(tracks, i);
+              },
             );
           },
         );

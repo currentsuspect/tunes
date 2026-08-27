@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/platform/notifications.dart';
 import '../../core/theme/tokens.dart';
 
 class NowPlayingPage extends StatelessWidget {
@@ -207,7 +210,10 @@ class NowPlayingPage extends StatelessWidget {
                       final t = player.queue[i];
                       final isCurrent = i == player.index;
                       return InkWell(
-                        onTap: () => player.playAt(i),
+                        onTap: () {
+                          unawaited(requestNotificationPermissionIfNeeded());
+                          player.playAt(i);
+                        },
                         borderRadius: BorderRadius.circular(
                           RadiusTokens.control,
                         ),
