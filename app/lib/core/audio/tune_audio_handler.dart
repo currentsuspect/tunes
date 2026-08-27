@@ -12,6 +12,8 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   final TunePlayer player;
 
   void _sync() {
+    debugPrint(
+        'handler sync: playing=${player.playing} current=${player.current?.title}');
     final controls = [
       MediaControl.skipToPrevious,
       if (player.playing) MediaControl.pause else MediaControl.play,
