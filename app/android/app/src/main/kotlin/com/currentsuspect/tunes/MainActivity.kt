@@ -2,6 +2,7 @@ package com.currentsuspect.tunes
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -16,16 +17,22 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "requestPostNotifications" -> {
-                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                            PackageManager.PERMISSION_GRANTED
-                        ) {
-                            ActivityCompat.requestPermissions(
-                                this,
-                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                                4001,
-                            )
-                        }
                         result.success(null)
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            try {
+                                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                                    PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    ActivityCompat.requestPermissions(
+                                        this,
+                                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                        4001,
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                // never let a permission request take the app down
+                            }
+                        }
                     }
                     else -> result.notImplemented()
                 }
