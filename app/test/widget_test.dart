@@ -47,6 +47,52 @@ class FakeTunePlayer extends TunePlayer {
   ManifestTrack? get current =>
       (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
 
+  int nextCalls = 0;
+  int previousCalls = 0;
+  int playAtCalls = 0;
+  int playCalls = 0;
+  int pauseCalls = 0;
+
+  @override
+  void play() {
+    playCalls += 1;
+    _playing = true;
+    notifyListeners();
+  }
+
+  @override
+  void pause() {
+    pauseCalls += 1;
+    _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  void next() {
+    nextCalls += 1;
+    if (_index < _queue.length - 1) {
+      _index += 1;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void previous() {
+    previousCalls += 1;
+    if (_index > 0) {
+      _index -= 1;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void playAt(int index) {
+    playAtCalls += 1;
+    _index = index;
+    _playing = true;
+    notifyListeners();
+  }
+
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     playQueueCalls += 1;
@@ -222,5 +268,58 @@ void main() {
     expect(player.stopCalls, 1);
     expect(find.byIcon(Icons.pause_rounded), findsNothing);
     expect(find.byIcon(Icons.close_rounded), findsNothing);
+  });
+
+  testWidgets('tapping the mini bar opens the full Now Playing page', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Now Playing'), findsOneWidget);
+    expect(find.text('Up next'), findsOneWidget);
+    expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+  });
+
+  testWidgets('full page controls reach the player', (tester) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bassline').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.skip_next_rounded));
+    expect(player.nextCalls, 1);
+
+    await tester.tap(find.byIcon(Icons.skip_previous_rounded));
+    expect(player.previousCalls, 1);
+  });
+
+  testWidgets('queue list jumps to a tapped track', (tester) async {
+    final player = FakeTunePlayer();
+    final client = _FakeClient(() async => _library());
+    await tester.pumpWidget(TunesApp(client: client, player: player));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bassline').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Nightdrive').last);
+    expect(player.playAtCalls, 1);
+    expect(player.index, 1);
   });
 }

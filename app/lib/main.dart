@@ -1,11 +1,14 @@
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/net/tunes_client.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 import 'domain/manifest.dart';
+import 'features/now_playing/now_playing_page.dart';
 
 const _gitCommit = String.fromEnvironment('GIT_COMMIT', defaultValue: 'local');
 const _buildNumber = String.fromEnvironment(
@@ -18,12 +21,21 @@ const _tunesdUrl = String.fromEnvironment(
   defaultValue: 'http://192.168.100.6:4780',
 );
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   final client = TunesClient(_tunesdUrl);
   final player = MediaKitTunePlayer(
     trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
+  );
+  await AudioService.init(
+    builder: () => TuneAudioHandler(player),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.currentsuspect.tunes.channel.audio',
+      androidNotificationChannelName: 'Tunes playback',
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: true,
+    ),
   );
   runApp(TunesApp(client: client, player: player));
 }
@@ -296,69 +308,76 @@ class _MiniPlayerBar extends StatelessWidget {
         final value = player.position.inMilliseconds
             .clamp(0, player.duration.inMilliseconds)
             .toDouble();
-        return Container(
-          padding: const EdgeInsets.fromLTRB(
-            Space.md,
-            Space.sm,
-            Space.md,
-            Space.sm,
+        return InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => NowPlayingPage(player: player),
+            ),
           ),
-          decoration: const BoxDecoration(
-            color: Tones.surface,
-            border: Border(top: BorderSide(color: Tones.hairline)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      current.title,
-                      style: TypeScale.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      player.playing
-                          ? 'playing · ${current.durationLabel}'
-                          : 'paused · ${current.durationLabel}',
-                      style: TypeScale.caption,
-                    ),
-                  ],
-                ),
-              ),
-              if (max > 0)
-                SizedBox(
-                  width: 120,
-                  child: Slider(
-                    value: value,
-                    max: max,
-                    onChanged: (v) =>
-                        player.seek(Duration(milliseconds: v.round())),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(
+              Space.md,
+              Space.sm,
+              Space.md,
+              Space.sm,
+            ),
+            decoration: const BoxDecoration(
+              color: Tones.surface,
+              border: Border(top: BorderSide(color: Tones.hairline)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        current.title,
+                        style: TypeScale.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        player.playing
+                            ? 'playing · ${current.durationLabel}'
+                            : 'paused · ${current.durationLabel}',
+                        style: TypeScale.caption,
+                      ),
+                    ],
                   ),
                 ),
-              IconButton(
-                onPressed: player.stop,
-                icon: const Icon(
-                  Icons.close_rounded,
-                  size: 20,
-                  color: Tones.textMuted,
+                if (max > 0)
+                  SizedBox(
+                    width: 120,
+                    child: Slider(
+                      value: value,
+                      max: max,
+                      onChanged: (v) =>
+                          player.seek(Duration(milliseconds: v.round())),
+                    ),
+                  ),
+                IconButton(
+                  onPressed: player.stop,
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    size: 20,
+                    color: Tones.textMuted,
+                  ),
+                  tooltip: 'Stop playback',
                 ),
-                tooltip: 'Stop playback',
-              ),
-              IconButton(
-                onPressed: player.toggle,
-                icon: Icon(
-                  player.playing
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  size: 30,
-                  color: Tones.primary,
+                IconButton(
+                  onPressed: player.toggle,
+                  icon: Icon(
+                    player.playing
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    size: 30,
+                    color: Tones.primary,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

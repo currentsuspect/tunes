@@ -14,7 +14,12 @@ abstract class TunePlayer extends ChangeNotifier {
   ManifestTrack? get current;
 
   void playQueue(List<ManifestTrack> tracks, int startIndex);
+  void play();
+  void pause();
   void toggle();
+  void next();
+  void previous();
+  void playAt(int index);
   void seek(Duration target);
   void stop();
 }
@@ -84,6 +89,51 @@ class MediaKitTunePlayer extends TunePlayer {
     } else {
       player.play();
     }
+  }
+
+  @override
+  void play() {
+    final player = _player;
+    if (player == null) return;
+    if (_queue.isEmpty) return;
+    player.play();
+  }
+
+  @override
+  void pause() {
+    _player?.pause();
+  }
+
+  @override
+  void next() {
+    final player = _player;
+    if (player == null) return;
+    if (_index >= _queue.length - 1) {
+      stop();
+      return;
+    }
+    player.next();
+  }
+
+  @override
+  void previous() {
+    final player = _player;
+    if (player == null) return;
+    if (_index <= 0) {
+      player.seek(Duration.zero);
+      return;
+    }
+    player.previous();
+  }
+
+  @override
+  void playAt(int index) {
+    final player = _player;
+    if (player == null) return;
+    if (index < 0 || index >= _queue.length) return;
+    player.jump(index);
+    _index = index;
+    notifyListeners();
   }
 
   @override
