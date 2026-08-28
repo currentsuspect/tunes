@@ -187,6 +187,55 @@ describe("buildManifest", () => {
     expect(m.releases[0]?.artSha).toBe("c".repeat(64)); // art inherited from member tracks
   });
 
+  it("folds absorbed unknown-album strays into one card", () => {
+    const mk = (i: number, sha: string) => ({
+      sha,
+      artist: null as string | null,
+      album: null as string | null,
+      year: null as string | null,
+      artSha: null,
+      releaseId: null,
+      releaseType: null,
+      trackNumber: null,
+      discNumber: null,
+    });
+    const enrich = new Map<string, TrackEnrichment>();
+    for (let i = 0; i < 2; i++) enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32)));
+    for (let i = 0; i < 5; i++) enrich.set(`b${i}`.repeat(32), mk(i, `b${i}`.repeat(32)));
+    const m = buildManifest(
+      [],
+      new Map(),
+      enrich,
+      [...enrich.keys()].map((sha) => ({ sha, size: 100 }))
+    );
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.trackShas).toHaveLength(7);
+  });
+
+  it("folds three anonymous stray cards into one", () => {
+    const mk = (i: number, sha: string) => ({
+      sha,
+      artist: null as string | null,
+      album: null as string | null,
+      year: null as string | null,
+      artSha: null,
+      releaseId: null,
+      releaseType: null,
+      trackNumber: null,
+      discNumber: null,
+    });
+    const enrich = new Map<string, TrackEnrichment>();
+    for (let i = 0; i < 6; i++) enrich.set(`x${i}`.repeat(32), mk(i, `x${i}`.repeat(32)));
+    const m = buildManifest(
+      [],
+      new Map(),
+      enrich,
+      [...enrich.keys()].map((sha) => ({ sha, size: 100 }))
+    );
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.trackShas).toHaveLength(6);
+  });
+
   it("keeps same-token releases apart when years differ", () => {
     const enrich = new Map([
       [
@@ -340,20 +389,38 @@ describe("buildManifest", () => {
 
   it("falls back to a normalized name key without an external id", () => {
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map());
-    expect(m.releases.length).toBe(2); // per-sha until named
+    expect(m.releases.length).toBe(1); // anonymous strays fold into one card
     const named = buildManifest(
       [probe(), probe({ sha: "b".repeat(64) })],
+      new Map(),
       new Map([
         [
           "a".repeat(64),
-          { caption: null, fileName: "Travis Scott - MAFIA.flac" },
+          {
+            artist: "Travis Scott",
+            album: "MAFIA",
+            year: "2021",
+            artSha: null,
+            releaseId: null,
+            releaseType: null,
+            trackNumber: null,
+            discNumber: null,
+          },
         ],
         [
           "b".repeat(64),
-          { caption: null, fileName: "Travis Scott - ESCAPE PLAN.flac" },
+          {
+            artist: "Travis Scott",
+            album: "ESCAPE PLAN",
+            year: "2021",
+            artSha: null,
+            releaseId: null,
+            releaseType: null,
+            trackNumber: 1,
+            discNumber: null,
+          },
         ],
-      ]),
-      new Map()
+      ])
     );
     expect(named.releases.length).toBe(2); // different albums, same artist
   });

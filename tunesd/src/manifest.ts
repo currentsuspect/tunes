@@ -188,30 +188,34 @@ export function buildManifest(
   }
   const merged = new Map<string, ManifestRelease>();
   for (const r of releaseMap.values()) {
-    let target = r;
-    const mergedShas = new Set<string>(r.trackShas);
-    for (const other of releaseMap.values()) {
-      if (other === r) continue;
-      if (other.artist !== r.artist) continue;
-      if (other.year !== r.year && other.year != null && r.year != null) continue;
-      const rSmaller = r.trackShas.length <= other.trackShas.length;
-      const small = rSmaller ? r : other;
-      const big = rSmaller ? other : r;
-      if (small.trackShas.length === 0 || small.trackShas.length > 8) continue;
-      if (tokenSubset(small.title, big.title)) {
-        target = big;
-        for (const sha of small.trackShas) mergedShas.add(sha);
-        for (const sha of big.trackShas) mergedShas.add(sha);
+    merged.set(r.id, { ...r, trackShas: [...r.trackShas] });
+  }
+  let mergedAnything = true;
+  while (mergedAnything) {
+    mergedAnything = false;
+    const ids = [...merged.keys()];
+    for (const id of ids) {
+      const r = merged.get(id);
+      if (!r) continue;
+      for (const [oid, other] of merged) {
+        if (oid === id) continue;
+        if (other.artist !== r.artist) continue;
+        if (other.year !== r.year && other.year != null && r.year != null) continue;
+        const rSmaller = r.trackShas.length <= other.trackShas.length;
+        const small = rSmaller ? r : other;
+        const big = rSmaller ? other : r;
+        if (small.trackShas.length === 0) continue;
+        const bothUnknown =
+          small.title === "unknown album" && big.title === "unknown album";
+        if (small.trackShas.length > 8 && !bothUnknown) continue;
+        if (!bothUnknown && !tokenSubset(small.title, big.title)) continue;
+        for (const sha of small.trackShas) {
+          if (!big.trackShas.includes(sha)) big.trackShas.push(sha);
+        }
+        merged.delete(small.id);
+        mergedAnything = true;
         break;
       }
-    }
-    const existing = merged.get(target.id);
-    if (existing) {
-      for (const sha of mergedShas) {
-        if (!existing.trackShas.includes(sha)) existing.trackShas.push(sha);
-      }
-    } else {
-      merged.set(target.id, { ...target, trackShas: [...mergedShas] });
     }
   }
   for (const r of merged.values()) {
