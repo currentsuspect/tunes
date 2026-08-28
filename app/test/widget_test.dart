@@ -7,15 +7,17 @@ import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
+import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
 import 'package:tunes/features/player/mini_player_bar.dart';
 import 'package:tunes/main.dart';
 
 class _FakeClient implements TunesClient {
-  _FakeClient(this.result, {this.onSearch});
+  _FakeClient(this.result, {this.onSearch, this.onDiscography});
 
   final Future<TunesManifest> Function() result;
   final Future<SearchResults> Function(String q)? onSearch;
+  final Future<ArtistDiscography> Function(String artist)? onDiscography;
 
   @override
   String get baseUrl => 'http://fake:4780';
@@ -42,6 +44,18 @@ class _FakeClient implements TunesClient {
       ),
     );
   }
+
+  @override
+  Future<ArtistDiscography> discography(String artist) =>
+      onDiscography?.call(artist) ??
+      Future.value(
+        ArtistDiscography(
+          artist: artist,
+          mbid: null,
+          fetchedAt: null,
+          groups: const [],
+        ),
+      );
 
   @override
   Future<bool> ping() async => true;
@@ -429,6 +443,91 @@ void main() {
     await tester.tap(find.text('Nightdrive (Remaster)'));
     await tester.pumpAndSettle();
     expect(find.text('Album'), findsWidgets);
+  });
+
+  testWidgets('artist page lists discography not in the library', (
+    tester,
+  ) async {
+    final tracks = [
+      _track(
+        'KRYPTONITE',
+        'flac',
+        950000,
+        artist: 'Don Toliver',
+        album: 'HARDSTONE PSYCHO',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'HARDSTONE PSYCHO',
+          artist: 'Don Toliver',
+          year: '2024',
+          artSha: null,
+          type: 'album',
+          totalTracks: 19,
+          trackShas: ['a' * 64],
+        ),
+      ],
+    );
+    final client = _FakeClient(
+      () async => manifest,
+      onDiscography: (artist) async => ArtistDiscography(
+        artist: artist,
+        mbid: 'mbid-1',
+        fetchedAt: 1,
+        groups: [
+          DiscographyGroup(
+            id: 'g1',
+            title: 'HARDSTONE PSYCHO',
+            type: 'Album',
+            year: '2024',
+            date: '2024-08-09',
+            owned: true,
+            releaseId: 'rel-1',
+            ownedTracks: 1,
+            totalTracks: 19,
+          ),
+          DiscographyGroup(
+            id: 'g2',
+            title: 'OCTANE',
+            type: 'Album',
+            year: '2026',
+            date: '2026-06-26',
+            owned: false,
+            releaseId: null,
+            ownedTracks: 0,
+            totalTracks: null,
+          ),
+          DiscographyGroup(
+            id: 'g3',
+            title: 'Love Sick',
+            type: 'Album',
+            year: '2023',
+            date: '2023-02-24',
+            owned: false,
+            releaseId: null,
+            ownedTracks: 0,
+            totalTracks: null,
+          ),
+        ],
+      ),
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+
+    await tester.tap(find.text('Artists').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Don Toliver'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Discography · 1 of 3 in your library'), findsOneWidget);
+    expect(find.text('OCTANE'), findsOneWidget);
+    expect(find.text('Love Sick'), findsOneWidget);
+    expect(find.text('not in library'), findsNWidgets(2));
   });
 
   testWidgets('home surfaces missing-from-collection and released-this-year', (

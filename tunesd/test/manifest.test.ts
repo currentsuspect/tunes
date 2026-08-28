@@ -397,6 +397,37 @@ describe("buildManifest", () => {
     expect(album?.tracks[0]?.trackNumber).toBe(4);
   });
 
+  it("surfaces the release-group id from linkmeta on the release", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [
+        "a".repeat(64),
+        {
+          artist: "Don Toliver",
+          album: "HARDSTONE PSYCHO",
+          year: "2024",
+          artSha: null,
+          releaseId: "mb:rel",
+          releaseType: "Album",
+          trackNumber: 1,
+          discNumber: null,
+          totalTracks: 23,
+          membership: [],
+        },
+      ],
+    ]);
+    const m = buildManifest(
+      [probe()],
+      new Map(),
+      enrich,
+      [],
+      [],
+      new Map([
+        ["mb:rel", { title: "HARDSTONE PSYCHO", type: "Album", totalTracks: 23, groupId: "g1", date: "2024-08-09" }],
+      ])
+    );
+    expect(m.releases[0]?.groupId).toBe("g1");
+  });
+
   it("suppresses category/genre releases as entities", () => {
     const enrich = new Map([
       [

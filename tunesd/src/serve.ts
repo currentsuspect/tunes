@@ -5,6 +5,8 @@ import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV2 } from "./manifest.js";
+import type { ArtistDiscography, JoinedGroup } from "./discography.js";
+import { joinDiscography, normName } from "./discography.js";
 
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -28,7 +30,9 @@ export class ManifestServer {
     private readonly artDir: string,
     private readonly buildManifest: () => Promise<ManifestV2>,
     private readonly port: number,
-    private readonly log: Log
+    private readonly log: Log,
+    private readonly getDiscographies: () => Map<string, ArtistDiscography> = () =>
+      new Map()
   ) {}
 
   private async getManifest(force = false): Promise<ManifestV2> {
@@ -92,6 +96,30 @@ export class ManifestServer {
           const artists = manifest.artists.filter((a) => norm(a.name).includes(qn)).slice(0, limit);
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ tracks, releases, artists }));
+          return;
+        }
+
+        if (url.pathname === "/discography") {
+          const name = (url.searchParams.get("artist") ?? "").trim();
+          if (name === "") {
+            res.writeHead(400, { "content-type": "text/plain" });
+            res.end("missing artist");
+            return;
+          }
+          const manifest = await this.getManifest();
+          const d = this.getDiscographies().get(normName(name));
+          const groups: JoinedGroup[] = d
+            ? joinDiscography(d.groups, manifest.releases)
+            : [];
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              artist: d?.name ?? name,
+              mbid: d?.mbid ?? null,
+              fetchedAt: d?.fetchedAt ?? null,
+              groups,
+            })
+          );
           return;
         }
 

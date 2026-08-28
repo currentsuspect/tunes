@@ -2,19 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/initials.dart';
+import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
 import '../now_playing/now_playing_page.dart';
 import '../library/library_widgets.dart';
 import '../player/mini_player_bar.dart';
 
-class ArtistPage extends StatelessWidget {
+class ArtistPage extends StatefulWidget {
   const ArtistPage({
     super.key,
     required this.artist,
     required this.manifest,
+    this.client,
     required this.player,
     required this.store,
     required this.downloading,
@@ -25,6 +28,7 @@ class ArtistPage extends StatelessWidget {
 
   final String artist;
   final TunesManifest manifest;
+  final TunesClient? client;
   final TunePlayer player;
   final DownloadStore store;
   final Set<String> downloading;
@@ -33,9 +37,47 @@ class ArtistPage extends StatelessWidget {
   final String Function(String sha) artUrlFor;
 
   @override
+  State<ArtistPage> createState() => _ArtistPageState();
+}
+
+class _ArtistPageState extends State<ArtistPage> {
+  ArtistDiscography? _discography;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.offline) return;
+    final client = widget.client;
+    if (client == null) return;
+    setState(() => _loading = true);
+    try {
+      final d = await client.discography(widget.artist);
+      if (!mounted) return;
+      setState(() => _discography = d);
+    } catch (_) {
+      // box unreachable — the owned section still renders
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final tracks = manifest.tracks.where((t) => t.artist == artist).toList();
-    final releases = manifest.releasesFor(artist);
+    final artist = widget.artist;
+    final tracks = widget.manifest.tracks
+        .where((t) => t.artist == artist)
+        .toList();
+    final releases = widget.manifest.releasesFor(artist);
+    final d = _discography;
+    final missing = <DiscographyGroup>[
+      if (d != null) ...d.groups.where((g) => !g.owned),
+    ]..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
+    final ownedCount = d == null ? 0 : d.groups.where((g) => g.owned).length;
 
     return Scaffold(
       body: SafeArea(
@@ -75,7 +117,7 @@ class ArtistPage extends StatelessWidget {
                 children: [
                   Center(
                     child: () {
-                      final photo = manifest.artistArt(artist);
+                      final photo = widget.manifest.artistArt(artist);
                       if (photo == null) {
                         return InitialsAvatar(name: artist, size: 140);
                       }
@@ -84,7 +126,7 @@ class ArtistPage extends StatelessWidget {
                           width: 140,
                           height: 140,
                           child: Image.network(
-                            artUrlFor(photo),
+                            widget.artUrlFor(photo),
                             fit: BoxFit.cover,
                             errorBuilder: (_, _, _) =>
                                 InitialsAvatar(name: artist, size: 140),
@@ -107,7 +149,7 @@ class ArtistPage extends StatelessWidget {
                   ),
                   const SizedBox(height: Space.lg),
                   FilledButton.icon(
-                    onPressed: () => player.playQueue(tracks, 0),
+                    onPressed: () => widget.player.playQueue(tracks, 0),
                     icon: const Icon(Icons.play_arrow_rounded, size: 20),
                     label: const Text('Play all'),
                     style: FilledButton.styleFrom(
@@ -115,23 +157,110 @@ class ArtistPage extends StatelessWidget {
                       foregroundColor: Tones.onPrimary,
                     ),
                   ),
+                  if (_loading)
+                    const Padding(
+                      padding: EdgeInsets.all(Space.lg),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else if (d != null && d.groups.isNotEmpty) ...[
+                    const SizedBox(height: Space.lg),
+                    Text(
+                      'Discography · $ownedCount of ${d.groups.length} in your library',
+                      style: TypeScale.title,
+                    ),
+                    const SizedBox(height: Space.sm),
+                    if (missing.isEmpty)
+                      Text(
+                        'Complete — everything in your library.',
+                        style: TypeScale.caption,
+                      )
+                    else
+                      for (final g in missing) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: Space.sm,
+                            horizontal: Space.xs,
+                          ),
+                          child: Row(
+                            children: [
+                              Opacity(
+                                opacity: 0.45,
+                                child: ArtThumb(
+                                  sha: null,
+                                  artUrlFor: widget.artUrlFor,
+                                  size: 48,
+                                ),
+                              ),
+                              const SizedBox(width: Space.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      g.title,
+                                      style: TypeScale.title.copyWith(
+                                        color: Tones.textMuted,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      '${g.typeLabel} · ${g.year ?? '—'}',
+                                      style: TypeScale.caption,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: Space.sm),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: Space.sm,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Tones.surfaceRaised,
+                                  borderRadius: BorderRadius.circular(
+                                    RadiusTokens.control,
+                                  ),
+                                  border: Border.all(color: Tones.hairline),
+                                ),
+                                child: Text(
+                                  'not in library',
+                                  style: TypeScale.caption.copyWith(
+                                    color: Tones.textMuted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (g != missing.last) const Divider(),
+                      ],
+                  ],
                   const SizedBox(height: Space.lg),
                   for (final r in releases) ...[
                     _ReleaseCard(
                       release: r,
-                      manifest: manifest,
-                      artUrlFor: artUrlFor,
+                      manifest: widget.manifest,
+                      artUrlFor: widget.artUrlFor,
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => AlbumPage(
                             release: r,
-                            manifest: manifest,
-                            player: player,
-                            store: store,
-                            downloading: downloading,
-                            onDownload: onDownload,
-                            offline: offline,
-                            artUrlFor: artUrlFor,
+                            manifest: widget.manifest,
+                            player: widget.player,
+                            store: widget.store,
+                            downloading: widget.downloading,
+                            onDownload: widget.onDownload,
+                            offline: widget.offline,
+                            artUrlFor: widget.artUrlFor,
                           ),
                         ),
                       ),
@@ -145,21 +274,21 @@ class ArtistPage extends StatelessWidget {
         ),
       ),
       bottomNavigationBar: MiniPlayerBar(
-        player: player,
+        player: widget.player,
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => NowPlayingPage(
-              player: player,
-              manifest: manifest,
-              store: store,
-              downloading: downloading,
-              onDownload: onDownload,
-              offline: offline,
-              artUrlFor: artUrlFor,
+              player: widget.player,
+              manifest: widget.manifest,
+              store: widget.store,
+              downloading: widget.downloading,
+              onDownload: widget.onDownload,
+              offline: widget.offline,
+              artUrlFor: widget.artUrlFor,
             ),
           ),
         ),
-        artUrlFor: artUrlFor,
+        artUrlFor: widget.artUrlFor,
       ),
     );
   }

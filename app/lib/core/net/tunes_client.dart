@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
 
 class TunesClient {
@@ -89,6 +90,26 @@ class TunesClient {
       }
       final body = await res.transform(utf8.decoder).join();
       return SearchResults.fromJson(jsonDecode(body) as Map<String, dynamic>);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<ArtistDiscography> discography(String artist) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/discography?artist=${Uri.encodeQueryComponent(artist)}',
+      );
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        throw TunesFetchException('discography ${res.statusCode}');
+      }
+      final body = await res.transform(utf8.decoder).join();
+      return ArtistDiscography.fromJson(
+        jsonDecode(body) as Map<String, dynamic>,
+      );
     } finally {
       client.close(force: true);
     }

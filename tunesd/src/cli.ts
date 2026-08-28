@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
+import type { ArtistDiscography } from "./discography.js";
+import { loadDiscographies, persistDiscographies } from "./discography.js";
 import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
@@ -110,6 +112,9 @@ async function main(): Promise<void> {
       await writeFile(tmp, JSON.stringify({ releases: Object.fromEntries(linkMeta) }, null, 1));
       await rename(tmp, linkMetaFile);
     };
+    const discographyFile = join(env.dataDir, "discography.json");
+    const discographies = await loadDiscographies(discographyFile);
+    let lastDiscographySweep = 0;
     const releaseGroupShas = (): Map<string, string[]> => {
       const groups = new Map<string, string[]>();
       for (const e of enrich.values()) {
@@ -512,6 +517,8 @@ async function main(): Promise<void> {
             title: release.title,
             type: release.type,
             totalTracks: release.tracks.length,
+            groupId: release.groupId,
+            date: release.date,
           });
           await persistLinkMeta();
         }
@@ -633,6 +640,32 @@ async function main(): Promise<void> {
         if (changed) await persistEnrich();
       }
 
+      const refreshDiscographies = async () => {
+        if (Date.now() - lastDiscographySweep < 3_600_000) return;
+        lastDiscographySweep = Date.now();
+        const names = [
+          ...new Set(
+            [...enrich.values()].map((e) => e.artist).filter((n): n is string => n != null)
+          ),
+        ];
+        let changed = false;
+        for (const name of names) {
+          const cached = discographies.get(normName(name));
+          if (cached && Date.now() - cached.fetchedAt < 7 * 86_400_000) continue;
+          const d = await mb.artistDiscography(name);
+          if (!d) continue;
+          discographies.set(normName(name), { ...d, name, fetchedAt: Date.now() });
+          changed = true;
+          log.info({
+            event: "DISC_GROUP_SYNCED",
+            artist: normName(name).slice(0, 20),
+            groups: d.groups.length,
+          });
+        }
+        if (changed) await persistDiscographies(discographyFile, discographies);
+      };
+      await refreshDiscographies();
+
       } finally {
         enrichPassRunning = false;
       }
@@ -698,7 +731,8 @@ async function main(): Promise<void> {
         join(env.dataDir, "covers"),
         manifestBuilder,
         env.port,
-        log
+        log,
+        () => discographies
       );
       await server.start();
       void runEnrichPass().catch((e) =>

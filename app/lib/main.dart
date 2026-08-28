@@ -257,6 +257,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         builder: (_) => ArtistPage(
           artist: artist,
           manifest: manifest,
+          client: widget.client,
           player: widget.player,
           store: widget.store,
           downloading: _downloading,

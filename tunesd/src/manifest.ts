@@ -28,6 +28,7 @@ export interface ManifestRelease {
   artSha: string | null;
   type: string | null;
   totalTracks: number | null;
+  groupId: string | null;
   trackShas: string[];
   tracks: Array<{ sha: string; trackNumber: number | null; discNumber: number | null }>;
 }
@@ -63,11 +64,15 @@ export interface ReleaseLinkMeta {
   title: string;
   type: string | null;
   totalTracks: number | null;
+  groupId?: string | null;
+  date?: string | null;
 }
 
-function norm(s: string): string {
+export function normalize(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
+
+const norm = normalize;
 
 const CATEGORY_RELEASES = new Set([
   "alt rap", "rap", "hip hop", "hip-hop", "r&b", "rnb", "drill", "afrobeats",
@@ -202,6 +207,7 @@ export function buildManifest(
       artSha: t.artSha,
       type: meta?.type ?? enrich?.releaseType ?? null,
       totalTracks: meta?.totalTracks ?? enrich?.totalTracks ?? null,
+      groupId: meta?.groupId ?? null,
       trackShas: [],
       tracks: [],
     };
@@ -225,6 +231,10 @@ export function buildManifest(
       enrich?.releaseId ??
       fallbackReleaseKey({ artist: t.artist, album: t.album, sha: t.sha });
     const primary = ensureRelease(t, enrich, key);
+    if (primary.groupId == null) {
+      const meta = linkMeta.get(key);
+      if (meta?.groupId != null) primary.groupId = meta.groupId;
+    }
     addTrackToRelease(primary, t.sha, enrich?.trackNumber ?? null, enrich?.discNumber ?? null);
     if (primary.artSha == null) primary.artSha = t.artSha;
     if (primary.totalTracks == null) {
@@ -320,7 +330,8 @@ export function buildManifest(
         if (na !== nb) return na - nb;
         return a.sha < b.sha ? -1 : 1;
       });
-      return { ...r, trackShas: sorted.map((x) => x.sha), tracks: sorted };
+      const groupId = r.groupId ?? linkMeta.get(r.id)?.groupId ?? null;
+      return { ...r, groupId, trackShas: sorted.map((x) => x.sha), tracks: sorted };
     });
 
   const integrityBody = JSON.stringify({ schema: 2, tracks, releases });

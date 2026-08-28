@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flattenReleaseTracks, parseArtistTitle } from "../src/enrich.js";
+import { flattenReleaseTracks, MusicBrainzClient, parseArtistTitle } from "../src/enrich.js";
 
 describe("parseArtistTitle", () => {
   it("parses 'Artist - Title.ext'", () => {
@@ -72,4 +72,54 @@ describe("flattenReleaseTracks", () => {
     ]);
     expect(rows.map((r) => r.position)).toEqual([1, 2]);
   });
+});
+
+describe("MusicBrainzClient.artistDiscography", () => {
+  it("searches the artist and maps release groups", async () => {
+    const calls: string[] = [];
+    const replies: unknown[] = [
+      { artists: [{ id: "mbid-1", name: "Don Toliver" }] },
+      {
+        "release-groups": [
+          {
+            id: "g1",
+            title: "HARDSTONE PSYCHO",
+            "primary-type": "Album",
+            "first-release-date": "2024-08-09",
+          },
+          {
+            id: "g2",
+            title: "BROTHER STONE (FEAT. KODAK BLACK)",
+            "primary-type": "Single",
+            "first-release-date": "2024-05-17",
+          },
+        ],
+      },
+    ];
+    const fetcher = async (url: string) => {
+      calls.push(url);
+      const body = replies.shift() ?? { artists: [] };
+      return { ok: true, json: async () => body } as Response;
+    };
+    const mb = new MusicBrainzClient(
+      "tunes/test",
+      "",
+      fetcher as unknown as typeof fetch
+    );
+    const d = await mb.artistDiscography("Don Toliver");
+    expect(d?.mbid).toBe("mbid-1");
+    expect(d?.groups).toHaveLength(2);
+    expect(d?.groups[0]).toMatchObject({
+      id: "g1",
+      title: "HARDSTONE PSYCHO",
+      type: "Album",
+      year: "2024",
+      date: "2024-08-09",
+    });
+    expect(calls.some((u) => u.includes("/ws/2/artist?query="))).toBe(true);
+    expect(
+      calls.some((u) => u.includes("/ws/2/artist/mbid-1?inc=release-groups"))
+    ).toBe(true);
+  });
+
 });

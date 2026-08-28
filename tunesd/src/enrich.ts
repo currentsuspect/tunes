@@ -1,3 +1,5 @@
+import type { DiscographyGroup } from "./discography.js";
+
 export interface EntMember {
   id: string;
   position: number | null;
@@ -205,6 +207,37 @@ export class MusicBrainzClient {
     return null;
   }
 
+  async artistDiscography(
+    name: string
+  ): Promise<{ mbid: string; groups: DiscographyGroup[] } | null> {
+    const q = `artist:"${name.replace(/"/g, "")}"`;
+    const search = await this.getJson<{
+      artists?: Array<{ id: string; name?: string }>;
+    }>(
+      `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(q)}&fmt=json&limit=1`
+    );
+    const mbid = search?.artists?.[0]?.id;
+    if (!mbid) return null;
+    const body = await this.getJson<{
+      "release-groups"?: Array<{
+        id?: string;
+        title?: string;
+        "primary-type"?: string | null;
+        "first-release-date"?: string | null;
+      }>;
+    }>(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=release-groups&fmt=json`);
+    const groups = (body?.["release-groups"] ?? [])
+      .map((g) => ({
+        id: g.id ?? "",
+        title: g.title ?? "",
+        type: g["primary-type"] ?? null,
+        year: g["first-release-date"] ? g["first-release-date"].slice(0, 4) : null,
+        date: g["first-release-date"] ?? null,
+      }))
+      .filter((g) => g.id !== "" && g.title !== "");
+    return { mbid, groups };
+  }
+
   async fetchCover(releaseId: string): Promise<{ sha: string; bytes: Uint8Array } | null> {
     const bytes = await this.getBytes(
       `https://coverartarchive.org/release/${releaseId}/front-500`
@@ -218,6 +251,8 @@ export class MusicBrainzClient {
   ): Promise<{
     title: string;
     type: string | null;
+    groupId: string | null;
+    date: string | null;
     tracks: Array<{
       title: string;
       lengthMs: number | null;
@@ -230,7 +265,11 @@ export class MusicBrainzClient {
       `https://musicbrainz.org/ws/2/release/${releaseMbid}?inc=recordings+release-groups&fmt=json`;
     const body = await this.getJson<{
       title?: string;
-      "release-group"?: { "primary-type"?: string | null };
+      "release-group"?: {
+        id?: string;
+        "primary-type"?: string | null;
+        "first-release-date"?: string | null;
+      };
       media?: Array<{
         position?: number;
         tracks?: Array<{
@@ -246,6 +285,8 @@ export class MusicBrainzClient {
     return {
       title: body.title,
       type: body["release-group"]?.["primary-type"] ?? null,
+      groupId: body["release-group"]?.id ?? null,
+      date: body["release-group"]?.["first-release-date"] ?? null,
       tracks,
     };
   }
