@@ -1,6 +1,5 @@
 package com.currentsuspect.tunes
 
-import android.content.pm.ActivityInfo
 import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -16,7 +15,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         val probe = object : Runnable {
             var n = 0
             val delays = longArrayOf(1000, 3000, 6000, 10000, 20000, 30000)
