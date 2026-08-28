@@ -6,7 +6,6 @@ class DiagLog {
   DiagLog._();
 
   static File? _file;
-  static String? _lastError;
 
   static Future<void> init() async {
     try {
@@ -14,7 +13,7 @@ class DiagLog {
       _file = File('${dir.path}/tunes_diag.log');
       log('diag initialized at ${_file?.path}');
     } catch (e) {
-      _lastError = '$e';
+      stderr.writeln('diaglog init failed: $e');
     }
   }
 
@@ -25,8 +24,6 @@ class DiagLog {
         mode: FileMode.append,
       );
     } catch (e) {
-      _lastError = '$e';
-      _file = null;
       stderr.writeln('diaglog: $e — $line');
     }
   }
