@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
-import type { ManifestV1 } from "./manifest.js";
+import type { ManifestV2 } from "./manifest.js";
 
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -20,18 +20,18 @@ const MIME: Record<string, string> = {
 };
 
 export class ManifestServer {
-  private lastManifest: ManifestV1 | null = null;
+  private lastManifest: ManifestV2 | null = null;
   private lastBuiltAt = 0;
 
   constructor(
     private readonly store: ObjectStore,
     private readonly artDir: string,
-    private readonly buildManifest: () => Promise<ManifestV1>,
+    private readonly buildManifest: () => Promise<ManifestV2>,
     private readonly port: number,
     private readonly log: Log
   ) {}
 
-  private async getManifest(force = false): Promise<ManifestV1> {
+  private async getManifest(force = false): Promise<ManifestV2> {
     const now = Date.now();
     if (!force && this.lastManifest && now - this.lastBuiltAt < 30_000) {
       return this.lastManifest;

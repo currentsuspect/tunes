@@ -4,6 +4,8 @@ export interface EnrichmentEntry {
   album: string | null;
   year: string | null;
   artSha: string | null;
+  releaseId: string | null;
+  releaseType: string | null;
   source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }
@@ -162,6 +164,8 @@ export async function storeCoverBytes(
 export interface SpotifyLookup {
   artist: string;
   album: string | null;
+  albumId: string | null;
+  albumType: string | null;
   year: string | null;
   artUrl: string | null;
 }
@@ -173,6 +177,7 @@ function norm(s: string): string {
 export interface DiscogsLookup {
   artist: string;
   album: string | null;
+  albumId: string | null;
   year: string | null;
   artUrl: string | null;
 }
@@ -198,6 +203,7 @@ export class DiscogsClient {
       if (!res.ok) return null;
       const body = (await res.json()) as {
         results?: Array<{
+          id?: number;
           title?: string;
           year?: number | string;
           cover_image?: string;
@@ -217,6 +223,7 @@ export class DiscogsClient {
           return {
             artist,
             album: track,
+            albumId: r.id != null ? `discogs:${r.id}` : null,
             year: r.year != null ? String(r.year) : null,
             artUrl: r.cover_image && !r.cover_image.includes("spacer") ? r.cover_image : r.thumb ?? null,
           };
@@ -272,9 +279,16 @@ export class SpotifyClient {
       const body = (await res.json()) as {
         tracks?: {
           items?: Array<{
+            id?: string;
             name?: string;
             artists?: Array<{ name?: string }>;
-            album?: { name?: string; release_date?: string; images?: Array<{ url?: string }> };
+            album?: {
+              id?: string;
+              album_type?: string;
+              name?: string;
+              release_date?: string;
+              images?: Array<{ url?: string }>;
+            };
           }>;
         };
       };
@@ -289,6 +303,8 @@ export class SpotifyClient {
           return {
             artist,
             album: item.album?.name ?? null,
+            albumId: item.album?.id ?? null,
+            albumType: item.album?.album_type ?? null,
             year: item.album?.release_date ? item.album.release_date.slice(0, 4) : null,
             artUrl: art,
           };

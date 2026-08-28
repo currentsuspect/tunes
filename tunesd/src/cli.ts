@@ -121,7 +121,8 @@ async function main(): Promise<void> {
         }
         const existing = enrich.get(obj.sha);
         const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
-        if (existing && !stale) continue;
+        const needsReleaseId = existing && !existing.releaseId;
+        if (existing && !stale && !needsReleaseId) continue;
 
         const probe = probeCache.get(obj.sha)!;
         const tagged = Boolean(probe.tags.title) || Boolean(probe.tags.artist) || Boolean(probe.tags.album);
@@ -132,6 +133,8 @@ async function main(): Promise<void> {
             album: null,
             year: null,
             artSha: null,
+            releaseId: null,
+            releaseType: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -147,6 +150,8 @@ async function main(): Promise<void> {
             album: null,
             year: null,
             artSha: null,
+            releaseId: null,
+            releaseType: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -163,6 +168,8 @@ async function main(): Promise<void> {
             album: hit.album.title,
             year: hit.album.year,
             artSha: cover?.sha ?? null,
+            releaseId: `mb:${hit.album.releaseId}`,
+            releaseType: hit.album.primaryType ?? null,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -199,6 +206,8 @@ async function main(): Promise<void> {
               album: sp.album,
               year: sp.year,
               artSha,
+              releaseId: sp.albumId != null ? `sp:${sp.albumId}` : null,
+              releaseType: sp.albumType ?? null,
               source: "spotify",
               enrichedAt: new Date().toISOString(),
             });
@@ -238,6 +247,8 @@ async function main(): Promise<void> {
               album: dg.album,
               year: dg.year,
               artSha,
+              releaseId: dg.albumId,
+              releaseType: null,
               source: "discogs",
               enrichedAt: new Date().toISOString(),
             });
@@ -257,7 +268,14 @@ async function main(): Promise<void> {
       }
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
-        enrichForManifest.set(sha, { artist: e.artist, album: e.album, year: e.year, artSha: e.artSha });
+        enrichForManifest.set(sha, {
+          artist: e.artist,
+          album: e.album,
+          year: e.year,
+          artSha: e.artSha,
+          releaseId: e.releaseId,
+          releaseType: e.releaseType,
+        });
       }
       return buildManifest([...probeCache.values()], metaBySha, enrichForManifest);
     };
