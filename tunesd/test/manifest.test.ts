@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildManifest } from "../src/manifest.js";
+import type { TrackEnrichment } from "../src/manifest.js";
 import type { ProbeResult } from "../src/probe.js";
 
 function probe(over: Partial<ProbeResult> = {}): ProbeResult {
@@ -50,7 +51,7 @@ describe("buildManifest", () => {
     const enrich = new Map([
       [
         "a".repeat(64),
-        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1 },
+        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1, discNumber: null },
       ],
     ]);
     const untagged = buildManifest([probe()], new Map(), enrich);
@@ -88,6 +89,7 @@ describe("buildManifest", () => {
           releaseId: "sp:album1",
           releaseType: "single",
           trackNumber: 1,
+          discNumber: null,
         },
       ],
       [
@@ -100,6 +102,7 @@ describe("buildManifest", () => {
           releaseId: "sp:album1",
           releaseType: "single",
           trackNumber: 1,
+          discNumber: null,
         },
       ],
     ]);
@@ -125,6 +128,7 @@ describe("buildManifest", () => {
           releaseId: "mb:one",
           releaseType: null,
           trackNumber: 1,
+          discNumber: null,
         },
       ],
       [
@@ -137,6 +141,7 @@ describe("buildManifest", () => {
           releaseId: "sp:two",
           releaseType: null,
           trackNumber: 2,
+          discNumber: null,
         },
       ],
     ]);
@@ -144,6 +149,42 @@ describe("buildManifest", () => {
     expect(m.releases.length).toBe(1);
     expect(m.releases[0]?.title).toBe("xperiment - cartunez");
     expect(m.releases[0]?.trackShas).toHaveLength(2);
+  });
+
+  it("consolidates multi-piece drops into the full album card", () => {
+    const mk = (
+      i: number,
+      sha: string,
+      album: string,
+      releaseId: string,
+      artSha: string | null = null
+    ) => ({
+      sha,
+      artist: "Ken Carson",
+      album,
+      year: "2026",
+      artSha,
+      releaseId,
+      releaseType: null,
+      trackNumber: i,
+      discNumber: null,
+    });
+    const enrich = new Map<string, TrackEnrichment>();
+    for (let i = 0; i < 3; i++) {
+      enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32), "cartunez", "mb:c", "c".repeat(64)));
+    }
+    for (let i = 0; i < 6; i++) enrich.set(`b${i}`.repeat(32), mk(i, `b${i}`.repeat(32), "xperiment", "mb:x"));
+    for (let i = 0; i < 20; i++) enrich.set(`c${i}`.repeat(32), mk(i, `c${i}`.repeat(32), "xperiment - cartunez", "mb:f"));
+    const m = buildManifest(
+      [],
+      new Map(),
+      enrich,
+      [...enrich.keys()].map((sha) => ({ sha, size: 100 }))
+    );
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.title).toBe("xperiment - cartunez");
+    expect(m.releases[0]?.trackShas).toHaveLength(29);
+    expect(m.releases[0]?.artSha).toBe("c".repeat(64)); // art inherited from member tracks
   });
 
   it("keeps same-token releases apart when years differ", () => {
@@ -158,6 +199,7 @@ describe("buildManifest", () => {
           releaseId: "mb:one",
           releaseType: null,
           trackNumber: 1,
+          discNumber: null,
         },
       ],
       [
@@ -170,6 +212,7 @@ describe("buildManifest", () => {
           releaseId: "mb:two",
           releaseType: null,
           trackNumber: 1,
+          discNumber: null,
         },
       ],
     ]);
@@ -189,6 +232,7 @@ describe("buildManifest", () => {
           releaseId: "mb:one",
           releaseType: "Single",
           trackNumber: 1,
+          discNumber: null,
         },
       ],
       [
@@ -201,6 +245,7 @@ describe("buildManifest", () => {
           releaseId: "sp:two",
           releaseType: "single",
           trackNumber: 1,
+          discNumber: null,
         },
       ],
     ]);
@@ -220,6 +265,7 @@ describe("buildManifest", () => {
           releaseId: "mb:venue",
           releaseType: null,
           trackNumber: null,
+          discNumber: null,
         },
       ],
     ]);
@@ -244,6 +290,7 @@ describe("buildManifest", () => {
           releaseId: "mb:one",
           releaseType: null,
           trackNumber: 1,
+          discNumber: null,
         },
       ],
       [
@@ -256,6 +303,7 @@ describe("buildManifest", () => {
           releaseId: "mb:two",
           releaseType: null,
           trackNumber: 2,
+          discNumber: null,
         },
       ],
     ]);
@@ -282,6 +330,7 @@ describe("buildManifest", () => {
             releaseId: "mb:rel",
             releaseType: null,
             trackNumber: null,
+            discNumber: null,
           },
         ],
       ])

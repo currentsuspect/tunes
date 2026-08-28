@@ -16,6 +16,7 @@ export interface ManifestTrack {
   artSha: string | null;
   releaseId: string | null;
   trackNumber: number | null;
+  discNumber: number | null;
 }
 
 export interface ManifestRelease {
@@ -49,6 +50,7 @@ export interface TrackEnrichment {
   releaseId: string | null;
   releaseType: string | null;
   trackNumber: number | null;
+  discNumber: number | null;
 }
 
 function norm(s: string): string {
@@ -97,9 +99,27 @@ function fallbackReleaseKey(track: {
 export function buildManifest(
   probes: ProbeResult[],
   metaBySha: Map<string, TrackMeta> = new Map(),
-  enrichBySha: Map<string, TrackEnrichment> = new Map()
+  enrichBySha: Map<string, TrackEnrichment> = new Map(),
+  objects: Array<{ sha: string; size: number }> = []
 ): ManifestV2 {
-  const tracks: ManifestTrack[] = probes
+  const probeFor = new Map(probes.map((p) => [p.sha, p]));
+  for (const obj of objects) {
+    if (!probeFor.has(obj.sha)) {
+      probeFor.set(obj.sha, {
+        sha: obj.sha,
+        size: obj.size,
+        codec: null,
+        sampleRate: null,
+        channels: null,
+        bitrate: null,
+        durationMs: null,
+        tags: {},
+        probedAt: "",
+      });
+    }
+  }
+  const allProbes = [...probeFor.values()];
+  const tracks: ManifestTrack[] = allProbes
     .map((p) => {
       const meta = metaBySha.get(p.sha);
       const enrich = enrichBySha.get(p.sha);
@@ -139,6 +159,7 @@ export function buildManifest(
         artSha: categoryRelease ? null : enrich?.artSha ?? null,
         releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
         trackNumber: enrich?.trackNumber ?? null,
+        discNumber: enrich?.discNumber ?? null,
       };
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
@@ -172,11 +193,11 @@ export function buildManifest(
     for (const other of releaseMap.values()) {
       if (other === r) continue;
       if (other.artist !== r.artist) continue;
-      if (other.year !== r.year) continue;
+      if (other.year !== r.year && other.year != null && r.year != null) continue;
       const rSmaller = r.trackShas.length <= other.trackShas.length;
       const small = rSmaller ? r : other;
       const big = rSmaller ? other : r;
-      if (small.trackShas.length === 0 || small.trackShas.length > 2) continue;
+      if (small.trackShas.length === 0 || small.trackShas.length > 8) continue;
       if (tokenSubset(small.title, big.title)) {
         target = big;
         for (const sha of small.trackShas) mergedShas.add(sha);
@@ -193,16 +214,33 @@ export function buildManifest(
       merged.set(target.id, { ...target, trackShas: [...mergedShas] });
     }
   }
+  for (const r of merged.values()) {
+    if (r.artSha == null) {
+      for (const t of tracks) {
+        if (r.trackShas.includes(t.sha) && t.artSha != null) {
+          r.artSha = t.artSha;
+          break;
+        }
+      }
+    }
+  }
   const releases = [...merged.values()]
     .sort((a, b) =>
       a.artist !== b.artist ? a.artist.localeCompare(b.artist) : a.title.localeCompare(b.title)
     )
     .map((r) => {
       const byNumber = new Map<string, number | null>();
+      const discOf = new Map<string, number>();
       for (const t of tracks) {
-        if (r.trackShas.includes(t.sha)) byNumber.set(t.sha, t.trackNumber ?? null);
+        if (r.trackShas.includes(t.sha)) {
+          byNumber.set(t.sha, t.trackNumber ?? null);
+          if (t.discNumber != null) discOf.set(t.sha, t.discNumber);
+        }
       }
       const ordered = [...r.trackShas].sort((a, b) => {
+        const da = discOf.get(a) ?? 1;
+        const db = discOf.get(b) ?? 1;
+        if (da !== db) return da - db;
         const na = byNumber.get(a) ?? 999;
         const nb = byNumber.get(b) ?? 999;
         if (na !== nb) return na - nb;

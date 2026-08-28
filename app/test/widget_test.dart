@@ -7,6 +7,7 @@ import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
+import 'package:tunes/features/album/album_page.dart';
 import 'package:tunes/main.dart';
 
 class _FakeClient implements TunesClient {
@@ -170,6 +171,7 @@ ManifestTrack _track(
   artSha: null,
   releaseId: releaseId ?? (title == 'Bassline' ? 'rel-1' : 'rel-2'),
   trackNumber: null,
+  discNumber: null,
 );
 
 List<ManifestTrack> _library() => [
@@ -649,7 +651,12 @@ void main() {
     await tester.tap(find.text('Go to album'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Play'), findsOneWidget);
+    expect(find.byType(AlbumPage), findsOneWidget);
+    expect(find.text('MAFIA'), findsWidgets); // the album tracklist row
+    expect(
+      find.byIcon(Icons.pause_rounded),
+      findsOneWidget,
+    ); // mini bar pinned, playing
   });
 
   testWidgets('active track is highlighted in the library list', (
@@ -716,10 +723,13 @@ void main() {
     await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('MAFIA'));
+    await tester.tap(find.text('MAFIA').first);
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+    expect(
+      find.byIcon(Icons.pause_rounded),
+      findsOneWidget,
+    ); // playing via mini bar
     expect(
       find.textContaining('FLAC'),
       findsNothing,

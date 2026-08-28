@@ -6,6 +6,8 @@ import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
 import '../library/library_widgets.dart';
+import '../now_playing/now_playing_page.dart';
+import '../player/mini_player_bar.dart';
 
 class AlbumPage extends StatelessWidget {
   const AlbumPage({
@@ -181,6 +183,23 @@ class AlbumPage extends StatelessWidget {
           ],
         ),
       ),
+      bottomNavigationBar: MiniPlayerBar(
+        player: player,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => NowPlayingPage(
+              player: player,
+              manifest: manifest,
+              store: store,
+              downloading: downloading,
+              onDownload: onDownload,
+              offline: offline,
+              artUrlFor: artUrlFor,
+            ),
+          ),
+        ),
+        artUrlFor: artUrlFor,
+      ),
     );
   }
 }
@@ -228,7 +247,7 @@ class _AlbumTrackRow extends StatelessWidget {
             child: Row(
               children: [
                 SizedBox(
-                  width: 30,
+                  width: 34,
                   child: active && player.playing
                       ? const Icon(
                           Icons.graphic_eq_rounded,
@@ -236,7 +255,9 @@ class _AlbumTrackRow extends StatelessWidget {
                           color: Tones.primary,
                         )
                       : Text(
-                          position.toString().padLeft(2, '0'),
+                          track.discNumber != null && track.discNumber! > 1
+                              ? '${track.discNumber}.${position.toString().padLeft(2, '0')}'
+                              : position.toString().padLeft(2, '0'),
                           style: TypeScale.caption.copyWith(
                             fontFeatures: const [FontFeature.tabularFigures()],
                             color: active ? Tones.primary : Tones.textMuted,

@@ -7,6 +7,7 @@ export interface EnrichmentEntry {
   releaseId: string | null;
   releaseType: string | null;
   trackNumber: number | null;
+  discNumber: number | null;
   source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }
@@ -82,6 +83,7 @@ export class MusicBrainzClient {
     try {
       const res = await this.fetcher(url, {
         headers: { "User-Agent": this.userAgent, Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) return null;
       return (await res.json()) as T;
@@ -93,7 +95,10 @@ export class MusicBrainzClient {
   private async getBytes(url: string): Promise<Uint8Array | null> {
     await this.rateLimit();
     try {
-      const res = await this.fetcher(url, { headers: { "User-Agent": this.userAgent } });
+      const res = await this.fetcher(url, {
+        headers: { "User-Agent": this.userAgent },
+        signal: AbortSignal.timeout(20_000),
+      });
       if (!res.ok) return null;
       return new Uint8Array(await res.arrayBuffer());
     } catch {
@@ -153,7 +158,13 @@ export class MusicBrainzClient {
   ): Promise<{
     title: string;
     type: string | null;
-    tracks: Array<{ title: string; lengthMs: number | null; position: number; artist: string | null }>;
+    tracks: Array<{
+      title: string;
+      lengthMs: number | null;
+      position: number;
+      discNumber: number;
+      artist: string | null;
+    }>;
   } | null> {
     const url =
       `https://musicbrainz.org/ws/2/release/${releaseMbid}?inc=recordings+release-groups&fmt=json`;
@@ -161,6 +172,7 @@ export class MusicBrainzClient {
       title?: string;
       "release-group"?: { "primary-type"?: string | null };
       media?: Array<{
+        position?: number;
         tracks?: Array<{
           title?: string;
           length?: number;
@@ -171,13 +183,15 @@ export class MusicBrainzClient {
     }>(url);
     if (!body?.title) return null;
     const tracks = (body.media ?? [])
-      .flatMap((m) => m.tracks ?? [])
-      .map((t) => ({
-        title: t.title ?? "",
-        lengthMs: t.length != null ? Number(t.length) : null,
-        position: t.position ?? 0,
-        artist: t.recording?.["artist-credit"]?.[0]?.name ?? null,
-      }));
+      .flatMap((m) =>
+        (m.tracks ?? []).map((t) => ({
+          discNumber: m.position ?? 1,
+          title: t.title ?? "",
+          lengthMs: t.length != null ? Number(t.length) : null,
+          position: t.position ?? 0,
+          artist: t.recording?.["artist-credit"]?.[0]?.name ?? null,
+        }))
+      );
     return {
       title: body.title,
       type: body["release-group"]?.["primary-type"] ?? null,

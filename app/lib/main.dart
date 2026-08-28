@@ -20,6 +20,7 @@ import 'features/artist/artist_page.dart';
 import 'features/home/home_view.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
+import 'features/player/mini_player_bar.dart';
 import 'features/profile/profile_sheet.dart';
 import 'features/search/search_view.dart';
 
@@ -386,7 +387,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _MiniPlayerBar(player: widget.player, onTap: _openNowPlaying),
+          MiniPlayerBar(
+            player: widget.player,
+            onTap: _openNowPlaying,
+            artUrlFor: _artUrlFor,
+          ),
           NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
@@ -492,105 +497,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         };
         return content;
-      },
-    );
-  }
-}
-
-class _MiniArtPlaceholder extends StatelessWidget {
-  const _MiniArtPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 40,
-      height: 40,
-      color: Tones.surfaceRaised,
-      child: const Icon(
-        Icons.music_note_rounded,
-        size: 18,
-        color: Tones.textMuted,
-      ),
-    );
-  }
-}
-
-class _MiniPlayerBar extends StatelessWidget {
-  const _MiniPlayerBar({required this.player, required this.onTap});
-
-  final TunePlayer player;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: player,
-      builder: (context, _) {
-        final current = player.current;
-        if (current == null) return const SizedBox.shrink();
-        return InkWell(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(
-              Space.md,
-              Space.sm,
-              Space.md,
-              Space.sm,
-            ),
-            decoration: const BoxDecoration(
-              color: Tones.surface,
-              border: Border(top: BorderSide(color: Tones.hairline)),
-            ),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: current.artSha != null
-                      ? Image.network(
-                          '$_tunesdUrl/art/${current.artSha}',
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) =>
-                              const _MiniArtPlaceholder(),
-                        )
-                      : const _MiniArtPlaceholder(),
-                ),
-                const SizedBox(width: Space.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        current.title,
-                        style: TypeScale.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        current.artist,
-                        style: TypeScale.caption,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: player.toggle,
-                  icon: Icon(
-                    player.playing
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    size: 30,
-                    color: Tones.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
       },
     );
   }

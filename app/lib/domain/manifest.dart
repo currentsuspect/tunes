@@ -14,6 +14,7 @@ class ManifestTrack {
     required this.artSha,
     required this.releaseId,
     required this.trackNumber,
+    required this.discNumber,
   });
 
   final String sha;
@@ -30,6 +31,7 @@ class ManifestTrack {
   final String? artSha;
   final String? releaseId;
   final int? trackNumber;
+  final int? discNumber;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -47,6 +49,7 @@ class ManifestTrack {
       artSha: json['artSha'] as String?,
       releaseId: json['releaseId'] as String?,
       trackNumber: (json['trackNumber'] as num?)?.toInt(),
+      discNumber: (json['discNumber'] as num?)?.toInt(),
     );
   }
 

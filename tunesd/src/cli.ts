@@ -38,6 +38,10 @@ function channelsFromEnv(env: NodeJS.ProcessEnv): ChannelConfig[] {
 function normTitle(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
+function bareTitle(s: string): string {
+  const stripped = s.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s*\(.*$/, " ");
+  return normTitle(stripped);
+}
 function normName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -88,10 +92,27 @@ async function main(): Promise<void> {
       await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrich) }, null, 1));
       await rename(tmp, enrichFile);
     };
+    const releaseGroupShas = (): Map<string, string[]> => {
+      const groups = new Map<string, string[]>();
+      for (const e of enrich.values()) {
+        if (!e.releaseId) continue;
+        const list = groups.get(e.releaseId) ?? [];
+        list.push(e.sha);
+        groups.set(e.releaseId, list);
+      }
+      return groups;
+    };
+
     const tryReleaseMembership = async (
       parsed: { artist: string; title: string },
       sha: string
-    ): Promise<{ releaseId: string; album: string; type: string | null; position: number } | null> => {
+    ): Promise<{
+      releaseId: string;
+      album: string;
+      type: string | null;
+      position: number;
+      discNumber: number;
+    } | null> => {
       const mbReleases = new Map<string, string[]>();
       for (const e of enrich.values()) {
         if (e.artist === parsed.artist && e.releaseId?.startsWith("mb:")) {
@@ -108,7 +129,9 @@ async function main(): Promise<void> {
         if (!release) continue;
         for (const t of release.tracks) {
           if (t.position <= 0) continue;
-          const titleOk = normTitle(t.title) === normTitle(parsed.title);
+          const titleOk =
+            bareTitle(t.title) === bareTitle(parsed.title) ||
+            normTitle(t.title) === normTitle(parsed.title);
           const artistOk = t.artist == null || normName(t.artist) === normName(parsed.artist);
           const durMs = probeCache.get(sha)?.durationMs ?? null;
           const durOk = t.lengthMs == null || durMs == null || Math.abs(t.lengthMs - durMs) <= 4000;
@@ -118,6 +141,7 @@ async function main(): Promise<void> {
               album: release.title,
               type: release.type,
               position: t.position,
+              discNumber: t.discNumber,
             };
           }
         }
@@ -190,6 +214,7 @@ async function main(): Promise<void> {
                 releaseId: `mb:${member.releaseId}`,
                 releaseType: member.type,
                 trackNumber: member.position,
+                discNumber: member.discNumber,
                 source: "musicbrainz",
                 enrichedAt: new Date().toISOString(),
               });
@@ -218,6 +243,7 @@ async function main(): Promise<void> {
             releaseId: null,
             releaseType: null,
             trackNumber: null,
+            discNumber: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -236,6 +262,7 @@ async function main(): Promise<void> {
             releaseId: null,
             releaseType: null,
             trackNumber: null,
+            discNumber: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -255,6 +282,7 @@ async function main(): Promise<void> {
             releaseId: `mb:${hit.album.releaseId}`,
             releaseType: hit.album.primaryType ?? null,
             trackNumber: null,
+            discNumber: null,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -274,7 +302,7 @@ async function main(): Promise<void> {
             let artSha: string | null = null;
             if (sp.artUrl) {
               try {
-                const res = await fetch(sp.artUrl);
+                const res = await fetch(sp.artUrl, { signal: AbortSignal.timeout(15_000) });
                 if (res.ok) {
                   const bytes = new Uint8Array(await res.arrayBuffer());
                   if (bytes.length > 1000) {
@@ -294,6 +322,7 @@ async function main(): Promise<void> {
               releaseId: sp.albumId != null ? `sp:${sp.albumId}` : null,
               releaseType: sp.albumType ?? null,
               trackNumber: sp.trackNumber,
+              discNumber: null,
               source: "spotify",
               enrichedAt: new Date().toISOString(),
             });
@@ -321,6 +350,7 @@ async function main(): Promise<void> {
             releaseId: `mb:${member.releaseId}`,
             releaseType: member.type,
             trackNumber: member.position,
+            discNumber: member.discNumber,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -340,7 +370,7 @@ async function main(): Promise<void> {
             let artSha: string | null = null;
             if (dg.artUrl) {
               try {
-                const res = await fetch(dg.artUrl);
+                const res = await fetch(dg.artUrl, { signal: AbortSignal.timeout(15_000) });
                 if (res.ok) {
                   const bytes = new Uint8Array(await res.arrayBuffer());
                   if (bytes.length > 1000) {
@@ -360,6 +390,7 @@ async function main(): Promise<void> {
               releaseId: dg.albumId,
               releaseType: null,
               trackNumber: null,
+              discNumber: null,
               source: "discogs",
               enrichedAt: new Date().toISOString(),
             });
@@ -377,6 +408,73 @@ async function main(): Promise<void> {
         }
         log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
       }
+
+      const releaseGroups = releaseGroupShas();
+      for (const [releaseId, shas] of releaseGroups) {
+        if (!releaseId.startsWith("mb:")) continue;
+        if (shas.length < 2) continue;
+        let release = await mb.releaseWithRecordings(releaseId.slice(3));
+        if (!release) {
+          await sleep(12_000);
+          release = await mb.releaseWithRecordings(releaseId.slice(3));
+        }
+        if (!release) {
+          log.warn({ event: "ENRICH_ORDER_SKIP", release: releaseId.slice(0, 12) });
+          continue;
+        }
+        let changed = false;
+        for (const sha of shas) {
+          const e = enrich.get(sha);
+          if (!e || e.trackNumber != null) continue;
+          const probe = probeCache.get(sha);
+          const meta = metaBySha.get(sha);
+          const probeTitle = probe?.tags.title;
+          const metaTitle = meta?.fileName
+            ? meta.fileName.replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim()
+            : null;
+          const parsedTitle = metaTitle ? parseArtistTitle(metaTitle) : null;
+          const title =
+            probeTitle ??
+            (parsedTitle && e.artist && normName(parsedTitle.artist) === normName(e.artist)
+              ? parsedTitle.title
+              : metaTitle);
+          const durMs = probe?.durationMs ?? null;
+          const candidates = [
+            title,
+            parsedTitle?.title ?? null,
+            probeTitle,
+            metaTitle,
+          ].filter((t): t is string => t != null);
+          const match = release.tracks.find((t) => {
+            const titleOk = candidates.some(
+              (c) =>
+                bareTitle(t.title) === bareTitle(c) ||
+                normTitle(t.title) === normTitle(c)
+            );
+            const durOk =
+              t.lengthMs == null ||
+              durMs == null ||
+              Math.abs(t.lengthMs - durMs) <= 4000;
+            return titleOk && durOk;
+          });
+          if (match && match.position > 0) {
+            enrich.set(sha, {
+              ...e,
+              trackNumber: match.position,
+              discNumber: match.discNumber,
+            });
+            changed = true;
+            log.info({
+              event: "ENRICH_ORDER",
+              release: releaseId.slice(0, 12),
+              track: match.position,
+              title: match.title,
+            });
+          }
+        }
+        if (changed) await persistEnrich();
+      }
+
       } finally {
         enrichPassRunning = false;
       }
@@ -384,6 +482,7 @@ async function main(): Promise<void> {
 
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
+      const objects = await store.listObjects();
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
         enrichForManifest.set(sha, {
@@ -394,9 +493,10 @@ async function main(): Promise<void> {
           releaseId: e.releaseId,
           releaseType: e.releaseType,
           trackNumber: e.trackNumber,
+          discNumber: e.discNumber,
         });
       }
-      return buildManifest([...probeCache.values()], metaBySha, enrichForManifest);
+      return buildManifest([...probeCache.values()], metaBySha, enrichForManifest, objects);
     };
 
     const run = async (): Promise<void> => {
@@ -432,8 +532,14 @@ async function main(): Promise<void> {
         log
       );
       await server.start();
-      void runEnrichPass();
-      const enrichTimer = setInterval(() => void runEnrichPass(), 90_000);
+      void runEnrichPass().catch((e) =>
+        log.error({ event: "ENRICH_PASS_ERROR", err: String(e) })
+      );
+      const enrichTimer = setInterval(() => {
+        void runEnrichPass().catch((e) =>
+          log.error({ event: "ENRICH_PASS_ERROR", err: String(e) })
+        );
+      }, 90_000);
       process.on("exit", () => clearInterval(enrichTimer));
 
       if (immediate) {

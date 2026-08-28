@@ -6,7 +6,9 @@ import '../../core/theme/tokens.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
+import '../now_playing/now_playing_page.dart';
 import '../library/library_widgets.dart';
+import '../player/mini_player_bar.dart';
 
 class ArtistPage extends StatelessWidget {
   const ArtistPage({
@@ -122,6 +124,23 @@ class ArtistPage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+      bottomNavigationBar: MiniPlayerBar(
+        player: player,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => NowPlayingPage(
+              player: player,
+              manifest: manifest,
+              store: store,
+              downloading: downloading,
+              onDownload: onDownload,
+              offline: offline,
+              artUrlFor: artUrlFor,
+            ),
+          ),
+        ),
+        artUrlFor: artUrlFor,
       ),
     );
   }

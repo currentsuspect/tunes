@@ -83,6 +83,7 @@ ManifestTrack _track(String title, {String? artSha}) => ManifestTrack(
   artSha: artSha,
   releaseId: 'rel-1',
   trackNumber: null,
+  discNumber: null,
 );
 
 void main() {
