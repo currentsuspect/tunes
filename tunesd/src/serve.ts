@@ -67,6 +67,34 @@ export class ManifestServer {
           return;
         }
 
+        if (url.pathname === "/search") {
+          const q = (url.searchParams.get("q") ?? "").trim();
+          const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? "10") || 10, 1), 20);
+          if (q === "") {
+            res.writeHead(400, { "content-type": "text/plain" });
+            res.end("missing q");
+            return;
+          }
+          const manifest = await this.getManifest();
+          const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+          const qn = norm(q);
+          const tracks = manifest.tracks
+            .filter(
+              (t) =>
+                norm(t.title).includes(qn) ||
+                norm(t.artist).includes(qn) ||
+                norm(t.album).includes(qn)
+            )
+            .slice(0, limit);
+          const releases = manifest.releases
+            .filter((r) => norm(r.title).includes(qn) || norm(r.artist).includes(qn))
+            .slice(0, limit);
+          const artists = manifest.artists.filter((a) => norm(a.name).includes(qn)).slice(0, limit);
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ tracks, releases, artists }));
+          return;
+        }
+
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("not found");
       } catch (e) {

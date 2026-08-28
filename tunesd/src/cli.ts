@@ -8,7 +8,7 @@ import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest, isCategoryRelease } from "./manifest.js";
-import type { TrackEnrichment } from "./manifest.js";
+import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -82,7 +82,9 @@ async function main(): Promise<void> {
       const raw = JSON.parse(await readFile(enrichFile, "utf8")) as {
         entries: Record<string, EnrichmentEntry>;
       };
-      for (const [sha, e] of Object.entries(raw.entries ?? {})) enrich.set(sha, e);
+      for (const [sha, e] of Object.entries(raw.entries ?? {})) {
+        enrich.set(sha, { ...e, membership: e.membership ?? [] });
+      }
     } catch {
       // fresh start
     }
@@ -91,6 +93,22 @@ async function main(): Promise<void> {
       const tmp = join(env.dataDir, `.enrich-${process.pid}.tmp`);
       await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrich) }, null, 1));
       await rename(tmp, enrichFile);
+    };
+    const linkMetaFile = join(env.dataDir, "linkmeta.json");
+    const linkMeta = new Map<string, ReleaseLinkMeta>();
+    try {
+      const raw = JSON.parse(await readFile(linkMetaFile, "utf8")) as {
+        releases: Record<string, ReleaseLinkMeta>;
+      };
+      for (const [id, r] of Object.entries(raw.releases ?? {})) linkMeta.set(id, r);
+    } catch {
+      // fresh start
+    }
+    const persistLinkMeta = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.linkmeta-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ releases: Object.fromEntries(linkMeta) }, null, 1));
+      await rename(tmp, linkMetaFile);
     };
     const releaseGroupShas = (): Map<string, string[]> => {
       const groups = new Map<string, string[]>();
@@ -268,7 +286,8 @@ async function main(): Promise<void> {
                 trackNumber: member.position,
                 discNumber: member.discNumber,
                 totalTracks: null,
-                source: "musicbrainz",
+                                membership: [],
+                                source: "musicbrainz",
                 enrichedAt: new Date().toISOString(),
               });
               log.info({
@@ -298,7 +317,8 @@ async function main(): Promise<void> {
             trackNumber: null,
             discNumber: null,
             totalTracks: null,
-            source: null,
+                        membership: [],
+                        source: null,
             enrichedAt: new Date().toISOString(),
           });
           continue;
@@ -318,7 +338,8 @@ async function main(): Promise<void> {
             trackNumber: null,
             discNumber: null,
             totalTracks: null,
-            source: null,
+                        membership: [],
+                        source: null,
             enrichedAt: new Date().toISOString(),
           });
           continue;
@@ -339,7 +360,8 @@ async function main(): Promise<void> {
             trackNumber: null,
             discNumber: null,
             totalTracks: null,
-            source: "musicbrainz",
+                        membership: [],
+                        source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
           log.info({
@@ -380,7 +402,8 @@ async function main(): Promise<void> {
               trackNumber: sp.trackNumber,
               discNumber: null,
               totalTracks: null,
-              source: "spotify",
+                            membership: [],
+                            source: "spotify",
               enrichedAt: new Date().toISOString(),
             });
             log.info({
@@ -410,7 +433,8 @@ async function main(): Promise<void> {
             trackNumber: member.position,
             discNumber: member.discNumber,
             totalTracks: null,
-            source: "musicbrainz",
+                        membership: [],
+                        source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
           log.info({
@@ -451,7 +475,8 @@ async function main(): Promise<void> {
               trackNumber: null,
               discNumber: null,
               totalTracks: null,
-              source: "discogs",
+                            membership: [],
+                            source: "discogs",
               enrichedAt: new Date().toISOString(),
             });
             log.info({
@@ -472,7 +497,6 @@ async function main(): Promise<void> {
       const releaseGroups = releaseGroupShas();
       for (const [releaseId, shas] of releaseGroups) {
         if (!releaseId.startsWith("mb:")) continue;
-        if (shas.length < 2) continue;
         let release = await mb.releaseWithRecordings(releaseId.slice(3));
         if (!release) {
           await sleep(12_000);
@@ -481,6 +505,15 @@ async function main(): Promise<void> {
         if (!release) {
           log.warn({ event: "ENRICH_ORDER_SKIP", release: releaseId.slice(0, 12) });
           continue;
+        }
+        await sleep(1_000);
+        if (release.tracks.length > 0) {
+          linkMeta.set(releaseId, {
+            title: release.title,
+            type: release.type,
+            totalTracks: release.tracks.length,
+          });
+          await persistLinkMeta();
         }
         let changed = false;
         for (const sha of shas) {
@@ -537,6 +570,66 @@ async function main(): Promise<void> {
             });
           }
         }
+        for (const [sha, e] of enrich) {
+          if (!e.album || e.releaseId === releaseId) continue;
+          const existing = e.membership.find((m) => m.id === releaseId);
+          const probe = probeCache.get(sha);
+          const meta = metaBySha.get(sha);
+          const probeTitle = probe?.tags.title;
+          const metaTitle = meta?.fileName
+            ? meta.fileName.replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim()
+            : null;
+          const parsedTitle = metaTitle ? parseArtistTitle(metaTitle) : null;
+          const title = probeTitle ?? parsedTitle?.title ?? metaTitle;
+          if (!title) continue;
+          const durMs = probe?.durationMs ?? null;
+          const candidates = [
+            title,
+            parsedTitle?.title ?? null,
+            probeTitle,
+            metaTitle,
+          ].filter((t): t is string => t != null);
+          const match = release.tracks.find((t) => {
+            const titleOk = candidates.some(
+              (c) =>
+                bareTitle(t.title) === bareTitle(c) ||
+                normTitle(t.title) === normTitle(c)
+            );
+            const durOk =
+              t.lengthMs == null ||
+              durMs == null ||
+              Math.abs(t.lengthMs - durMs) <= 4000;
+            return titleOk && durOk;
+          });
+          if (match && match.position > 0) {
+            if (
+              existing &&
+              existing.position === match.position &&
+              existing.disc === match.discNumber
+            ) {
+              continue;
+            }
+            enrich.set(sha, {
+              ...e,
+              membership: existing
+                ? e.membership.map((m) =>
+                    m.id === releaseId
+                      ? { id: releaseId, position: match.position, disc: match.discNumber }
+                      : m
+                  )
+                : [
+                    ...e.membership,
+                    { id: releaseId, position: match.position, disc: match.discNumber },
+                  ],
+            });
+            changed = true;
+            log.info({
+              event: "ENRICH_CROSSLINK",
+              release: releaseId.slice(0, 12),
+              track: match.position,
+            });
+          }
+        }
         if (changed) await persistEnrich();
       }
 
@@ -562,6 +655,7 @@ async function main(): Promise<void> {
           trackNumber: e.trackNumber,
           discNumber: e.discNumber,
           totalTracks: e.totalTracks,
+          membership: e.membership,
         });
       }
       return buildManifest(
@@ -569,7 +663,8 @@ async function main(): Promise<void> {
         metaBySha,
         enrichForManifest,
         objects,
-        artistList
+        artistList,
+        linkMeta
       );
     };
 

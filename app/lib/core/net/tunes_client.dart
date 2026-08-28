@@ -78,6 +78,22 @@ class TunesClient {
     }
   }
 
+  Future<SearchResults> search(String q) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final uri = Uri.parse('$baseUrl/search?q=${Uri.encodeQueryComponent(q)}');
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        throw TunesFetchException('search ${res.statusCode}');
+      }
+      final body = await res.transform(utf8.decoder).join();
+      return SearchResults.fromJson(jsonDecode(body) as Map<String, dynamic>);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {

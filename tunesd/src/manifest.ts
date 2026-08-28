@@ -15,6 +15,7 @@ export interface ManifestTrack {
   year: string | null;
   artSha: string | null;
   releaseId: string | null;
+  releaseIds: string[];
   trackNumber: number | null;
   discNumber: number | null;
 }
@@ -28,6 +29,7 @@ export interface ManifestRelease {
   type: string | null;
   totalTracks: number | null;
   trackShas: string[];
+  tracks: Array<{ sha: string; trackNumber: number | null; discNumber: number | null }>;
 }
 
 export interface ManifestV2 {
@@ -53,6 +55,13 @@ export interface TrackEnrichment {
   releaseType: string | null;
   trackNumber: number | null;
   discNumber: number | null;
+  totalTracks: number | null;
+  membership: Array<{ id: string; position: number | null; disc: number | null }>;
+}
+
+export interface ReleaseLinkMeta {
+  title: string;
+  type: string | null;
   totalTracks: number | null;
 }
 
@@ -104,7 +113,8 @@ export function buildManifest(
   metaBySha: Map<string, TrackMeta> = new Map(),
   enrichBySha: Map<string, TrackEnrichment> = new Map(),
   objects: Array<{ sha: string; size: number }> = [],
-  artists: Array<{ name: string; artSha: string | null }> = []
+  artists: Array<{ name: string; artSha: string | null }> = [],
+  linkMeta: Map<string, ReleaseLinkMeta> = new Map()
 ): ManifestV2 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -162,6 +172,12 @@ export function buildManifest(
         year,
         artSha: categoryRelease ? null : enrich?.artSha ?? null,
         releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
+        releaseIds: [
+          ...new Set([
+            ...(categoryRelease ? [] : enrich?.releaseId != null ? [enrich.releaseId] : []),
+            ...(enrich?.membership ?? []).map((m) => m.id),
+          ]),
+        ],
         trackNumber: enrich?.trackNumber ?? null,
         discNumber: enrich?.discNumber ?? null,
         totalTracks: enrich?.totalTracks ?? null,
@@ -170,29 +186,63 @@ export function buildManifest(
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
 
   const releaseMap = new Map<string, ManifestRelease>();
+  const ensureRelease = (
+    t: ManifestTrack,
+    enrich: TrackEnrichment | undefined,
+    id: string,
+    meta?: ReleaseLinkMeta
+  ): ManifestRelease => {
+    let release = releaseMap.get(id);
+    if (release) return release;
+    release = {
+      id,
+      title: meta?.title ?? t.album,
+      artist: t.artist,
+      year: enrich?.year ?? t.year,
+      artSha: t.artSha,
+      type: meta?.type ?? enrich?.releaseType ?? null,
+      totalTracks: meta?.totalTracks ?? enrich?.totalTracks ?? null,
+      trackShas: [],
+      tracks: [],
+    };
+    releaseMap.set(id, release);
+    return release;
+  };
+  const addTrackToRelease = (
+    release: ManifestRelease,
+    sha: string,
+    num: number | null,
+    disc: number | null
+  ) => {
+    if (!release.trackShas.includes(sha)) release.trackShas.push(sha);
+    if (!release.tracks.some((x) => x.sha === sha)) {
+      release.tracks.push({ sha, trackNumber: num, discNumber: disc });
+    }
+  };
   for (const t of tracks) {
     const enrich = enrichBySha.get(t.sha);
     const key =
       enrich?.releaseId ??
       fallbackReleaseKey({ artist: t.artist, album: t.album, sha: t.sha });
-    let release = releaseMap.get(key);
-    if (!release) {
-      release = {
-        id: key,
-        title: t.album,
-        artist: t.artist,
-        year: enrich?.year ?? t.year,
-        artSha: t.artSha,
-        type: enrich?.releaseType ?? null,
-        totalTracks: enrich?.totalTracks ?? null,
-        trackShas: [],
-      };
-      releaseMap.set(key, release);
+    const primary = ensureRelease(t, enrich, key);
+    addTrackToRelease(primary, t.sha, enrich?.trackNumber ?? null, enrich?.discNumber ?? null);
+    if (primary.artSha == null) primary.artSha = t.artSha;
+    if (primary.totalTracks == null) {
+      const meta = linkMeta.get(key);
+      if (meta?.totalTracks != null) primary.totalTracks = meta.totalTracks;
     }
-    if (!release.trackShas.includes(t.sha)) release.trackShas.push(t.sha);
-    if (release.artSha == null) release.artSha = t.artSha;
-    if (release.totalTracks == null && enrich?.totalTracks != null) {
-      release.totalTracks = enrich.totalTracks;
+    for (const m of enrich?.membership ?? []) {
+      let member = releaseMap.get(m.id);
+      if (!member) {
+        const meta = linkMeta.get(m.id);
+        member = ensureRelease(t, undefined, m.id, meta);
+      }
+      addTrackToRelease(member, t.sha, m.position, m.disc);
+      if (member.artSha == null) member.artSha = t.artSha;
+      if (member.totalTracks == null) {
+        const meta = linkMeta.get(m.id);
+        if (meta?.totalTracks != null) member.totalTracks = meta.totalTracks;
+      }
     }
   }
   const merged = new Map<string, ManifestRelease>();
@@ -216,11 +266,20 @@ export function buildManifest(
         if (small.trackShas.length === 0) continue;
         const bothUnknown =
           small.title === "unknown album" && big.title === "unknown album";
-        if (small.trackShas.length > 8 && !bothUnknown) continue;
+        const exactTitle = norm(small.title) === norm(big.title);
+        if (small.trackShas.length > 8 && !bothUnknown && !exactTitle) continue;
         if (!bothUnknown && !tokenSubset(small.title, big.title)) continue;
         for (const sha of small.trackShas) {
           if (!big.trackShas.includes(sha)) big.trackShas.push(sha);
         }
+        for (const tr of small.tracks) {
+          if (!big.tracks.some((x) => x.sha === tr.sha)) big.tracks.push(tr);
+        }
+        big.totalTracks = Math.max(
+          big.totalTracks ?? 0,
+          small.totalTracks ?? 0,
+          big.trackShas.length
+        );
         merged.delete(small.id);
         mergedAnything = true;
         break;
@@ -242,24 +301,26 @@ export function buildManifest(
       a.artist !== b.artist ? a.artist.localeCompare(b.artist) : a.title.localeCompare(b.title)
     )
     .map((r) => {
-      const byNumber = new Map<string, number | null>();
-      const discOf = new Map<string, number>();
-      for (const t of tracks) {
-        if (r.trackShas.includes(t.sha)) {
-          byNumber.set(t.sha, t.trackNumber ?? null);
-          if (t.discNumber != null) discOf.set(t.sha, t.discNumber);
-        }
-      }
-      const ordered = [...r.trackShas].sort((a, b) => {
-        const da = discOf.get(a) ?? 1;
-        const db = discOf.get(b) ?? 1;
+      const fallbackRows = r.tracks.length > 0
+        ? r.tracks
+        : [...r.trackShas].map((sha) => {
+            const t = tracks.find((x) => x.sha === sha);
+            return {
+              sha,
+              trackNumber: t?.trackNumber ?? null,
+              discNumber: t?.discNumber ?? null,
+            };
+          });
+      const sorted = [...fallbackRows].sort((a, b) => {
+        const da = a.discNumber ?? 1;
+        const db = b.discNumber ?? 1;
         if (da !== db) return da - db;
-        const na = byNumber.get(a) ?? 999;
-        const nb = byNumber.get(b) ?? 999;
+        const na = a.trackNumber ?? 999;
+        const nb = b.trackNumber ?? 999;
         if (na !== nb) return na - nb;
-        return a < b ? -1 : a > b ? 1 : 0;
+        return a.sha < b.sha ? -1 : 1;
       });
-      return { ...r, trackShas: ordered };
+      return { ...r, trackShas: sorted.map((x) => x.sha), tracks: sorted };
     });
 
   const integrityBody = JSON.stringify({ schema: 2, tracks, releases });

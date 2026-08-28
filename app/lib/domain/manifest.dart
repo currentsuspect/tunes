@@ -15,6 +15,7 @@ class ManifestTrack {
     required this.releaseId,
     required this.trackNumber,
     required this.discNumber,
+    this.releaseIds = const [],
   });
 
   final String sha;
@@ -32,6 +33,7 @@ class ManifestTrack {
   final String? releaseId;
   final int? trackNumber;
   final int? discNumber;
+  final List<String> releaseIds;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -48,6 +50,9 @@ class ManifestTrack {
       year: json['year'] as String?,
       artSha: json['artSha'] as String?,
       releaseId: json['releaseId'] as String?,
+      releaseIds: (json['releaseIds'] as List<dynamic>? ?? const [])
+          .map((s) => s as String)
+          .toList(),
       trackNumber: (json['trackNumber'] as num?)?.toInt(),
       discNumber: (json['discNumber'] as num?)?.toInt(),
     );
@@ -80,6 +85,7 @@ class ManifestRelease {
     required this.type,
     required this.totalTracks,
     required this.trackShas,
+    this.tracks = const [],
   });
 
   final String id;
@@ -90,6 +96,7 @@ class ManifestRelease {
   final String? type;
   final int? totalTracks;
   final List<String> trackShas;
+  final List<ManifestReleaseTrack> tracks;
 
   factory ManifestRelease.fromJson(Map<String, dynamic> json) {
     return ManifestRelease(
@@ -103,6 +110,9 @@ class ManifestRelease {
       trackShas: (json['trackShas'] as List<dynamic>? ?? const [])
           .map((s) => s as String)
           .toList(),
+      tracks: (json['tracks'] as List<dynamic>? ?? const [])
+          .map((t) => ManifestReleaseTrack.fromJson(t as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -115,6 +125,52 @@ class ManifestRelease {
     if (t == 'compilation') return 'Compilation';
     if (t == 'live') return 'Live';
     return type!;
+  }
+}
+
+class ManifestReleaseTrack {
+  const ManifestReleaseTrack({
+    required this.sha,
+    required this.trackNumber,
+    required this.discNumber,
+  });
+
+  final String sha;
+  final int? trackNumber;
+  final int? discNumber;
+
+  factory ManifestReleaseTrack.fromJson(Map<String, dynamic> json) {
+    return ManifestReleaseTrack(
+      sha: json['sha'] as String,
+      trackNumber: (json['trackNumber'] as num?)?.toInt(),
+      discNumber: (json['discNumber'] as num?)?.toInt(),
+    );
+  }
+}
+
+class SearchResults {
+  const SearchResults({
+    required this.tracks,
+    required this.releases,
+    required this.artists,
+  });
+
+  final List<ManifestTrack> tracks;
+  final List<ManifestRelease> releases;
+  final List<ManifestArtist> artists;
+
+  factory SearchResults.fromJson(Map<String, dynamic> json) {
+    return SearchResults(
+      tracks: (json['tracks'] as List<dynamic>? ?? const [])
+          .map((t) => ManifestTrack.fromJson(t as Map<String, dynamic>))
+          .toList(),
+      releases: (json['releases'] as List<dynamic>? ?? const [])
+          .map((r) => ManifestRelease.fromJson(r as Map<String, dynamic>))
+          .toList(),
+      artists: (json['artists'] as List<dynamic>? ?? const [])
+          .map((a) => ManifestArtist.fromJson(a as Map<String, dynamic>))
+          .toList(),
+    );
   }
 }
 

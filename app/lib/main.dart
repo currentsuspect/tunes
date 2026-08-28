@@ -475,12 +475,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final content = switch (_tab) {
           1 => SearchView(
             tracks: tracks,
+            releases: manifest.releases,
+            client: widget.client,
             player: widget.player,
             store: widget.store,
             downloading: _downloading,
             onDownload: _download,
             offline: offline,
             artUrlFor: _artUrlFor,
+            onAlbumTap: (release) => _openAlbum(release, manifest),
+            onArtistTap: (artist) => _openArtist(artist, manifest),
           ),
           2 => LibraryView(
             tracks: tracks,

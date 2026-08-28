@@ -33,18 +33,32 @@ class AlbumPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trackShas = release.trackShas;
-    final releaseTracks = trackShas
-        .map(
-          (sha) => manifest.tracks.firstWhere(
-            (t) => t.sha == sha,
-            orElse: () => manifest.tracks.firstWhere(
-              (t) => t.sha == sha,
-              orElse: () => throw StateError('track $sha missing'),
-            ),
-          ),
-        )
-        .toList();
+    final bySha = {for (final t in manifest.tracks) t.sha: t};
+    final rows = release.tracks.isEmpty
+        ? [
+            for (final sha in release.trackShas)
+              if (bySha[sha] != null)
+                (track: bySha[sha]!, number: null, disc: null),
+          ]
+        : [
+            for (final rt in release.tracks)
+              if (bySha[rt.sha] != null)
+                (
+                  track: bySha[rt.sha]!,
+                  number: rt.trackNumber,
+                  disc: rt.discNumber,
+                ),
+          ];
+    rows.sort((a, b) {
+      final da = a.disc ?? 1;
+      final db = b.disc ?? 1;
+      if (da != db) return da - db;
+      final na = a.number ?? 999;
+      final nb = b.number ?? 999;
+      if (na != nb) return na - nb;
+      return a.track.sha.compareTo(b.track.sha);
+    });
+    final releaseTracks = [for (final r in rows) r.track];
 
     return Scaffold(
       body: SafeArea(
@@ -165,10 +179,13 @@ class AlbumPage extends StatelessWidget {
                   ),
                   const SizedBox(height: Space.md),
                   const SizedBox(height: Space.lg),
-                  for (var i = 0; i < releaseTracks.length; i++) ...[
+                  for (var i = 0; i < rows.length; i++) ...[
                     _AlbumTrackRow(
-                      track: releaseTracks[i],
-                      position: releaseTracks[i].trackNumber ?? i + 1,
+                      track: rows[i].track,
+                      position:
+                          rows[i].number ??
+                          releaseTracks[i].trackNumber ??
+                          i + 1,
                       player: player,
                       onPlay: () => player.playQueue(releaseTracks, i),
                       store: store,

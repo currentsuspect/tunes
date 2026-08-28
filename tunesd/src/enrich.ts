@@ -1,3 +1,9 @@
+export interface EntMember {
+  id: string;
+  position: number | null;
+  disc: number | null;
+}
+
 export interface EnrichmentEntry {
   sha: string;
   artist: string | null;
@@ -9,6 +15,7 @@ export interface EnrichmentEntry {
   trackNumber: number | null;
   discNumber: number | null;
   totalTracks: number | null;
+  membership: EntMember[];
   source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }
@@ -61,6 +68,58 @@ interface MusicBrainzRecording {
     date?: string;
     "cover-art-archive"?: { front?: boolean; art_count?: number };
   }>;
+}
+
+export interface ReleaseTrackRow {
+  title: string;
+  lengthMs: number | null;
+  position: number;
+  discNumber: number;
+  artist: string | null;
+}
+
+export function flattenReleaseTracks(
+  media: Array<{
+    position?: number;
+    tracks?: Array<{
+      title?: string;
+      length?: number;
+      position?: number;
+      recording?: { "artist-credit"?: Array<{ name?: string }> };
+    }>;
+  }>
+): ReleaseTrackRow[] {
+  const raw: Array<{
+    disc: number;
+    pos: number;
+    title: string;
+    lengthMs: number | null;
+    artist: string | null;
+  }> = [];
+  let lastMax = 0;
+  let monotonic = true;
+  for (const m of media) {
+    const disc = m.position ?? 1;
+    for (const t of m.tracks ?? []) {
+      const p = t.position ?? 0;
+      if (p <= lastMax) monotonic = false;
+      if (p > lastMax) lastMax = p;
+      raw.push({
+        disc,
+        pos: p,
+        title: t.title ?? "",
+        lengthMs: t.length != null ? Number(t.length) : null,
+        artist: t.recording?.["artist-credit"]?.[0]?.name ?? null,
+      });
+    }
+  }
+  return raw.map((t, i) => ({
+    discNumber: t.disc,
+    title: t.title,
+    lengthMs: t.lengthMs,
+    artist: t.artist,
+    position: monotonic ? t.pos : i + 1,
+  }));
 }
 
 export class MusicBrainzClient {
@@ -183,16 +242,7 @@ export class MusicBrainzClient {
       }>;
     }>(url);
     if (!body?.title) return null;
-    const tracks = (body.media ?? [])
-      .flatMap((m) =>
-        (m.tracks ?? []).map((t) => ({
-          discNumber: m.position ?? 1,
-          title: t.title ?? "",
-          lengthMs: t.length != null ? Number(t.length) : null,
-          position: t.position ?? 0,
-          artist: t.recording?.["artist-credit"]?.[0]?.name ?? null,
-        }))
-      );
+    const tracks = flattenReleaseTracks(body.media ?? []);
     return {
       title: body.title,
       type: body["release-group"]?.["primary-type"] ?? null,

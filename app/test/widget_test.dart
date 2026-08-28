@@ -12,15 +12,36 @@ import 'package:tunes/features/player/mini_player_bar.dart';
 import 'package:tunes/main.dart';
 
 class _FakeClient implements TunesClient {
-  _FakeClient(this.result);
+  _FakeClient(this.result, {this.onSearch});
 
   final Future<TunesManifest> Function() result;
+  final Future<SearchResults> Function(String q)? onSearch;
 
   @override
   String get baseUrl => 'http://fake:4780';
 
   @override
   Future<TunesManifest> fetchManifest() => result();
+
+  @override
+  Future<SearchResults> search(String q) {
+    final custom = onSearch;
+    if (custom != null) return custom(q);
+    return result().then(
+      (m) => SearchResults(
+        tracks: m.tracks
+            .where(
+              (t) =>
+                  t.title.toLowerCase().contains(q.toLowerCase()) ||
+                  t.artist.toLowerCase().contains(q.toLowerCase()) ||
+                  t.album.toLowerCase().contains(q.toLowerCase()),
+            )
+            .toList(),
+        releases: m.releases,
+        artists: m.artists,
+      ),
+    );
+  }
 
   @override
   Future<bool> ping() async => true;
@@ -318,6 +339,96 @@ void main() {
 
     expect(find.text('Recently played'), findsOneWidget);
     expect(find.text('Bassline'), findsWidgets);
+  });
+
+  testWidgets('album page uses per-release positions for folded singles', (
+    tester,
+  ) async {
+    final tracks = [
+      _track(
+        'BROTHER STONE',
+        'flac',
+        950000,
+        artist: 'Don Toliver',
+        album: 'BROTHER STONE',
+        sha: 'a' * 64,
+        releaseId: 'rel-single',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-single',
+          title: 'BROTHER STONE',
+          artist: 'Don Toliver',
+          year: '2024',
+          artSha: null,
+          type: 'single',
+          totalTracks: 1,
+          trackShas: ['a' * 64],
+        ),
+        ManifestRelease(
+          id: 'rel-album',
+          title: 'HARDSTONE PSYCHO',
+          artist: 'Don Toliver',
+          year: '2024',
+          artSha: null,
+          type: 'album',
+          totalTracks: 19,
+          trackShas: ['a' * 64],
+          tracks: [
+            ManifestReleaseTrack(sha: 'a' * 64, trackNumber: 9, discNumber: 1),
+          ],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
+    await tester.tap(find.text('HARDSTONE PSYCHO').first);
+    await tester.pumpAndSettle();
+    expect(find.text('09'), findsOneWidget);
+    expect(find.textContaining('/19 tracks'), findsOneWidget);
+  });
+
+  testWidgets('search queries the database and surfaces albums and artists', (
+    tester,
+  ) async {
+    final manifest = _manifestOf(_library());
+    final client = _FakeClient(
+      () async => manifest,
+      onSearch: (q) async => SearchResults(
+        tracks: const [],
+        releases: [
+          ManifestRelease(
+            id: 'rel-x',
+            title: 'Nightdrive (Remaster)',
+            artist: 'Vax',
+            year: '2026',
+            artSha: null,
+            type: 'album',
+            totalTracks: 9,
+            trackShas: const [],
+          ),
+        ],
+        artists: const [ManifestArtist(name: 'Vax', artSha: null)],
+      ),
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'night');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Albums'), findsOneWidget);
+    expect(find.text('Artists'), findsOneWidget);
+    expect(find.text('Nightdrive (Remaster)'), findsOneWidget);
+
+    await tester.tap(find.text('Nightdrive (Remaster)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Album'), findsWidgets);
   });
 
   testWidgets('home surfaces missing-from-collection and released-this-year', (

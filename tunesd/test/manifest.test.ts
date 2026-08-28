@@ -51,7 +51,7 @@ describe("buildManifest", () => {
     const enrich = new Map([
       [
         "a".repeat(64),
-        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1, discNumber: null, totalTracks: null },
+        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1, discNumber: null, totalTracks: null, membership: [] },
       ],
     ]);
     const untagged = buildManifest([probe()], new Map(), enrich);
@@ -91,7 +91,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
       [
         "b".repeat(64),
@@ -105,7 +106,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
@@ -132,7 +134,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
       [
         "b".repeat(64),
@@ -146,7 +149,8 @@ describe("buildManifest", () => {
           trackNumber: 2,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
@@ -173,7 +177,8 @@ describe("buildManifest", () => {
       trackNumber: i,
       discNumber: null,
           totalTracks: null,
-    });
+        membership: [],
+        });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 3; i++) {
       enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32), "cartunez", "mb:c", "c".repeat(64)));
@@ -204,7 +209,8 @@ describe("buildManifest", () => {
       trackNumber: null,
       discNumber: null,
           totalTracks: null,
-    });
+        membership: [],
+        });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 2; i++) enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32)));
     for (let i = 0; i < 5; i++) enrich.set(`b${i}`.repeat(32), mk(i, `b${i}`.repeat(32)));
@@ -230,7 +236,8 @@ describe("buildManifest", () => {
       trackNumber: null,
       discNumber: null,
           totalTracks: null,
-    });
+        membership: [],
+        });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 6; i++) enrich.set(`x${i}`.repeat(32), mk(i, `x${i}`.repeat(32)));
     const m = buildManifest(
@@ -257,7 +264,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
       [
         "b".repeat(64),
@@ -271,7 +279,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
@@ -292,7 +301,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
       [
         "b".repeat(64),
@@ -306,11 +316,85 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
     expect(m.releases.length).toBe(2);
+  });
+
+  it("keeps a single in both the single card and its album (membership)", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [
+        "a".repeat(64),
+        {
+          artist: "Don Toliver",
+          album: "BROTHER STONE (FEAT. KODAK BLACK)",
+          year: "2024",
+          artSha: null,
+          releaseId: "mb:single",
+          releaseType: "Single",
+          trackNumber: 1,
+          discNumber: null,
+          totalTracks: 1,
+          membership: [{ id: "mb:album-x", position: 12, disc: 1 }],
+        },
+      ],
+    ]);
+    const m = buildManifest(
+      [probe()],
+      new Map(),
+      enrich,
+      [],
+      [],
+      new Map([
+        ["mb:album-x", { title: "HARDSTONE PSYCHO", type: "Album", totalTracks: 15 }],
+      ])
+    );
+    const single = m.releases.find((r) => r.id === "mb:single");
+    const album = m.releases.find((r) => r.id === "mb:album-x");
+    expect(single?.trackShas).toEqual(["a".repeat(64)]);
+    expect(album?.trackShas).toEqual(["a".repeat(64)]);
+    expect(album?.tracks[0]?.trackNumber).toBe(12);
+    expect(album?.tracks[0]?.discNumber).toBe(1);
+    expect(m.tracks[0]?.releaseIds).toEqual(["mb:single", "mb:album-x"]);
+  });
+
+  it("materializes an album card from linkmeta even with no primary tracks", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [
+        "a".repeat(64),
+        {
+          artist: "Don Toliver",
+          album: "BROTHER STONE (FEAT. KODAK BLACK)",
+          year: null,
+          artSha: null,
+          releaseId: "mb:single",
+          releaseType: "Single",
+          trackNumber: 1,
+          discNumber: null,
+          totalTracks: 1,
+          membership: [{ id: "mb:album-y", position: 4, disc: null }],
+        },
+      ],
+    ]);
+    const m = buildManifest(
+      [probe()],
+      new Map(),
+      enrich,
+      [],
+      [],
+      new Map([
+        ["mb:album-y", { title: "HARDSTONE PSYCHO", type: "Album", totalTracks: 15 }],
+      ])
+    );
+    const album = m.releases.find((r) => r.id === "mb:album-y");
+    expect(album?.title).toBe("HARDSTONE PSYCHO");
+    expect(album?.type).toBe("Album");
+    expect(album?.totalTracks).toBe(15);
+    expect(album?.artist).toBe("Don Toliver");
+    expect(album?.tracks[0]?.trackNumber).toBe(4);
   });
 
   it("suppresses category/genre releases as entities", () => {
@@ -327,7 +411,8 @@ describe("buildManifest", () => {
           trackNumber: null,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe()], new Map(), enrich);
@@ -353,7 +438,8 @@ describe("buildManifest", () => {
           trackNumber: 1,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
       [
         "b".repeat(64),
@@ -367,7 +453,8 @@ describe("buildManifest", () => {
           trackNumber: 2,
           discNumber: null,
           totalTracks: null,
-        },
+                membership: [],
+                },
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
@@ -395,7 +482,8 @@ describe("buildManifest", () => {
             trackNumber: null,
             discNumber: null,
           totalTracks: null,
-          },
+                    membership: [],
+                    },
         ],
       ])
     );
@@ -421,7 +509,8 @@ describe("buildManifest", () => {
             trackNumber: null,
             discNumber: null,
           totalTracks: null,
-          },
+                    membership: [],
+                    },
         ],
         [
           "b".repeat(64),
@@ -435,10 +524,33 @@ describe("buildManifest", () => {
             trackNumber: 1,
             discNumber: null,
           totalTracks: null,
-          },
+                    membership: [],
+                    },
         ],
       ])
     );
     expect(named.releases.length).toBe(2); // different albums, same artist
   });
 });
+  it("merges same-title split cards regardless of size and lifts the total", () => {
+    const mk = (i: number, sha: string, releaseId: string, total: number | null = null) => ({
+      sha,
+      artist: "Don Toliver",
+      album: "HARDSTONE PSYCHO",
+      year: "2024",
+      artSha: null,
+      releaseId,
+      releaseType: "Album",
+      trackNumber: i,
+      discNumber: null,
+      totalTracks: total,
+      membership: [],
+    });
+    const enrich = new Map<string, TrackEnrichment>();
+    for (let i = 0; i < 14; i++) enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32), "sp:album", null));
+    for (let i = 0; i < 16; i++) enrich.set(`b${i}`.repeat(32), mk(i, `b${i}`.repeat(32), "mb:album", 23));
+    const m = buildManifest([], new Map(), enrich, [...enrich.keys()].map((sha) => ({ sha, size: 1 })));
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.trackShas.length).toBe(30);
+    expect(m.releases[0]?.totalTracks).toBe(30);
+  });
