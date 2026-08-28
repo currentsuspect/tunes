@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
-import { MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
+import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
@@ -90,7 +90,12 @@ async function main(): Promise<void> {
     const spotify = spotifyId && spotifySecret
       ? new SpotifyClient(spotifyId, spotifySecret)
       : null;
+    const discogsToken = process.env["TUNESD_DISCOGS_TOKEN"];
+    const discogs = discogsToken
+      ? new DiscogsClient(discogsToken, "tunes/0.1 ( https://github.com/currentsuspect/tunes )")
+      : null;
     if (!spotify) log.warn({ event: "ENRICH_SPOTIFY_DISABLED" });
+    if (!discogs) log.warn({ event: "ENRICH_DISCOGS_DISABLED" });
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
     const manifestBuilder = async () => {
@@ -205,6 +210,44 @@ async function main(): Promise<void> {
               album: sp.album,
               year: sp.year,
               artSha: artSha?.slice(0, 8) ?? null,
+            });
+            await persistEnrich();
+            continue;
+          }
+        }
+        if (discogs) {
+          const dg = await discogs.search(parsed);
+          if (dg) {
+            let artSha: string | null = null;
+            if (dg.artUrl) {
+              try {
+                const res = await fetch(dg.artUrl);
+                if (res.ok) {
+                  const bytes = new Uint8Array(await res.arrayBuffer());
+                  if (bytes.length > 1000) {
+                    artSha = (await storeCoverBytes(env.dataDir, bytes)).sha;
+                  }
+                }
+              } catch {
+                artSha = null;
+              }
+            }
+            enrich.set(obj.sha, {
+              sha: obj.sha,
+              artist: dg.artist,
+              album: dg.album,
+              year: dg.year,
+              artSha,
+              source: "discogs",
+              enrichedAt: new Date().toISOString(),
+            });
+            log.info({
+              event: "ENRICH_OK",
+              source: "discogs",
+              sha: obj.sha.slice(0, 8),
+              artist: dg.artist,
+              album: dg.album,
+              year: dg.year,
             });
             await persistEnrich();
             continue;

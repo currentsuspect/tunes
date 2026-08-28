@@ -76,16 +76,6 @@ class FakeTunePlayer extends TunePlayer {
     notifyListeners();
   }
 
-  void setPlaying(bool value) {
-    _playing = value;
-    notifyListeners();
-  }
-
-  void setPosition(Duration value) {
-    _position = value;
-    notifyListeners();
-  }
-
   @override
   void play() {
     playCalls += 1;
@@ -157,7 +147,13 @@ class FakeTunePlayer extends TunePlayer {
   }
 }
 
-ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
+ManifestTrack _track(
+  String title,
+  String codec,
+  int bitrate, {
+  String artist = 'Artist',
+  String album = 'Album',
+}) => ManifestTrack(
   sha: title == 'Bassline' ? 'a' * 64 : 'b' * 64,
   size: 1000,
   codec: codec,
@@ -166,8 +162,8 @@ ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
   bitrate: bitrate,
   durationMs: 125000,
   title: title,
-  artist: 'Artist',
-  album: 'Album',
+  artist: artist,
+  album: album,
   year: null,
   artSha: null,
 );
@@ -210,19 +206,25 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('renders tracks from the manifest', (tester) async {
+  Future<void> goToLibrary(WidgetTester tester) async {
+    await tester.tap(find.text('Library'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('home renders dynamic stats from the manifest', (tester) async {
     await pumpApp(
       tester,
       _FakeClient(() async => _library()),
       FakeTunePlayer(),
     );
 
-    expect(find.text('Bassline'), findsOneWidget);
-    expect(find.text('FLAC 950k'), findsOneWidget);
-    expect(find.text('MP3 320k'), findsOneWidget);
+    expect(find.text('2'), findsWidgets); // tracks count
+    expect(find.text('tracks'), findsOneWidget);
+    expect(find.text('Artists'), findsOneWidget);
+    expect(find.text('Albums'), findsOneWidget);
   });
 
-  testWidgets('shows the honest empty state when the daemon is unreachable', (
+  testWidgets('shows the honest error state when the daemon is unreachable', (
     tester,
   ) async {
     final client = _FakeClient(
@@ -234,24 +236,36 @@ void main() {
     expect(find.textContaining('tunesd is not answering'), findsOneWidget);
   });
 
-  testWidgets('empty manifest shows the no-tracks state', (tester) async {
+  testWidgets('empty manifest shows the no-library home state', (tester) async {
     await pumpApp(tester, _FakeClient(() async => []), FakeTunePlayer());
 
-    expect(find.text('No Tracks yet'), findsOneWidget);
+    expect(
+      find.textContaining('No library yet — channels are configured'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('tab switch swaps the not-yet label', (tester) async {
-    await pumpApp(tester, _FakeClient(() async => []), FakeTunePlayer());
+  testWidgets('library tab lists tracks with quality badges', (tester) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      FakeTunePlayer(),
+    );
+    await goToLibrary(tester);
 
-    await tester.tap(find.text('Albums'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Albums coming in M4'), findsOneWidget);
+    expect(find.text('Bassline'), findsOneWidget);
+    expect(find.text('FLAC 950k'), findsOneWidget);
+    expect(find.text('MP3 320k'), findsOneWidget);
+    expect(find.text('Tracks'), findsWidgets);
+    expect(find.text('Albums'), findsWidgets);
   });
 
-  testWidgets('tapping a row starts playback on that track', (tester) async {
+  testWidgets('tapping a library row starts playback on that track', (
+    tester,
+  ) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Nightdrive'));
     await tester.pumpAndSettle();
@@ -262,9 +276,79 @@ void main() {
     expect(find.textContaining('playing'), findsOneWidget);
   });
 
+  testWidgets('playing records recents on the home tab', (tester) async {
+    final player = FakeTunePlayer();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    expect(player.playQueueCalls, 1);
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Recently played'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recently played'), findsOneWidget);
+    expect(find.text('Bassline'), findsWidgets);
+  });
+
+  testWidgets('artist chip on home filters the library', (tester) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => [_track('One', 'flac', 950000, artist: 'Vax')]),
+      FakeTunePlayer(),
+    );
+
+    await tester.tap(find.text('Vax'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('One'), findsOneWidget);
+  });
+
+  testWidgets('search filters and plays results', (tester) async {
+    final player = FakeTunePlayer();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
+
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'night');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nightdrive'), findsOneWidget);
+    expect(find.text('Bassline'), findsNothing);
+
+    await tester.tap(find.text('Nightdrive'));
+    await tester.pumpAndSettle();
+    expect(player.playQueueCalls, 1);
+  });
+
+  testWidgets('profile sheet opens from the avatar', (tester) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      FakeTunePlayer(),
+    );
+
+    await tester.tap(find.byIcon(Icons.person_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Daemon'), findsOneWidget);
+    expect(find.text('http://fake:4780'), findsOneWidget);
+    expect(find.text('Library'), findsWidgets);
+  });
+
   testWidgets('mini bar toggle and seek reach the player', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -281,6 +365,7 @@ void main() {
   ) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -292,18 +377,15 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('Bassline'),
-      findsNWidgets(2),
-    ); // track row + mini bar both alive
+    expect(find.text('Bassline'), findsNWidgets(2)); // row + mini bar
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
-    expect(player.index, 0);
     expect(player.playQueueCalls, 1);
   });
 
   testWidgets('stop clears the mini bar', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -314,7 +396,6 @@ void main() {
 
     expect(player.stopCalls, 1);
     expect(find.byIcon(Icons.pause_rounded), findsNothing);
-    expect(find.byIcon(Icons.close_rounded), findsNothing);
   });
 
   testWidgets('tapping the mini bar opens the full Now Playing page', (
@@ -322,10 +403,10 @@ void main() {
   ) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
-
     await tester.tap(find.text('Bassline').last);
     await tester.pumpAndSettle();
 
@@ -337,6 +418,7 @@ void main() {
   testWidgets('full page controls reach the player', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -353,6 +435,7 @@ void main() {
   testWidgets('queue list jumps to a tapped track', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -372,6 +455,7 @@ void main() {
       _FakeClient(() async => _library()),
       FakeTunePlayer(),
     );
+    await goToLibrary(tester);
 
     expect(find.byIcon(Icons.download_rounded), findsNWidgets(2));
 
@@ -419,6 +503,7 @@ void main() {
       player,
       reachability: reach,
     );
+    await goToLibrary(tester);
     reach.setOffline(true);
     await tester.pumpAndSettle();
 

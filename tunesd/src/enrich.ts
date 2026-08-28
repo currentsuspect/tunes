@@ -4,7 +4,7 @@ export interface EnrichmentEntry {
   album: string | null;
   year: string | null;
   artSha: string | null;
-  source: "musicbrainz" | "spotify" | null;
+  source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }
 
@@ -168,6 +168,65 @@ export interface SpotifyLookup {
 
 function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export interface DiscogsLookup {
+  artist: string;
+  album: string | null;
+  year: string | null;
+  artUrl: string | null;
+}
+
+export class DiscogsClient {
+  constructor(
+    private readonly token: string,
+    private readonly userAgent: string,
+    private readonly fetcher: typeof fetch = fetch
+  ) {}
+
+  async search(parsed: ParsedName): Promise<DiscogsLookup | null> {
+    const url =
+      `https://api.discogs.com/database/search?` +
+      `q=${encodeURIComponent(`${parsed.artist} ${parsed.title}`)}` +
+      `&artist=${encodeURIComponent(parsed.artist)}` +
+      `&track=${encodeURIComponent(parsed.title)}` +
+      `&type=release&per_page=10`;
+    try {
+      const res = await this.fetcher(url, {
+        headers: { "User-Agent": this.userAgent, Authorization: `Discogs token=${this.token}` },
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        results?: Array<{
+          title?: string;
+          year?: number | string;
+          cover_image?: string;
+          thumb?: string;
+        }>;
+      };
+      const wantArtist = norm(parsed.artist);
+      const wantTitle = norm(parsed.title);
+      for (const r of body.results ?? []) {
+        const title = r.title ?? "";
+        const dash = title.indexOf(" - ");
+        if (dash <= 0) continue;
+        const artist = title.slice(0, dash).trim();
+        const trackRaw = title.slice(dash + 3).trim();
+        const track = trackRaw.split(" (")[0] ?? trackRaw;
+        if (norm(artist) === wantArtist && norm(track) === wantTitle) {
+          return {
+            artist,
+            album: track,
+            year: r.year != null ? String(r.year) : null,
+            artUrl: r.cover_image && !r.cover_image.includes("spacer") ? r.cover_image : r.thumb ?? null,
+          };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export class SpotifyClient {
