@@ -207,6 +207,39 @@ export class MusicBrainzClient {
     return null;
   }
 
+  async searchArtists(
+    q: string,
+    limit = 6
+  ): Promise<Array<{
+    name: string;
+    mbid: string;
+    type: string | null;
+    disambiguation: string | null;
+    score: number | null;
+  }>> {
+    const query = `artist:"${q.replace(/"/g, "")}"`;
+    const body = await this.getJson<{
+      artists?: Array<{
+        id?: string;
+        name?: string;
+        type?: string | null;
+        disambiguation?: string | null;
+        score?: number | null;
+      }>;
+    }>(
+      `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json&limit=${limit}`
+    );
+    return (body?.artists ?? [])
+      .filter((a) => a.id && a.name)
+      .map((a) => ({
+        name: a.name ?? "",
+        mbid: a.id ?? "",
+        type: a.type ?? null,
+        disambiguation: a.disambiguation ?? null,
+        score: a.score ?? null,
+      }));
+  }
+
   async artistDiscography(
     name: string
   ): Promise<{ mbid: string; groups: DiscographyGroup[] } | null> {

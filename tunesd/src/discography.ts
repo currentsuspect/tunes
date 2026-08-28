@@ -47,6 +47,30 @@ export function joinDiscography(
   });
 }
 
+export interface ExternalArtist {
+  name: string;
+  mbid: string;
+  type: string | null;
+  disambiguation: string | null;
+  score: number | null;
+}
+
+export function dedupeExternalArtists(
+  hits: ExternalArtist[],
+  localNames: Iterable<string>,
+  seenNames = new Set<string>()
+): ExternalArtist[] {
+  const local = new Set([...localNames].map((n) => normName(n)));
+  const out: ExternalArtist[] = [];
+  for (const h of hits) {
+    const key = normName(h.name);
+    if (local.has(key) || seenNames.has(key)) continue;
+    seenNames.add(key);
+    out.push(h);
+  }
+  return out;
+}
+
 export function normName(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }

@@ -732,7 +732,16 @@ async function main(): Promise<void> {
         manifestBuilder,
         env.port,
         log,
-        () => discographies
+        () => discographies,
+        (q) => mb.searchArtists(q),
+        async (name) => {
+          const d = await mb.artistDiscography(name);
+          if (!d) return null;
+          const entry: ArtistDiscography = { ...d, name, fetchedAt: Date.now() };
+          discographies.set(normName(name), entry);
+          await persistDiscographies(discographyFile, discographies);
+          return entry;
+        }
       );
       await server.start();
       void runEnrichPass().catch((e) =>

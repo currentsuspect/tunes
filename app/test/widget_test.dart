@@ -445,6 +445,46 @@ void main() {
     expect(find.text('Album'), findsWidgets);
   });
 
+  testWidgets('search surfaces artists from MusicBrainz and opens their page', (
+    tester,
+  ) async {
+    final manifest = _manifestOf(_library());
+    final client = _FakeClient(
+      () async => manifest,
+      onSearch: (q) async => SearchResults(
+        tracks: [],
+        releases: [],
+        artists: [],
+        externalArtists: const [
+          ExternalArtist(
+            name: 'OCTANE',
+            mbid: 'mbid-oct',
+            type: 'Group',
+            disambiguation: 'US rap duo',
+            score: 95,
+          ),
+        ],
+      ),
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'octane');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Artists on MusicBrainz'), findsOneWidget);
+    expect(find.text('Group · US rap duo'), findsOneWidget);
+
+    await tester.tap(find.text('OCTANE'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Artist'), findsOneWidget);
+    expect(find.text('OCTANE'), findsOneWidget);
+  });
+
   testWidgets('artist page lists discography not in the library', (
     tester,
   ) async {

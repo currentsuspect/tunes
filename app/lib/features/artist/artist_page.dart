@@ -141,22 +141,24 @@ class _ArtistPageState extends State<ArtistPage> {
                     textAlign: TextAlign.center,
                     style: TypeScale.wordmark,
                   ),
-                  const SizedBox(height: Space.xs),
-                  Text(
-                    '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · ${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
-                    textAlign: TextAlign.center,
-                    style: TypeScale.body,
-                  ),
-                  const SizedBox(height: Space.lg),
-                  FilledButton.icon(
-                    onPressed: () => widget.player.playQueue(tracks, 0),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                    label: const Text('Play all'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Tones.primary,
-                      foregroundColor: Tones.onPrimary,
+                  if (tracks.isNotEmpty) ...[
+                    const SizedBox(height: Space.xs),
+                    Text(
+                      '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · ${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
+                      textAlign: TextAlign.center,
+                      style: TypeScale.body,
                     ),
-                  ),
+                    const SizedBox(height: Space.lg),
+                    FilledButton.icon(
+                      onPressed: () => widget.player.playQueue(tracks, 0),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                      label: const Text('Play all'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Tones.primary,
+                        foregroundColor: Tones.onPrimary,
+                      ),
+                    ),
+                  ],
                   if (_loading)
                     const Padding(
                       padding: EdgeInsets.all(Space.lg),

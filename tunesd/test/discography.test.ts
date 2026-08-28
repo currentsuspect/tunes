@@ -50,3 +50,25 @@ describe("joinDiscography", () => {
     expect(first?.date).toBe("2024-08-09");
   });
 });
+import { dedupeExternalArtists } from "../src/discography.js";
+
+describe("dedupeExternalArtists", () => {
+  it("drops hits that match local library names", () => {
+    const hits = [
+      { name: "Don Toliver", mbid: "m1", type: "Person", disambiguation: null, score: 100 },
+      { name: "OCTANE", mbid: "m2", type: "Group", disambiguation: "US rap duo", score: 90 },
+      { name: "Octane", mbid: "m3", type: "Group", disambiguation: null, score: 50 },
+    ];
+    const out = dedupeExternalArtists(hits, ["don toliver", "life of a don"]);
+    expect(out.map((h) => h.name)).toEqual(["OCTANE"]);
+  });
+
+  it("keeps case-variant dupes out via the seen set", () => {
+    const hits = [
+      { name: "Octane", mbid: "m2", type: "Group", disambiguation: null, score: 90 },
+      { name: "OCTANE", mbid: "m3", type: "Group", disambiguation: null, score: 80 },
+    ];
+    const out = dedupeExternalArtists(hits, []);
+    expect(out.map((h) => h.name)).toEqual(["Octane"]);
+  });
+});

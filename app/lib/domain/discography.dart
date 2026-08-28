@@ -47,6 +47,32 @@ class DiscographyGroup {
   }
 }
 
+class ExternalArtist {
+  const ExternalArtist({
+    required this.name,
+    required this.mbid,
+    required this.type,
+    required this.disambiguation,
+    required this.score,
+  });
+
+  final String name;
+  final String mbid;
+  final String? type;
+  final String? disambiguation;
+  final int? score;
+
+  factory ExternalArtist.fromJson(Map<String, dynamic> json) {
+    return ExternalArtist(
+      name: (json['name'] as String?) ?? '',
+      mbid: (json['mbid'] as String?) ?? '',
+      type: json['type'] as String?,
+      disambiguation: json['disambiguation'] as String?,
+      score: (json['score'] as num?)?.toInt(),
+    );
+  }
+}
+
 class ArtistDiscography {
   const ArtistDiscography({
     required this.artist,

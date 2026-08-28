@@ -123,3 +123,37 @@ describe("MusicBrainzClient.artistDiscography", () => {
   });
 
 });
+
+describe("MusicBrainzClient.searchArtists", () => {
+  it("queries the artist index and maps hits", async () => {
+    const fetcher = async (url: string) => {
+      expect(url).toContain("/ws/2/artist?query=");
+      expect(url).toContain(encodeURIComponent('artist:"OCTANE"'));
+      return {
+        ok: true,
+        json: async () => ({
+          artists: [
+            { id: "m1", name: "OCTANE", type: "Group", disambiguation: "US rap duo", score: 100 },
+            { id: "m2", name: "Octane", type: "Person", disambiguation: null, score: 42 },
+          ],
+        }),
+      } as Response;
+    };
+    const mb = new MusicBrainzClient("tunes/test", "", fetcher as unknown as typeof fetch);
+    const hits = await mb.searchArtists("OCTANE");
+    expect(hits).toHaveLength(2);
+    expect(hits[0]).toMatchObject({
+      name: "OCTANE",
+      mbid: "m1",
+      type: "Group",
+      disambiguation: "US rap duo",
+      score: 100,
+    });
+  });
+
+  it("returns nothing on a missing index", async () => {
+    const fetcher = async () => ({ ok: true, json: async () => ({ artists: [] }) }) as Response;
+    const mb = new MusicBrainzClient("tunes/test", "", fetcher as unknown as typeof fetch);
+    expect(await mb.searchArtists("zzz")).toEqual([]);
+  });
+});

@@ -5,8 +5,8 @@ import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV2 } from "./manifest.js";
-import type { ArtistDiscography, JoinedGroup } from "./discography.js";
-import { joinDiscography, normName } from "./discography.js";
+import type { ArtistDiscography, ExternalArtist, JoinedGroup } from "./discography.js";
+import { dedupeExternalArtists, joinDiscography, normName } from "./discography.js";
 
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -32,8 +32,21 @@ export class ManifestServer {
     private readonly port: number,
     private readonly log: Log,
     private readonly getDiscographies: () => Map<string, ArtistDiscography> = () =>
-      new Map()
-  ) {}
+      new Map(),
+    private readonly searchExternalArtists:
+      | ((q: string) => Promise<ExternalArtist[]>)
+      | null = null,
+    private readonly fetchDiscography:
+      | ((name: string) => Promise<ArtistDiscography | null>)
+      | null = null
+  ) {
+    this.externalCache = new Map();
+  }
+
+  private readonly externalCache: Map<
+    string,
+    { at: number; hits: ExternalArtist[] }
+  >;
 
   private async getManifest(force = false): Promise<ManifestV2> {
     const now = Date.now();
@@ -94,8 +107,35 @@ export class ManifestServer {
             .filter((r) => norm(r.title).includes(qn) || norm(r.artist).includes(qn))
             .slice(0, limit);
           const artists = manifest.artists.filter((a) => norm(a.name).includes(qn)).slice(0, limit);
+          let externalArtists: ExternalArtist[] = [];
+          const searcher = this.searchExternalArtists;
+          if (searcher) {
+            const cached = this.externalCache.get(qn);
+            if (cached && Date.now() - cached.at < 30 * 60_000) {
+              externalArtists = cached.hits;
+            } else {
+              try {
+                const hits = await searcher(q);
+                this.externalCache.set(qn, { at: Date.now(), hits });
+                if (this.externalCache.size > 64) {
+                  const oldest = [...this.externalCache.entries()].sort(
+                    (a, b) => a[1].at - b[1].at
+                  )[0]?.[0];
+                  if (oldest) this.externalCache.delete(oldest);
+                }
+                externalArtists = hits;
+              } catch {
+                externalArtists = [];
+              }
+            }
+            const localNames = [
+              ...manifest.artists.map((a) => a.name),
+              ...manifest.tracks.map((t) => t.artist),
+            ];
+            externalArtists = dedupeExternalArtists(externalArtists, localNames);
+          }
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ tracks, releases, artists }));
+          res.end(JSON.stringify({ tracks, releases, artists, externalArtists }));
           return;
         }
 
@@ -107,7 +147,17 @@ export class ManifestServer {
             return;
           }
           const manifest = await this.getManifest();
-          const d = this.getDiscographies().get(normName(name));
+          let d: ArtistDiscography | undefined = this.getDiscographies().get(
+            normName(name)
+          );
+          if (!d && this.fetchDiscography) {
+            try {
+              const fresh = await this.fetchDiscography(name);
+              if (fresh) d = fresh;
+            } catch {
+              // on-demand fetch failed — serve empty
+            }
+          }
           const groups: JoinedGroup[] = d
             ? joinDiscography(d.groups, manifest.releases)
             : [];

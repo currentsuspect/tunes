@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/net/tunes_client.dart';
+import '../../core/ui/initials.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
 import '../library/library_widgets.dart';
@@ -164,6 +165,66 @@ class _SearchViewState extends State<SearchView> {
                           onDownload: () => widget.onDownload(results[i]),
                           offline: widget.offline,
                           artUrlFor: widget.artUrlFor,
+                        ),
+                        const Divider(),
+                      ],
+                    ],
+                    if (fromServer && _server!.externalArtists.isNotEmpty) ...[
+                      const SizedBox(height: Space.md),
+                      const Text(
+                        'Artists on MusicBrainz',
+                        style: TypeScale.title,
+                      ),
+                      const SizedBox(height: Space.sm),
+                      for (final a in _server!.externalArtists) ...[
+                        InkWell(
+                          onTap: widget.onArtistTap == null
+                              ? null
+                              : () => widget.onArtistTap!(a.name),
+                          borderRadius: BorderRadius.circular(
+                            RadiusTokens.control,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: Space.sm,
+                              horizontal: Space.xs,
+                            ),
+                            child: Row(
+                              children: [
+                                InitialsAvatar(name: a.name, size: 44),
+                                const SizedBox(width: Space.md),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        a.name,
+                                        style: TypeScale.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        [
+                                          if (a.type != null) a.type!,
+                                          if (a.disambiguation != null)
+                                            a.disambiguation!,
+                                        ].join(' · '),
+                                        style: TypeScale.caption,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.open_in_new_rounded,
+                                  size: 16,
+                                  color: Tones.textMuted,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                         const Divider(),
                       ],

@@ -1,3 +1,5 @@
+import 'discography.dart';
+
 class ManifestTrack {
   const ManifestTrack({
     required this.sha,
@@ -153,11 +155,13 @@ class SearchResults {
     required this.tracks,
     required this.releases,
     required this.artists,
+    this.externalArtists = const [],
   });
 
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
   final List<ManifestArtist> artists;
+  final List<ExternalArtist> externalArtists;
 
   factory SearchResults.fromJson(Map<String, dynamic> json) {
     return SearchResults(
@@ -169,6 +173,9 @@ class SearchResults {
           .toList(),
       artists: (json['artists'] as List<dynamic>? ?? const [])
           .map((a) => ManifestArtist.fromJson(a as Map<String, dynamic>))
+          .toList(),
+      externalArtists: (json['externalArtists'] as List<dynamic>? ?? const [])
+          .map((a) => ExternalArtist.fromJson(a as Map<String, dynamic>))
           .toList(),
     );
   }
