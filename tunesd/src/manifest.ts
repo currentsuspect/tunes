@@ -55,6 +55,32 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+const CATEGORY_RELEASES = new Set([
+  "alt rap", "rap", "hip hop", "hip-hop", "r&b", "rnb", "drill", "afrobeats",
+  "house", "techno", "edm", "rock", "pop", "indie", "metal", "jazz", "grime",
+  "phonk", "soul", "gospel", "reggae", "dancehall", "amapiano", "trap",
+  "ambient", "lo-fi", "lofi", "classical", "drum and bass", "dnb", "garage",
+  "synthwave", "vaporwave", "punk", "country", "folk", "blues", "funk",
+  "disco", "latin", "k-pop", "j-pop", "soundtrack", "instrumental",
+  "remixes", "remix", "greatest hits", "best of", "hits", "singles",
+]);
+
+function isCategoryRelease(title: string): boolean {
+  return CATEGORY_RELEASES.has(norm(title));
+}
+
+function titleTokens(title: string): string[] {
+  return norm(title)
+    .split(/[\/\-\s]+/)
+    .filter((t) => t.length > 0);
+}
+
+function tokenSubset(small: string, big: string): boolean {
+  const s = titleTokens(small);
+  const b = new Set(titleTokens(big));
+  return s.length > 0 && s.every((t) => b.has(t));
+}
+
 function fallbackReleaseKey(track: {
   artist: string;
   album: string;
@@ -81,7 +107,12 @@ export function buildManifest(
       let title = p.tags.title?.trim() ?? "";
       if (title === "" && meta?.caption && meta.caption.trim() !== "") title = meta.caption.trim();
       if (title === "" && meta?.fileName) {
-        title = meta.fileName.replace(/\.[^.]+$/, "").trim();
+        title = meta.fileName.replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim();
+        const dash = title.indexOf(" - ");
+        const enrichArtist = enrich?.artist ?? null;
+        if (dash > 0 && enrichArtist && norm(title.slice(0, dash)) === norm(enrichArtist)) {
+          title = title.slice(dash + 3).trim();
+        }
       }
       const artist = tagged
         ? p.tags.artist?.trim() ?? "unknown artist"
@@ -90,6 +121,9 @@ export function buildManifest(
         ? p.tags.album?.trim() ?? "unknown album"
         : enrich?.album ?? "unknown album";
       const year = tagged ? p.tags.year ?? null : enrich?.year ?? null;
+      const categoryRelease =
+        enrich?.releaseId != null &&
+        isCategoryRelease(enrich?.album ?? "");
       return {
         sha: p.sha,
         size: p.size,
@@ -100,10 +134,10 @@ export function buildManifest(
         durationMs: p.durationMs,
         title: title !== "" ? title : "untitled",
         artist,
-        album,
+        album: categoryRelease ? "unknown album" : album,
         year,
         artSha: enrich?.artSha ?? null,
-        releaseId: enrich?.releaseId ?? null,
+        releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
         trackNumber: enrich?.trackNumber ?? null,
       };
     })
@@ -131,7 +165,39 @@ export function buildManifest(
     if (!release.trackShas.includes(t.sha)) release.trackShas.push(t.sha);
     if (release.artSha == null) release.artSha = t.artSha;
   }
-  const releases = [...releaseMap.values()]
+  const sourceOf = (release: ManifestRelease): string | null => {
+    const md = /^(mb|sp|discogs):/.exec(release.id);
+    return md ? md[1]! : null;
+  };
+  const merged = new Map<string, ManifestRelease>();
+  for (const r of releaseMap.values()) {
+    let target = r;
+    const mergedShas = new Set<string>(r.trackShas);
+    for (const other of releaseMap.values()) {
+      if (other === r) continue;
+      if (other.artist !== r.artist) continue;
+      if (sourceOf(other) !== sourceOf(r)) continue;
+      const rSmaller = r.trackShas.length <= other.trackShas.length;
+      const small = rSmaller ? r : other;
+      const big = rSmaller ? other : r;
+      if (small.trackShas.length === 0 || small.trackShas.length > 2) continue;
+      if (tokenSubset(small.title, big.title)) {
+        target = big;
+        for (const sha of small.trackShas) mergedShas.add(sha);
+        for (const sha of big.trackShas) mergedShas.add(sha);
+        break;
+      }
+    }
+    const existing = merged.get(target.id);
+    if (existing) {
+      for (const sha of mergedShas) {
+        if (!existing.trackShas.includes(sha)) existing.trackShas.push(sha);
+      }
+    } else {
+      merged.set(target.id, { ...target, trackShas: [...mergedShas] });
+    }
+  }
+  const releases = [...merged.values()]
     .sort((a, b) =>
       a.artist !== b.artist ? a.artist.localeCompare(b.artist) : a.title.localeCompare(b.title)
     )

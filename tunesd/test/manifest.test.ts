@@ -144,6 +144,86 @@ describe("buildManifest", () => {
     expect(m.releases.length).toBe(2);
   });
 
+  it("suppresses category/genre releases as entities", () => {
+    const enrich = new Map([
+      [
+        "a".repeat(64),
+        {
+          artist: "Don Toliver",
+          album: "Alt Rap",
+          year: "2026",
+          artSha: null,
+          releaseId: "mb:venue",
+          releaseType: null,
+          trackNumber: null,
+        },
+      ],
+    ]);
+    const m = buildManifest([probe()], new Map(), enrich);
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.title).toBe("unknown album");
+    expect(m.releases[0]?.artist).toBe("Don Toliver");
+    expect(m.tracks[0]?.album).toBe("unknown album");
+    expect(m.tracks[0]?.releaseId).toBeNull();
+  });
+
+  it("merges single/combo releases whose titles are token-subsets", () => {
+    const enrich = new Map([
+      [
+        "a".repeat(64),
+        {
+          artist: "Travis Scott",
+          album: "ESCAPE PLAN",
+          year: "2021",
+          artSha: "c".repeat(64),
+          releaseId: "mb:one",
+          releaseType: null,
+          trackNumber: 1,
+        },
+      ],
+      [
+        "b".repeat(64),
+        {
+          artist: "Travis Scott",
+          album: "ESCAPE PLAN / MAFIA",
+          year: "2021",
+          artSha: null,
+          releaseId: "mb:two",
+          releaseType: null,
+          trackNumber: 2,
+        },
+      ],
+    ]);
+    const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.title).toBe("ESCAPE PLAN / MAFIA");
+    expect(m.releases[0]?.trackShas).toEqual(["a".repeat(64), "b".repeat(64)]);
+  });
+
+  it("strips the 'Artist - ' prefix from filename titles when enriched", () => {
+    const m = buildManifest(
+      [probe()],
+      new Map([
+        ["a".repeat(64), { caption: null, fileName: "Don Toliver - Smoke (feat. HVN).flac" }],
+      ]),
+      new Map([
+        [
+          "a".repeat(64),
+          {
+            artist: "Don Toliver",
+            album: "Life of a DON",
+            year: "2021",
+            artSha: null,
+            releaseId: "mb:rel",
+            releaseType: null,
+            trackNumber: null,
+          },
+        ],
+      ])
+    );
+    expect(m.tracks[0]?.title).toBe("Smoke (feat. HVN)");
+  });
+
   it("falls back to a normalized name key without an external id", () => {
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map());
     expect(m.releases.length).toBe(2); // per-sha until named
