@@ -1,20 +1,22 @@
 package com.currentsuspect.tunes
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.app.ActivityCompat
+import android.content.pm.ActivityInfo
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    override fun provideFlutterEngine(context: Context): FlutterEngine? {
+    override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
         val engine = super.provideFlutterEngine(context) ?: FlutterEngine(context)
         FlutterEngineCache.getInstance().put("audio_service_engine", engine)
         return engine
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -24,14 +26,14 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "requestPostNotifications" -> {
                         result.success(null)
-                        if (Build.VERSION.SDK_INT >= 33) {
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
                             try {
-                                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                                    PackageManager.PERMISSION_GRANTED
+                                if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED
                                 ) {
-                                    ActivityCompat.requestPermissions(
+                                    androidx.core.app.ActivityCompat.requestPermissions(
                                         this,
-                                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                        arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
                                         4001,
                                     )
                                 }

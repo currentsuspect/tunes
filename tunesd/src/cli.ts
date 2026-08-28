@@ -210,7 +210,9 @@ async function main(): Promise<void> {
       for (const name of names) {
         if (artists.has(name)) continue;
         if (name === "unknown artist") continue;
-        const id = await spotify.searchArtistId(name);
+        const id =
+          (await spotify.searchArtistId(name)) ??
+          (await spotify.artistIdFromTrack(name));
         if (!id) continue;
         await artistImageFor(id, name);
       }

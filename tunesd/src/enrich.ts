@@ -361,6 +361,29 @@ export class SpotifyClient {
     }
   }
 
+  async artistIdFromTrack(name: string): Promise<string | null> {
+    const token = await this.tokenFor();
+    if (!token) return null;
+    try {
+      const q = `artist:${name}`;
+      const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`;
+      const res = await this.fetcher(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        tracks?: { items?: Array<{ artists?: Array<{ id?: string; name?: string }> }> };
+      };
+      const hit = body.tracks?.items?.[0]?.artists?.[0];
+      if (!hit?.id) return null;
+      if (norm(hit.name ?? "") !== norm(name)) return null;
+      return hit.id;
+    } catch {
+      return null;
+    }
+  }
+
   async search(parsed: ParsedName): Promise<SpotifyLookup | null> {
     const token = await this.tokenFor();
     if (!token) return null;
