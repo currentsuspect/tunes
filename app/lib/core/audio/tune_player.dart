@@ -28,6 +28,9 @@ class MediaKitTunePlayer extends TunePlayer {
   MediaKitTunePlayer({required this.trackUriFor});
 
   final String Function(ManifestTrack track) trackUriFor;
+  Future<void> Function()? onFirstPlay;
+
+  bool _firstPlayDone = false;
 
   Player? _player;
   List<ManifestTrack> _queue = const [];
@@ -59,6 +62,10 @@ class MediaKitTunePlayer extends TunePlayer {
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     if (tracks.isEmpty) return;
+    if (!_firstPlayDone && onFirstPlay != null) {
+      _firstPlayDone = true;
+      unawaited(onFirstPlay!());
+    }
     _queue = List.of(tracks);
     _index = startIndex.clamp(0, tracks.length - 1);
     _playing = true;

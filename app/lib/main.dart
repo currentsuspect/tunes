@@ -53,23 +53,31 @@ Future<void> main() async {
       return '$_tunesdUrl/track/${track.sha}';
     },
   );
-  DiagLog.log('init begin');
-  try {
-    await AudioService.init(
-      builder: () => TuneAudioHandler(player, artBase: _tunesdUrl),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.currentsuspect.tunes.channel.audio',
-        androidNotificationChannelName: 'Tunes playback',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
-      ),
-    );
-    AudioService.asyncError.listen((e) => DiagLog.log('async error: $e'));
-    DiagLog.log('audio_service init ok');
-  } catch (e) {
-    DiagLog.log('AudioService.init failed: $e');
-    debugPrint('AudioService.init failed (notification disabled): $e');
+  var audioServiceReady = false;
+  Future<void> ensureAudioService() async {
+    if (audioServiceReady) return;
+    audioServiceReady = true;
+    try {
+      await AudioService.init(
+        builder: () => TuneAudioHandler(player, artBase: _tunesdUrl),
+        config: const AudioServiceConfig(
+          androidNotificationChannelId:
+              'com.currentsuspect.tunes.channel.audio',
+          androidNotificationChannelName: 'Tunes playback',
+          androidNotificationOngoing: true,
+          androidStopForegroundOnPause: true,
+        ),
+      );
+      AudioService.asyncError.listen((e) => DiagLog.log('async error: $e'));
+      DiagLog.log('audio_service init ok (lazy)');
+    } catch (e) {
+      audioServiceReady = false;
+      DiagLog.log('AudioService.init failed (lazy): $e');
+    }
   }
+
+  player.onFirstPlay = ensureAudioService;
+
   DiagLog.log('runApp');
   runApp(
     TunesApp(
