@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/download_store.dart';
+import 'core/data/reachability.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/platform/notifications.dart';
@@ -37,6 +38,8 @@ Future<void> main() async {
   final store = DownloadStore(support);
   await store.load();
   final client = TunesClient(_tunesdUrl, support);
+  final reachability = Reachability();
+  Heartbeat(ping: client.ping, reachability: reachability).start();
   final player = MediaKitTunePlayer(
     trackUriFor: (track) {
       final path = store.pathFor(track.sha);
@@ -62,7 +65,14 @@ Future<void> main() async {
     debugPrint('AudioService.init failed (notification disabled): $e');
   }
   DiagLog.log('runApp');
-  runApp(TunesApp(client: client, player: player, store: store));
+  runApp(
+    TunesApp(
+      client: client,
+      player: player,
+      store: store,
+      reachability: reachability,
+    ),
+  );
 }
 
 class TunesApp extends StatelessWidget {
@@ -71,11 +81,13 @@ class TunesApp extends StatelessWidget {
     required this.client,
     required this.player,
     required this.store,
+    required this.reachability,
   });
 
   final TunesClient client;
   final TunePlayer player;
   final DownloadStore store;
+  final Reachability reachability;
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +96,12 @@ class TunesApp extends StatelessWidget {
       title: 'tunes',
       debugShowCheckedModeBanner: false,
       theme: buildTunesTheme(mq),
-      home: LibraryHome(client: client, player: player, store: store),
+      home: LibraryHome(
+        client: client,
+        player: player,
+        store: store,
+        reachability: reachability,
+      ),
     );
   }
 }
@@ -95,11 +112,13 @@ class LibraryHome extends StatefulWidget {
     required this.client,
     required this.player,
     required this.store,
+    required this.reachability,
   });
 
   final TunesClient client;
   final TunePlayer player;
   final DownloadStore store;
+  final Reachability reachability;
 
   @override
   State<LibraryHome> createState() => _LibraryHomeState();
@@ -115,11 +134,24 @@ class _LibraryHomeState extends State<LibraryHome> {
   @override
   void initState() {
     super.initState();
-    _tracks = widget.client.fetchManifest();
+    _tracks = _fetch();
+  }
+
+  Future<List<ManifestTrack>> _fetch() {
+    return widget.client.fetchManifest().then(
+      (tracks) {
+        widget.reachability.setOffline(false);
+        return tracks;
+      },
+      onError: (Object e) {
+        widget.reachability.setOffline(true);
+        throw e;
+      },
+    );
   }
 
   void _reload() {
-    final future = widget.client.fetchManifest();
+    final future = _fetch();
     future.ignore();
     setState(() {
       _tracks = future;
@@ -149,61 +181,106 @@ class _LibraryHomeState extends State<LibraryHome> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.lg,
-                Space.lg,
-                Space.lg,
-                0,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        child: ListenableBuilder(
+          listenable: widget.reachability,
+          builder: (context, _) {
+            final offline = widget.reachability.offline;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    Space.lg,
+                    Space.lg,
+                    0,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('tunes', style: TypeScale.wordmark),
+                            const SizedBox(height: Space.xs),
+                            Text(
+                              'codename — library',
+                              style: TypeScale.caption,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _reload,
+                        icon: const Icon(Icons.refresh, color: Tones.textMuted),
+                        tooltip: 'Refresh library',
+                      ),
+                    ],
+                  ),
+                ),
+                if (offline) ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(
+                      Space.lg,
+                      Space.md,
+                      Space.lg,
+                      0,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: Space.md,
+                      vertical: Space.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Tones.surfaceRaised,
+                      borderRadius: BorderRadius.circular(RadiusTokens.control),
+                    ),
+                    child: const Row(
                       children: [
-                        const Text('tunes', style: TypeScale.wordmark),
-                        const SizedBox(height: Space.xs),
-                        Text('codename — library', style: TypeScale.caption),
+                        Icon(
+                          Icons.cloud_off_rounded,
+                          size: 16,
+                          color: Tones.textMuted,
+                        ),
+                        SizedBox(width: Space.sm),
+                        Expanded(
+                          child: Text(
+                            'Offline — playing downloads only',
+                            style: TypeScale.body,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: _reload,
-                    icon: const Icon(Icons.refresh, color: Tones.textMuted),
-                    tooltip: 'Refresh library',
-                  ),
                 ],
-              ),
-            ),
-            Expanded(
-              child: _tab == 0
-                  ? _TracksView(
-                      tracks: _tracks,
-                      onRetry: _reload,
-                      player: widget.player,
-                      store: widget.store,
-                      downloading: _downloading,
-                      onDownload: _download,
-                    )
-                  : _NotYetView(label: _tabs[_tab]),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.lg,
-                0,
-                Space.lg,
-                Space.sm,
-              ),
-              child: Text(
-                '$_channel · ${_gitCommit.length > 7 ? _gitCommit.substring(0, 7) : _gitCommit} · $_buildNumber',
-                style: TypeScale.caption,
-              ),
-            ),
-          ],
+                Expanded(
+                  child: _tab == 0
+                      ? _TracksView(
+                          tracks: _tracks,
+                          onRetry: _reload,
+                          player: widget.player,
+                          store: widget.store,
+                          downloading: _downloading,
+                          onDownload: _download,
+                          offline: offline,
+                        )
+                      : _NotYetView(label: _tabs[_tab]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    0,
+                    Space.lg,
+                    Space.sm,
+                  ),
+                  child: Text(
+                    '$_channel · ${_gitCommit.length > 7 ? _gitCommit.substring(0, 7) : _gitCommit} · $_buildNumber',
+                    style: TypeScale.caption,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
       bottomNavigationBar: Column(
@@ -246,6 +323,7 @@ class _TracksView extends StatelessWidget {
     required this.store,
     required this.downloading,
     required this.onDownload,
+    required this.offline,
   });
 
   final Future<List<ManifestTrack>> tracks;
@@ -254,6 +332,7 @@ class _TracksView extends StatelessWidget {
   final DownloadStore store;
   final Set<String> downloading;
   final void Function(ManifestTrack) onDownload;
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
@@ -304,6 +383,7 @@ class _TracksView extends StatelessWidget {
               store: store,
               downloading: downloading.contains(t.sha),
               onDownload: () => onDownload(t),
+              offline: offline,
             );
           },
         );
@@ -319,6 +399,7 @@ class _TrackRow extends StatelessWidget {
     required this.store,
     required this.downloading,
     required this.onDownload,
+    required this.offline,
   });
 
   final ManifestTrack track;
@@ -326,79 +407,90 @@ class _TrackRow extends StatelessWidget {
   final DownloadStore store;
   final bool downloading;
   final VoidCallback onDownload;
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(RadiusTokens.control),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          vertical: Space.sm,
-          horizontal: Space.xs,
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    style: TypeScale.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${track.artist} — ${track.album}',
-                    style: TypeScale.body,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+    final local = store.pathFor(track.sha) != null;
+    final dimmed = offline && !local;
+    return Opacity(
+      opacity: dimmed ? 0.45 : 1,
+      child: IgnorePointer(
+        ignoring: dimmed,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(RadiusTokens.control),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: Space.sm,
+              horizontal: Space.xs,
             ),
-            const SizedBox(width: Space.md),
-            _QualityBadge(label: track.qualityLabel),
-            const SizedBox(width: Space.md),
-            Text(
-              track.durationLabel,
-              style: TypeScale.caption.copyWith(
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-            ListenableBuilder(
-              listenable: store,
-              builder: (context, _) {
-                if (downloading) {
-                  return const Padding(
-                    padding: EdgeInsets.all(Space.sm),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Tones.primary,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        track.title,
+                        style: TypeScale.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  );
-                }
-                final local = store.pathFor(track.sha) != null;
-                return IconButton(
-                  onPressed: local ? null : onDownload,
-                  icon: Icon(
-                    local ? Icons.offline_pin_rounded : Icons.download_rounded,
-                    color: local ? Tones.primary : Tones.textMuted,
-                    size: 20,
+                      const SizedBox(height: 2),
+                      Text(
+                        '${track.artist} — ${track.album}',
+                        style: TypeScale.body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  tooltip: local
-                      ? 'Downloaded — offline ready'
-                      : 'Download to device',
-                );
-              },
+                ),
+                const SizedBox(width: Space.md),
+                _QualityBadge(label: track.qualityLabel),
+                const SizedBox(width: Space.md),
+                Text(
+                  track.durationLabel,
+                  style: TypeScale.caption.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                ListenableBuilder(
+                  listenable: store,
+                  builder: (context, _) {
+                    if (downloading) {
+                      return const Padding(
+                        padding: EdgeInsets.all(Space.sm),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Tones.primary,
+                          ),
+                        ),
+                      );
+                    }
+                    final local = store.pathFor(track.sha) != null;
+                    return IconButton(
+                      onPressed: local || offline ? null : onDownload,
+                      icon: Icon(
+                        local
+                            ? Icons.offline_pin_rounded
+                            : Icons.download_rounded,
+                        color: local ? Tones.primary : Tones.textMuted,
+                        size: 20,
+                      ),
+                      tooltip: local
+                          ? 'Downloaded — offline ready'
+                          : 'Download to device',
+                    );
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

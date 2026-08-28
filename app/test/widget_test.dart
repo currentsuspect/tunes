@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/download_store.dart';
+import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/main.dart';
@@ -20,12 +21,15 @@ class _FakeClient implements TunesClient {
   Future<List<ManifestTrack>> fetchManifest() => result();
 
   @override
+  Future<bool> ping() async => true;
+
+  @override
   Future<void> downloadTrack(
     String sha,
     String path, {
     void Function(int received, int total)? onProgress,
   }) async {
-    await File(path).parent.create(recursive: true);
+    File(path).parent.createSync(recursive: true);
     File(path).writeAsBytesSync(List.filled(100, 1));
   }
 }
@@ -191,10 +195,16 @@ void main() {
   Future<void> pumpApp(
     WidgetTester tester,
     _FakeClient client,
-    FakeTunePlayer player,
-  ) async {
+    FakeTunePlayer player, {
+    Reachability? reachability,
+  }) async {
     await tester.pumpWidget(
-      TunesApp(client: client, player: player, store: store),
+      TunesApp(
+        client: client,
+        player: player,
+        store: store,
+        reachability: reachability ?? Reachability(),
+      ),
     );
     await tester.pumpAndSettle();
   }
@@ -366,7 +376,7 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.tap(find.byIcon(Icons.download_rounded).first);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pumpAndSettle();
 
@@ -381,5 +391,62 @@ void main() {
     await reloaded.load();
     expect(reloaded.contains('c' * 64), isTrue);
     expect(reloaded.pathFor('c' * 64), '${tempDir.path}/c' * 64);
+  });
+
+  test('Heartbeat flips reachability on probe results', () async {
+    var ok = false;
+    final reach = Reachability();
+    final hb = Heartbeat(ping: () async => ok, reachability: reach);
+    await hb.probe();
+    expect(reach.offline, isTrue);
+    ok = true;
+    await hb.probe();
+    expect(reach.offline, isFalse);
+  });
+
+  testWidgets('offline banner shows and non-downloaded rows are inert', (
+    tester,
+  ) async {
+    final reach = Reachability();
+    final player = FakeTunePlayer();
+    await tester.runAsync(
+      () => store.add('b' * 64, '${tempDir.path}/nightdrive'),
+    );
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      player,
+      reachability: reach,
+    );
+    reach.setOffline(true);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Offline — playing downloads only'), findsOneWidget);
+
+    await tester.tap(find.text('Bassline'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(player.playQueueCalls, 0);
+
+    await tester.tap(find.text('Nightdrive'));
+    await tester.pumpAndSettle();
+    expect(player.playQueueCalls, 1);
+    expect(player.current?.title, 'Nightdrive');
+  });
+
+  testWidgets('banner disappears when reachability recovers', (tester) async {
+    final reach = Reachability();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      FakeTunePlayer(),
+      reachability: reach,
+    );
+    reach.setOffline(true);
+    await tester.pumpAndSettle();
+    expect(find.text('Offline — playing downloads only'), findsOneWidget);
+
+    reach.setOffline(false);
+    await tester.pumpAndSettle();
+    expect(find.text('Offline — playing downloads only'), findsNothing);
   });
 }

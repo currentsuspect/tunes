@@ -80,6 +80,19 @@ class TunesClient {
     }
   }
 
+  Future<bool> ping() async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
+      final res = await req.close().timeout(const Duration(seconds: 2));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<void> _writeCache(String body) async {
     final f = _cacheFile;
     if (f == null) return;
