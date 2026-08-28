@@ -65,7 +65,7 @@ const CATEGORY_RELEASES = new Set([
   "remixes", "remix", "greatest hits", "best of", "hits", "singles",
 ]);
 
-function isCategoryRelease(title: string): boolean {
+export function isCategoryRelease(title: string): boolean {
   return CATEGORY_RELEASES.has(norm(title));
 }
 

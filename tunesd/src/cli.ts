@@ -7,7 +7,7 @@ import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
-import { buildManifest } from "./manifest.js";
+import { buildManifest, isCategoryRelease } from "./manifest.js";
 import type { TrackEnrichment } from "./manifest.js";
 import { probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
@@ -33,6 +33,13 @@ function channelsFromEnv(env: NodeJS.ProcessEnv): ChannelConfig[] {
     out.push({ id, title: eq > 0 ? item.slice(eq + 1) : String(id), enabled: true });
   }
   return out;
+}
+
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function readSession(path: string): string {
@@ -81,6 +88,43 @@ async function main(): Promise<void> {
       await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrich) }, null, 1));
       await rename(tmp, enrichFile);
     };
+    const tryReleaseMembership = async (
+      parsed: { artist: string; title: string },
+      sha: string
+    ): Promise<{ releaseId: string; album: string; type: string | null; position: number } | null> => {
+      const mbReleases = new Map<string, string[]>();
+      for (const e of enrich.values()) {
+        if (e.artist === parsed.artist && e.releaseId?.startsWith("mb:")) {
+          const list = mbReleases.get(e.releaseId) ?? [];
+          list.push(e.sha);
+          mbReleases.set(e.releaseId, list);
+        }
+      }
+      const candidates = [...mbReleases.entries()]
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 3);
+      for (const [releaseId, _shas] of candidates) {
+        const release = await mb.releaseWithRecordings(releaseId.slice(3));
+        if (!release) continue;
+        for (const t of release.tracks) {
+          if (t.position <= 0) continue;
+          const titleOk = normTitle(t.title) === normTitle(parsed.title);
+          const artistOk = t.artist == null || normName(t.artist) === normName(parsed.artist);
+          const durMs = probeCache.get(sha)?.durationMs ?? null;
+          const durOk = t.lengthMs == null || durMs == null || Math.abs(t.lengthMs - durMs) <= 4000;
+          if (titleOk && artistOk && durOk) {
+            return {
+              releaseId: releaseId.slice(3),
+              album: release.title,
+              type: release.type,
+              position: t.position,
+            };
+          }
+        }
+      }
+      return null;
+    };
+
     const mb = new MusicBrainzClient(
       "tunes/0.1 ( https://github.com/currentsuspect/tunes )",
       env.dataDir
@@ -122,7 +166,39 @@ async function main(): Promise<void> {
         const existing = enrich.get(obj.sha);
         const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
         const needsReleaseId = existing && !existing.releaseId;
-        if (existing && !stale && !needsReleaseId) continue;
+        const categoryStuck = existing && isCategoryRelease(existing.album ?? "");
+        if (existing && !stale && !needsReleaseId && !categoryStuck) continue;
+        if (categoryStuck) {
+          const stuckMeta = metaBySha.get(obj.sha);
+          const stuckSeed = stuckMeta?.fileName ?? stuckMeta?.caption ?? "";
+          const stuckParsed = parseArtistTitle(stuckSeed);
+          if (stuckParsed) {
+            const member = await tryReleaseMembership(stuckParsed, obj.sha);
+            if (member) {
+              enrich.set(obj.sha, {
+                sha: obj.sha,
+                artist: stuckParsed.artist,
+                album: member.album,
+                year: null,
+                artSha: null,
+                releaseId: `mb:${member.releaseId}`,
+                releaseType: member.type,
+                trackNumber: member.position,
+                source: "musicbrainz",
+                enrichedAt: new Date().toISOString(),
+              });
+              log.info({
+                event: "ENRICH_REPARENT",
+                sha: obj.sha.slice(0, 8),
+                title: stuckParsed.title,
+                into: member.album,
+                track: member.position,
+              });
+              await persistEnrich();
+              continue;
+            }
+          }
+        }
 
         const probe = probeCache.get(obj.sha)!;
         const tagged = Boolean(probe.tags.title) || Boolean(probe.tags.artist) || Boolean(probe.tags.album);
@@ -227,6 +303,30 @@ async function main(): Promise<void> {
             await persistEnrich();
             continue;
           }
+        }
+        const member = await tryReleaseMembership(parsed, obj.sha);
+        if (member) {
+          enrich.set(obj.sha, {
+            sha: obj.sha,
+            artist: parsed.artist,
+            album: member.album,
+            year: null,
+            artSha: null,
+            releaseId: `mb:${member.releaseId}`,
+            releaseType: member.type,
+            trackNumber: member.position,
+            source: "musicbrainz",
+            enrichedAt: new Date().toISOString(),
+          });
+          log.info({
+            event: "ENRICH_REPARENT",
+            sha: obj.sha.slice(0, 8),
+            title: parsed.title,
+            into: member.album,
+            track: member.position,
+          });
+          await persistEnrich();
+          continue;
         }
         if (discogs) {
           const dg = await discogs.search(parsed);

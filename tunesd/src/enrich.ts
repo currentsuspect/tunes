@@ -147,6 +147,43 @@ export class MusicBrainzClient {
     if (!bytes) return null;
     return storeCoverBytes(this.cacheDir, bytes);
   }
+
+  async releaseWithRecordings(
+    releaseMbid: string
+  ): Promise<{
+    title: string;
+    type: string | null;
+    tracks: Array<{ title: string; lengthMs: number | null; position: number; artist: string | null }>;
+  } | null> {
+    const url =
+      `https://musicbrainz.org/ws/2/release/${releaseMbid}?inc=recordings+release-groups&fmt=json`;
+    const body = await this.getJson<{
+      title?: string;
+      "release-group"?: { "primary-type"?: string | null };
+      media?: Array<{
+        tracks?: Array<{
+          title?: string;
+          length?: number;
+          position?: number;
+          recording?: { "artist-credit"?: Array<{ name?: string }> };
+        }>;
+      }>;
+    }>(url);
+    if (!body?.title) return null;
+    const tracks = (body.media ?? [])
+      .flatMap((m) => m.tracks ?? [])
+      .map((t) => ({
+        title: t.title ?? "",
+        lengthMs: t.length != null ? Number(t.length) : null,
+        position: t.position ?? 0,
+        artist: t.recording?.["artist-credit"]?.[0]?.name ?? null,
+      }));
+    return {
+      title: body.title,
+      type: body["release-group"]?.["primary-type"] ?? null,
+      tracks,
+    };
+  }
 }
 
 export async function storeCoverBytes(
