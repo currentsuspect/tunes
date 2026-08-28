@@ -427,6 +427,19 @@ class _TrackRow extends StatelessWidget {
             ),
             child: Row(
               children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: track.artSha != null
+                      ? Image.network(
+                          '$_tunesdUrl/art/${track.artSha}',
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const _ArtPlaceholder(),
+                        )
+                      : const _ArtPlaceholder(),
+                ),
+                const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -516,7 +529,10 @@ class _MiniPlayerBar extends StatelessWidget {
         return InkWell(
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => NowPlayingPage(player: player),
+              builder: (_) => NowPlayingPage(
+                player: player,
+                artUrlFor: (sha) => '$_tunesdUrl/art/$sha',
+              ),
             ),
           ),
           child: Container(
@@ -604,6 +620,24 @@ class _QualityBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(label, style: TypeScale.caption),
+    );
+  }
+}
+
+class _ArtPlaceholder extends StatelessWidget {
+  const _ArtPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      color: Tones.surfaceRaised,
+      child: const Icon(
+        Icons.music_note_rounded,
+        size: 18,
+        color: Tones.textMuted,
+      ),
     );
   }
 }

@@ -11,6 +11,7 @@ class ManifestTrack {
     required this.artist,
     required this.album,
     required this.year,
+    required this.artSha,
   });
 
   final String sha;
@@ -24,6 +25,7 @@ class ManifestTrack {
   final String artist;
   final String album;
   final String? year;
+  final String? artSha;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -38,6 +40,7 @@ class ManifestTrack {
       artist: (json['artist'] as String?) ?? 'unknown artist',
       album: (json['album'] as String?) ?? 'unknown album',
       year: json['year'] as String?,
+      artSha: json['artSha'] as String?,
     );
   }
 

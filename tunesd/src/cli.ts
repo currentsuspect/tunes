@@ -1,11 +1,14 @@
 import { readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
+import { MusicBrainzClient, parseArtistTitle } from "./enrich.js";
+import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest } from "./manifest.js";
+import type { TrackEnrichment } from "./manifest.js";
 import { probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -62,7 +65,30 @@ async function main(): Promise<void> {
     const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log);
 
     const probeCache = new Map<string, ProbeResult>();
+    const enrichFile = join(env.dataDir, "enrich.json");
+    const enrich = new Map<string, EnrichmentEntry>();
+    try {
+      const raw = JSON.parse(await readFile(enrichFile, "utf8")) as {
+        entries: Record<string, EnrichmentEntry>;
+      };
+      for (const [sha, e] of Object.entries(raw.entries ?? {})) enrich.set(sha, e);
+    } catch {
+      // fresh start
+    }
+    const persistEnrich = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.enrich-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrich) }, null, 1));
+      await rename(tmp, enrichFile);
+    };
+    const mb = new MusicBrainzClient(
+      "tunes/0.1 ( https://github.com/currentsuspect/tunes )",
+      env.dataDir
+    );
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
     const manifestBuilder = async () => {
+      const metaBySha = state.allSeenMeta();
       for (const obj of await store.listObjects()) {
         if (!probeCache.has(obj.sha)) {
           try {
@@ -82,8 +108,65 @@ async function main(): Promise<void> {
             });
           }
         }
+        const existing = enrich.get(obj.sha);
+        const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
+        if (existing && !stale) continue;
+
+        const probe = probeCache.get(obj.sha)!;
+        const tagged = Boolean(probe.tags.title) || Boolean(probe.tags.artist) || Boolean(probe.tags.album);
+        if (tagged) {
+          enrich.set(obj.sha, {
+            sha: obj.sha,
+            artist: null,
+            album: null,
+            year: null,
+            artSha: null,
+            enrichedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+        const meta = metaBySha.get(obj.sha);
+        const seed = meta?.fileName ?? meta?.caption ?? "";
+        const parsed = parseArtistTitle(seed);
+        if (!parsed) {
+          enrich.set(obj.sha, {
+            sha: obj.sha,
+            artist: null,
+            album: null,
+            year: null,
+            artSha: null,
+            enrichedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+        const hit = await mb.searchRecording(parsed);
+        if (!hit || !hit.album) {
+          log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
+          continue;
+        }
+        const cover = await mb.fetchCover(hit.album.releaseId);
+        if (cover) log.info({ event: "ENRICH_ART", sha: obj.sha.slice(0, 8), artSha: cover.sha.slice(0, 8) });
+        enrich.set(obj.sha, {
+          sha: obj.sha,
+          artist: hit.artist,
+          album: hit.album.title,
+          year: hit.album.year,
+          artSha: cover?.sha ?? null,
+          enrichedAt: new Date().toISOString(),
+        });
+        log.info({
+          event: "ENRICH_OK",
+          sha: obj.sha.slice(0, 8),
+          artist: hit.artist,
+          album: hit.album.title,
+        });
+        await persistEnrich();
       }
-      return buildManifest([...probeCache.values()], state.allSeenMeta());
+      const enrichForManifest = new Map<string, TrackEnrichment>();
+      for (const [sha, e] of enrich) {
+        enrichForManifest.set(sha, { artist: e.artist, album: e.album, year: e.year, artSha: e.artSha });
+      }
+      return buildManifest([...probeCache.values()], metaBySha, enrichForManifest);
     };
 
     const run = async (): Promise<void> => {
@@ -111,7 +194,13 @@ async function main(): Promise<void> {
       process.on("SIGINT", () => shutdown("SIGINT"));
       process.on("SIGTERM", () => shutdown("SIGTERM"));
       log.info({ event: "TUNESD_START", channels: channels.map((c) => c.id) });
-      const server = new ManifestServer(store, manifestBuilder, env.port, log);
+      const server = new ManifestServer(
+        store,
+        join(env.dataDir, "covers"),
+        manifestBuilder,
+        env.port,
+        log
+      );
       await server.start();
 
       if (immediate) {

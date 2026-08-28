@@ -43,6 +43,29 @@ describe("buildManifest", () => {
     );
     expect(m.tracks[0]?.artist).toBe("unknown artist");
     expect(m.tracks[0]?.album).toBe("unknown album");
+    expect(m.tracks[0]?.artSha).toBeNull();
+  });
+
+  it("enrichment fills artist/album/art only when tags are absent", () => {
+    const enrich = new Map([
+      [
+        "a".repeat(64),
+        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64) },
+      ],
+    ]);
+    const untagged = buildManifest([probe()], new Map(), enrich);
+    expect(untagged.tracks[0]?.artist).toBe("Travis Scott");
+    expect(untagged.tracks[0]?.album).toBe("ESCAPE PLAN");
+    expect(untagged.tracks[0]?.year).toBe("2021");
+    expect(untagged.tracks[0]?.artSha).toBe("c".repeat(64));
+
+    const tagged = buildManifest(
+      [probe({ tags: { title: "T", artist: "Real Tag Artist", album: "Real Album" } })],
+      new Map(),
+      enrich
+    );
+    expect(tagged.tracks[0]?.artist).toBe("Real Tag Artist");
+    expect(tagged.tracks[0]?.album).toBe("Real Album");
   });
 
   it("is deterministic: same input, same integrity", () => {

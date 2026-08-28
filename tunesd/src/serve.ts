@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV1 } from "./manifest.js";
@@ -14,6 +14,9 @@ const MIME: Record<string, string> = {
   ".m4a": "audio/mp4",
   ".wav": "audio/wav",
   ".aac": "audio/aac",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
 };
 
 export class ManifestServer {
@@ -22,6 +25,7 @@ export class ManifestServer {
 
   constructor(
     private readonly store: ObjectStore,
+    private readonly artDir: string,
     private readonly buildManifest: () => Promise<ManifestV1>,
     private readonly port: number,
     private readonly log: Log
@@ -52,58 +56,77 @@ export class ManifestServer {
         const trackMatch = /^\/track\/([0-9a-f]{64})$/.exec(url.pathname);
         if (trackMatch) {
           const sha = trackMatch[1] ?? "";
-          const path = this.store.pathOf(sha);
-          try {
-            const info = await stat(path);
-            if (!info.isFile()) throw new Error("not a file");
-            const range = req.headers.range;
-            const mime = MIME[extname(path)] ?? "application/octet-stream";
-            if (range) {
-              const m = /^bytes=(\d*)-(\d*)$/.exec(range);
-              if (m) {
-                const start = m[1] === "" ? 0 : Number(m[1] ?? 0);
-                const requestedEnd = m[2] === "" ? info.size - 1 : Number(m[2] ?? info.size - 1);
-                const end = Math.min(requestedEnd, info.size - 1);
-                if (start <= end && start < info.size) {
-                  res.writeHead(206, {
-                    "content-type": mime,
-                    "accept-ranges": "bytes",
-                    "content-range": `bytes ${start}-${end}/${info.size}`,
-                    "content-length": String(end - start + 1),
-                  });
-                  createReadStream(path, { start, end }).pipe(res);
-                  return;
-                }
-              }
-              res.writeHead(416, { "content-range": `bytes */${info.size}` });
-              res.end();
-              return;
-            }
-            res.writeHead(200, {
-              "content-type": mime,
-              "accept-ranges": "bytes",
-              "content-length": String(info.size),
-            });
-            createReadStream(path).pipe(res);
-            return;
-          } catch {
-            res.writeHead(404, { "content-type": "text/plain" });
-            res.end("object not found");
-            return;
-          }
+          await this.serveRange(res, req, this.store.pathOf(sha), null);
+          return;
+        }
+
+        const artMatch = /^\/art\/([0-9a-f]{64})$/.exec(url.pathname);
+        if (artMatch) {
+          const sha = artMatch[1] ?? "";
+          await this.serveRange(res, req, join(this.artDir, sha.slice(0, 2), sha), "sha");
+          return;
         }
 
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("not found");
       } catch (e) {
         this.log.error({ event: "HTTP_ERROR", err: String(e) });
-        res.writeHead(500, { "content-type": "text/plain" });
-        res.end("internal error");
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "text/plain" });
+          res.end("internal error");
+        }
       }
     });
 
     server.listen(this.port, "0.0.0.0", () => {
       this.log.info({ event: "HTTP_LISTEN", port: this.port });
     });
+  }
+
+  private async serveRange(
+    res: import("node:http").ServerResponse,
+    req: import("node:http").IncomingMessage,
+    path: string,
+    _art: string | null
+  ): Promise<void> {
+    let info;
+    try {
+      info = await stat(path);
+      if (!info.isFile()) throw new Error("not a file");
+    } catch {
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("not found");
+      return;
+    }
+    const range = req.headers.range;
+    const mime = MIME[extname(path)] ?? "application/octet-stream";
+    if (range) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (m) {
+        const start = m[1] === "" ? 0 : Number(m[1] ?? 0);
+        const requestedEnd = m[2] === "" ? info.size - 1 : Number(m[2] ?? info.size - 1);
+        const end = Math.min(requestedEnd, info.size - 1);
+        if (start <= end && start < info.size) {
+          res.writeHead(206, {
+            "content-type": mime,
+            "accept-ranges": "bytes",
+            "content-range": `bytes ${start}-${end}/${info.size}`,
+            "content-length": String(end - start + 1),
+          });
+          createReadStream(path, { start, end }).pipe(res);
+          return;
+        }
+      }
+      res.writeHead(416, { "content-range": `bytes */${info.size}` });
+      res.end();
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": mime,
+      "accept-ranges": "bytes",
+      "content-length": String(info.size),
+    });
+    createReadStream(path).pipe(res);
+    return;
   }
 }

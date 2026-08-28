@@ -169,6 +169,7 @@ ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
   artist: 'Artist',
   album: 'Album',
   year: null,
+  artSha: null,
 );
 
 List<ManifestTrack> _library() => [

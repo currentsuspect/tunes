@@ -7,9 +7,14 @@ import '../../core/platform/notifications.dart';
 import '../../core/theme/tokens.dart';
 
 class NowPlayingPage extends StatelessWidget {
-  const NowPlayingPage({super.key, required this.player});
+  const NowPlayingPage({
+    super.key,
+    required this.player,
+    required this.artUrlFor,
+  });
 
   final TunePlayer player;
+  final String Function(String sha) artUrlFor;
 
   String _label(Duration d) {
     final s = d.inSeconds;
@@ -83,11 +88,28 @@ class NowPlayingPage extends StatelessWidget {
                                   RadiusTokens.card,
                                 ),
                               ),
-                              child: const Icon(
-                                Icons.music_note_rounded,
-                                size: 72,
-                                color: Tones.textMuted,
-                              ),
+                              child: current.artSha != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(
+                                        RadiusTokens.card,
+                                      ),
+                                      child: Image.network(
+                                        artUrlFor(current.artSha!),
+                                        width: 220,
+                                        height: 220,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => const Icon(
+                                          Icons.music_note_rounded,
+                                          size: 72,
+                                          color: Tones.textMuted,
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.music_note_rounded,
+                                      size: 72,
+                                      color: Tones.textMuted,
+                                    ),
                             ),
                             const SizedBox(height: Space.md),
                             Text(

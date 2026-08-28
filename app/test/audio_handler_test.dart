@@ -80,6 +80,7 @@ ManifestTrack _track(String title) => ManifestTrack(
   artist: 'Artist',
   album: 'Album',
   year: null,
+  artSha: null,
 );
 
 void main() {
