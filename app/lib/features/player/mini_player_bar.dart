@@ -53,6 +53,7 @@ class MiniPlayerBar extends StatelessWidget {
                 const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(

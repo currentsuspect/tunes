@@ -8,6 +8,7 @@ import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/features/album/album_page.dart';
+import 'package:tunes/features/player/mini_player_bar.dart';
 import 'package:tunes/main.dart';
 
 class _FakeClient implements TunesClient {
@@ -734,6 +735,32 @@ void main() {
       find.textContaining('FLAC'),
       findsNothing,
     ); // no quality pill in album rows
+  });
+
+  testWidgets('mini bar docks on the album page (height bounded)', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bassline').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Go to album'));
+    await tester.pumpAndSettle();
+
+    final bar = find.byType(MiniPlayerBar);
+    expect(bar, findsWidgets);
+    final size = tester.getSize(bar.first);
+    debugPrint('mini bar size: ${size.width}x${size.height}');
+    expect(size.height, lessThan(200));
   });
 
   testWidgets('download icon downloads and marks the track offline-ready', (
