@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
+import 'core/data/download_store.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/platform/notifications.dart';
@@ -30,9 +33,16 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   await DiagLog.init();
   DiagLog.log('main start');
-  final client = TunesClient(_tunesdUrl);
+  final support = await getApplicationSupportDirectory();
+  final store = DownloadStore(support);
+  await store.load();
+  final client = TunesClient(_tunesdUrl, support);
   final player = MediaKitTunePlayer(
-    trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
+    trackUriFor: (track) {
+      final path = store.pathFor(track.sha);
+      if (path != null && File(path).existsSync()) return path;
+      return '$_tunesdUrl/track/${track.sha}';
+    },
   );
   DiagLog.log('init begin');
   try {
@@ -52,14 +62,20 @@ Future<void> main() async {
     debugPrint('AudioService.init failed (notification disabled): $e');
   }
   DiagLog.log('runApp');
-  runApp(TunesApp(client: client, player: player));
+  runApp(TunesApp(client: client, player: player, store: store));
 }
 
 class TunesApp extends StatelessWidget {
-  const TunesApp({super.key, required this.client, required this.player});
+  const TunesApp({
+    super.key,
+    required this.client,
+    required this.player,
+    required this.store,
+  });
 
   final TunesClient client;
   final TunePlayer player;
+  final DownloadStore store;
 
   @override
   Widget build(BuildContext context) {
@@ -68,16 +84,22 @@ class TunesApp extends StatelessWidget {
       title: 'tunes',
       debugShowCheckedModeBanner: false,
       theme: buildTunesTheme(mq),
-      home: LibraryHome(client: client, player: player),
+      home: LibraryHome(client: client, player: player, store: store),
     );
   }
 }
 
 class LibraryHome extends StatefulWidget {
-  const LibraryHome({super.key, required this.client, required this.player});
+  const LibraryHome({
+    super.key,
+    required this.client,
+    required this.player,
+    required this.store,
+  });
 
   final TunesClient client;
   final TunePlayer player;
+  final DownloadStore store;
 
   @override
   State<LibraryHome> createState() => _LibraryHomeState();
@@ -86,6 +108,7 @@ class LibraryHome extends StatefulWidget {
 class _LibraryHomeState extends State<LibraryHome> {
   int _tab = 0;
   late Future<List<ManifestTrack>> _tracks;
+  final Set<String> _downloading = {};
 
   static const _tabs = ['Tracks', 'Albums', 'Artists', 'Channels'];
 
@@ -101,6 +124,25 @@ class _LibraryHomeState extends State<LibraryHome> {
     setState(() {
       _tracks = future;
     });
+  }
+
+  Future<void> _download(ManifestTrack track) async {
+    if (_downloading.contains(track.sha)) return;
+    setState(() => _downloading.add(track.sha));
+    try {
+      await widget.client.downloadTrack(
+        track.sha,
+        widget.store.newPathFor(track.sha),
+      );
+      await widget.store.add(track.sha, widget.store.newPathFor(track.sha));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('download failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _downloading.remove(track.sha));
+    }
   }
 
   @override
@@ -143,6 +185,9 @@ class _LibraryHomeState extends State<LibraryHome> {
                       tracks: _tracks,
                       onRetry: _reload,
                       player: widget.player,
+                      store: widget.store,
+                      downloading: _downloading,
+                      onDownload: _download,
                     )
                   : _NotYetView(label: _tabs[_tab]),
             ),
@@ -198,11 +243,17 @@ class _TracksView extends StatelessWidget {
     required this.tracks,
     required this.onRetry,
     required this.player,
+    required this.store,
+    required this.downloading,
+    required this.onDownload,
   });
 
   final Future<List<ManifestTrack>> tracks;
   final VoidCallback onRetry;
   final TunePlayer player;
+  final DownloadStore store;
+  final Set<String> downloading;
+  final void Function(ManifestTrack) onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +301,9 @@ class _TracksView extends StatelessWidget {
                 unawaited(requestNotificationPermissionIfNeeded());
                 player.playQueue(tracks, i);
               },
+              store: store,
+              downloading: downloading.contains(t.sha),
+              onDownload: () => onDownload(t),
             );
           },
         );
@@ -259,10 +313,19 @@ class _TracksView extends StatelessWidget {
 }
 
 class _TrackRow extends StatelessWidget {
-  const _TrackRow({required this.track, required this.onTap});
+  const _TrackRow({
+    required this.track,
+    required this.onTap,
+    required this.store,
+    required this.downloading,
+    required this.onDownload,
+  });
 
   final ManifestTrack track;
   final VoidCallback onTap;
+  final DownloadStore store;
+  final bool downloading;
+  final VoidCallback onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -304,6 +367,36 @@ class _TrackRow extends StatelessWidget {
               style: TypeScale.caption.copyWith(
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
+            ),
+            ListenableBuilder(
+              listenable: store,
+              builder: (context, _) {
+                if (downloading) {
+                  return const Padding(
+                    padding: EdgeInsets.all(Space.sm),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Tones.primary,
+                      ),
+                    ),
+                  );
+                }
+                final local = store.pathFor(track.sha) != null;
+                return IconButton(
+                  onPressed: local ? null : onDownload,
+                  icon: Icon(
+                    local ? Icons.offline_pin_rounded : Icons.download_rounded,
+                    color: local ? Tones.primary : Tones.textMuted,
+                    size: 20,
+                  ),
+                  tooltip: local
+                      ? 'Downloaded — offline ready'
+                      : 'Download to device',
+                );
+              },
             ),
           ],
         ),

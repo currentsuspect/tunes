@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
+import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/main.dart';
@@ -15,6 +18,16 @@ class _FakeClient implements TunesClient {
 
   @override
   Future<List<ManifestTrack>> fetchManifest() => result();
+
+  @override
+  Future<void> downloadTrack(
+    String sha,
+    String path, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    await File(path).parent.create(recursive: true);
+    File(path).writeAsBytesSync(List.filled(100, 1));
+  }
 }
 
 class FakeTunePlayer extends TunePlayer {
@@ -23,10 +36,6 @@ class FakeTunePlayer extends TunePlayer {
   bool _playing = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-
-  int playQueueCalls = 0;
-  int toggleCalls = 0;
-  int seekCalls = 0;
 
   @override
   List<ManifestTrack> get queue => _queue;
@@ -47,11 +56,31 @@ class FakeTunePlayer extends TunePlayer {
   ManifestTrack? get current =>
       (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
 
+  int playQueueCalls = 0;
+  int toggleCalls = 0;
+  int seekCalls = 0;
   int nextCalls = 0;
   int previousCalls = 0;
   int playAtCalls = 0;
   int playCalls = 0;
   int pauseCalls = 0;
+
+  @override
+  void toggle() {
+    toggleCalls += 1;
+    _playing = !_playing;
+    notifyListeners();
+  }
+
+  void setPlaying(bool value) {
+    _playing = value;
+    notifyListeners();
+  }
+
+  void setPosition(Duration value) {
+    _position = value;
+    notifyListeners();
+  }
 
   @override
   void play() {
@@ -102,14 +131,6 @@ class FakeTunePlayer extends TunePlayer {
     _position = Duration.zero;
     final ms = tracks[startIndex].durationMs;
     _duration = ms != null ? Duration(milliseconds: ms) : Duration.zero;
-    _position = Duration.zero;
-    notifyListeners();
-  }
-
-  @override
-  void toggle() {
-    toggleCalls += 1;
-    _playing = !_playing;
     notifyListeners();
   }
 
@@ -133,7 +154,7 @@ class FakeTunePlayer extends TunePlayer {
 }
 
 ManifestTrack _track(String title, String codec, int bitrate) => ManifestTrack(
-  sha: 'a' * 64,
+  sha: title == 'Bassline' ? 'a' * 64 : 'b' * 64,
   size: 1000,
   codec: codec,
   sampleRate: 44100,
@@ -152,10 +173,38 @@ List<ManifestTrack> _library() => [
 ];
 
 void main() {
-  testWidgets('renders tracks from the manifest', (tester) async {
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
+  late Directory tempDir;
+  late DownloadStore store;
+
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('tunes-test-');
+    store = DownloadStore(tempDir);
+    await store.load();
+  });
+
+  tearDown(() async {
+    try {
+      await tempDir.delete(recursive: true);
+    } catch (_) {}
+  });
+
+  Future<void> pumpApp(
+    WidgetTester tester,
+    _FakeClient client,
+    FakeTunePlayer player,
+  ) async {
+    await tester.pumpWidget(
+      TunesApp(client: client, player: player, store: store),
+    );
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('renders tracks from the manifest', (tester) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      FakeTunePlayer(),
+    );
 
     expect(find.text('Bassline'), findsOneWidget);
     expect(find.text('FLAC 950k'), findsOneWidget);
@@ -168,25 +217,20 @@ void main() {
     final client = _FakeClient(
       () async => throw TunesFetchException('unreachable'),
     );
-    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, client, FakeTunePlayer());
 
     expect(find.text('No library yet'), findsOneWidget);
     expect(find.textContaining('tunesd is not answering'), findsOneWidget);
   });
 
   testWidgets('empty manifest shows the no-tracks state', (tester) async {
-    final client = _FakeClient(() async => []);
-    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => []), FakeTunePlayer());
 
     expect(find.text('No Tracks yet'), findsOneWidget);
   });
 
   testWidgets('tab switch swaps the not-yet label', (tester) async {
-    final client = _FakeClient(() async => []);
-    await tester.pumpWidget(TunesApp(client: client, player: FakeTunePlayer()));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => []), FakeTunePlayer());
 
     await tester.tap(find.text('Albums'));
     await tester.pumpAndSettle();
@@ -196,9 +240,7 @@ void main() {
 
   testWidgets('tapping a row starts playback on that track', (tester) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Nightdrive'));
     await tester.pumpAndSettle();
@@ -211,9 +253,7 @@ void main() {
 
   testWidgets('mini bar toggle and seek reach the player', (tester) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -229,9 +269,7 @@ void main() {
     tester,
   ) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -254,9 +292,7 @@ void main() {
 
   testWidgets('stop clears the mini bar', (tester) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -274,9 +310,7 @@ void main() {
     tester,
   ) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -291,9 +325,7 @@ void main() {
 
   testWidgets('full page controls reach the player', (tester) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -309,9 +341,7 @@ void main() {
 
   testWidgets('queue list jumps to a tapped track', (tester) async {
     final player = FakeTunePlayer();
-    final client = _FakeClient(() async => _library());
-    await tester.pumpWidget(TunesApp(client: client, player: player));
-    await tester.pumpAndSettle();
+    await pumpApp(tester, _FakeClient(() async => _library()), player);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -321,5 +351,35 @@ void main() {
     await tester.tap(find.text('Nightdrive').last);
     expect(player.playAtCalls, 1);
     expect(player.index, 1);
+  });
+
+  testWidgets('download icon downloads and marks the track offline-ready', (
+    tester,
+  ) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _library()),
+      FakeTunePlayer(),
+    );
+
+    expect(find.byIcon(Icons.download_rounded), findsNWidgets(2));
+
+    await tester.runAsync(() async {
+      await tester.tap(find.byIcon(Icons.download_rounded).first);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.offline_pin_rounded), findsOneWidget);
+    expect(store.contains('a' * 64), isTrue);
+    expect(File(store.pathFor('a' * 64)!).existsSync(), isTrue);
+  });
+
+  test('DownloadStore persists across instances', () async {
+    await store.add('c' * 64, '${tempDir.path}/c' * 64);
+    final reloaded = DownloadStore(tempDir);
+    await reloaded.load();
+    expect(reloaded.contains('c' * 64), isTrue);
+    expect(reloaded.pathFor('c' * 64), '${tempDir.path}/c' * 64);
   });
 }

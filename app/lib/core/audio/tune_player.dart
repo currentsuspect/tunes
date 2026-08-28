@@ -25,9 +25,9 @@ abstract class TunePlayer extends ChangeNotifier {
 }
 
 class MediaKitTunePlayer extends TunePlayer {
-  MediaKitTunePlayer({required this.trackUrlFor});
+  MediaKitTunePlayer({required this.trackUriFor});
 
-  final String Function(String sha) trackUrlFor;
+  final String Function(ManifestTrack track) trackUriFor;
 
   Player? _player;
   List<ManifestTrack> _queue = const [];
@@ -71,7 +71,7 @@ class MediaKitTunePlayer extends TunePlayer {
     unawaited(
       player.open(
         Playlist(
-          tracks.map((t) => Media(trackUrlFor(t.sha))).toList(),
+          tracks.map((t) => Media(trackUriFor(t))).toList(),
           index: _index,
         ),
         play: true,
