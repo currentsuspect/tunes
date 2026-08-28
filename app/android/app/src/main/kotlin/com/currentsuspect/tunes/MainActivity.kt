@@ -17,6 +17,23 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val probe = object : Runnable {
+            var n = 0
+            val delays = longArrayOf(1000, 3000, 6000, 10000, 20000, 30000)
+            override fun run() {
+                val v = android.provider.Settings.System.getInt(
+                    contentResolver,
+                    android.provider.Settings.System.ACCELEROMETER_ROTATION,
+                    -1
+                )
+                android.util.Log.i("tunes-orient", "t=${delays.getOrElse(n.coerceAtMost(delays.size - 1)) { 0 }}ms rot=$v")
+                n += 1
+                if (n < delays.size) {
+                    window.decorView.postDelayed(this, delays[n] - delays[n - 1])
+                }
+            }
+        }
+        window.decorView.postDelayed(probe, 1000)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
