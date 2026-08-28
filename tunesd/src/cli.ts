@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
-import { MusicBrainzClient, parseArtistTitle } from "./enrich.js";
+import { MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
@@ -85,6 +85,12 @@ async function main(): Promise<void> {
       "tunes/0.1 ( https://github.com/currentsuspect/tunes )",
       env.dataDir
     );
+    const spotifyId = process.env["TUNESD_SPOTIFY_ID"];
+    const spotifySecret = process.env["TUNESD_SPOTIFY_SECRET"];
+    const spotify = spotifyId && spotifySecret
+      ? new SpotifyClient(spotifyId, spotifySecret)
+      : null;
+    if (!spotify) log.warn({ event: "ENRICH_SPOTIFY_DISABLED" });
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
     const manifestBuilder = async () => {
@@ -121,6 +127,7 @@ async function main(): Promise<void> {
             album: null,
             year: null,
             artSha: null,
+            source: null,
             enrichedAt: new Date().toISOString(),
           });
           continue;
@@ -135,32 +142,75 @@ async function main(): Promise<void> {
             album: null,
             year: null,
             artSha: null,
+            source: null,
             enrichedAt: new Date().toISOString(),
           });
           continue;
         }
         const hit = await mb.searchRecording(parsed);
-        if (!hit || !hit.album) {
-          log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
+        if (hit && hit.album) {
+          const cover = await mb.fetchCover(hit.album.releaseId);
+          if (cover)
+            log.info({ event: "ENRICH_ART", sha: obj.sha.slice(0, 8), artSha: cover.sha.slice(0, 8) });
+          enrich.set(obj.sha, {
+            sha: obj.sha,
+            artist: hit.artist,
+            album: hit.album.title,
+            year: hit.album.year,
+            artSha: cover?.sha ?? null,
+            source: "musicbrainz",
+            enrichedAt: new Date().toISOString(),
+          });
+          log.info({
+            event: "ENRICH_OK",
+            source: "musicbrainz",
+            sha: obj.sha.slice(0, 8),
+            artist: hit.artist,
+            album: hit.album.title,
+          });
+          await persistEnrich();
           continue;
         }
-        const cover = await mb.fetchCover(hit.album.releaseId);
-        if (cover) log.info({ event: "ENRICH_ART", sha: obj.sha.slice(0, 8), artSha: cover.sha.slice(0, 8) });
-        enrich.set(obj.sha, {
-          sha: obj.sha,
-          artist: hit.artist,
-          album: hit.album.title,
-          year: hit.album.year,
-          artSha: cover?.sha ?? null,
-          enrichedAt: new Date().toISOString(),
-        });
-        log.info({
-          event: "ENRICH_OK",
-          sha: obj.sha.slice(0, 8),
-          artist: hit.artist,
-          album: hit.album.title,
-        });
-        await persistEnrich();
+        if (spotify) {
+          const sp = await spotify.search(parsed);
+          if (sp) {
+            let artSha: string | null = null;
+            if (sp.artUrl) {
+              try {
+                const res = await fetch(sp.artUrl);
+                if (res.ok) {
+                  const bytes = new Uint8Array(await res.arrayBuffer());
+                  if (bytes.length > 1000) {
+                    artSha = (await storeCoverBytes(env.dataDir, bytes)).sha;
+                  }
+                }
+              } catch {
+                artSha = null;
+              }
+            }
+            enrich.set(obj.sha, {
+              sha: obj.sha,
+              artist: sp.artist,
+              album: sp.album,
+              year: sp.year,
+              artSha,
+              source: "spotify",
+              enrichedAt: new Date().toISOString(),
+            });
+            log.info({
+              event: "ENRICH_OK",
+              source: "spotify",
+              sha: obj.sha.slice(0, 8),
+              artist: sp.artist,
+              album: sp.album,
+              year: sp.year,
+              artSha: artSha?.slice(0, 8) ?? null,
+            });
+            await persistEnrich();
+            continue;
+          }
+        }
+        log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
       }
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {

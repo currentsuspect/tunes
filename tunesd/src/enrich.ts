@@ -4,6 +4,7 @@ export interface EnrichmentEntry {
   album: string | null;
   year: string | null;
   artSha: string | null;
+  source: "musicbrainz" | "spotify" | null;
   enrichedAt: string;
 }
 
@@ -141,12 +142,102 @@ export class MusicBrainzClient {
       `https://coverartarchive.org/release/${releaseId}/front-500`
     );
     if (!bytes) return null;
-    const { createHash } = await import("node:crypto");
-    const sha = createHash("sha256").update(bytes).digest("hex");
-    const { mkdir, writeFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    await mkdir(join(this.cacheDir, "covers", sha.slice(0, 2)), { recursive: true });
-    await writeFile(join(this.cacheDir, "covers", sha.slice(0, 2), sha), bytes);
-    return { sha, bytes };
+    return storeCoverBytes(this.cacheDir, bytes);
+  }
+}
+
+export async function storeCoverBytes(
+  cacheDir: string,
+  bytes: Uint8Array
+): Promise<{ sha: string; bytes: Uint8Array }> {
+  const { createHash } = await import("node:crypto");
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  await mkdir(join(cacheDir, "covers", sha.slice(0, 2)), { recursive: true });
+  await writeFile(join(cacheDir, "covers", sha.slice(0, 2), sha), bytes);
+  return { sha, bytes };
+}
+
+export interface SpotifyLookup {
+  artist: string;
+  album: string | null;
+  year: string | null;
+  artUrl: string | null;
+}
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export class SpotifyClient {
+  private token: string | null = null;
+  private tokenExpiresAt = 0;
+
+  constructor(
+    private readonly clientId: string,
+    private readonly clientSecret: string,
+    private readonly fetcher: typeof fetch = fetch
+  ) {}
+
+  private async tokenFor(): Promise<string | null> {
+    if (this.token && Date.now() < this.tokenExpiresAt) return this.token;
+    try {
+      const res = await this.fetcher("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64")}`,
+        },
+        body: "grant_type=client_credentials",
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { access_token?: string; expires_in?: number };
+      if (!body.access_token) return null;
+      this.token = body.access_token;
+      this.tokenExpiresAt = Date.now() + (body.expires_in ?? 3600) * 1000 - 60_000;
+      return this.token;
+    } catch {
+      return null;
+    }
+  }
+
+  async search(parsed: ParsedName): Promise<SpotifyLookup | null> {
+    const token = await this.tokenFor();
+    if (!token) return null;
+    const q = `artist:${parsed.artist} track:${parsed.title}`;
+    const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=10`;
+    try {
+      const res = await this.fetcher(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        tracks?: {
+          items?: Array<{
+            name?: string;
+            artists?: Array<{ name?: string }>;
+            album?: { name?: string; release_date?: string; images?: Array<{ url?: string }> };
+          }>;
+        };
+      };
+      const items = body.tracks?.items ?? [];
+      const wantArtist = norm(parsed.artist);
+      const wantTitle = norm(parsed.title);
+      for (const item of items) {
+        const artist = item.artists?.[0]?.name ?? "";
+        const title = item.name ?? "";
+        if (norm(artist) === wantArtist && norm(title) === wantTitle) {
+          const art = item.album?.images?.find((i) => i.url)?.url ?? null;
+          return {
+            artist,
+            album: item.album?.name ?? null,
+            year: item.album?.release_date ? item.album.release_date.slice(0, 4) : null,
+            artUrl: art,
+          };
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 }
