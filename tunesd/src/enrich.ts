@@ -215,6 +215,7 @@ export async function storeCoverBytes(
 
 export interface SpotifyLookup {
   artist: string;
+  artistId: string | null;
   album: string | null;
   albumId: string | null;
   albumType: string | null;
@@ -321,6 +322,45 @@ export class SpotifyClient {
     }
   }
 
+  async artistImage(artistId: string): Promise<string | null> {
+    const token = await this.tokenFor();
+    if (!token) return null;
+    try {
+      const res = await this.fetcher(
+        `https://api.spotify.com/v1/artists/${artistId}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) }
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as { images?: Array<{ url?: string }> };
+      return body.images?.find((i) => i.url)?.url ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async searchArtistId(name: string): Promise<string | null> {
+    const token = await this.tokenFor();
+    if (!token) return null;
+    try {
+      const q = `artist:${name}`;
+      const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=artist&limit=1`;
+      const res = await this.fetcher(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        artists?: { items?: Array<{ id?: string; name?: string }> };
+      };
+      const hit = body.artists?.items?.[0];
+      if (!hit?.id) return null;
+      if (norm(hit.name ?? "") !== norm(name)) return null;
+      return hit.id;
+    } catch {
+      return null;
+    }
+  }
+
   async search(parsed: ParsedName): Promise<SpotifyLookup | null> {
     const token = await this.tokenFor();
     if (!token) return null;
@@ -335,7 +375,7 @@ export class SpotifyClient {
             id?: string;
             name?: string;
             track_number?: number;
-            artists?: Array<{ name?: string }>;
+            artists?: Array<{ id?: string; name?: string }>;
             album?: {
               id?: string;
               album_type?: string;
@@ -356,6 +396,7 @@ export class SpotifyClient {
           const art = item.album?.images?.find((i) => i.url)?.url ?? null;
           return {
             artist,
+            artistId: item.artists?.[0]?.id ?? null,
             album: item.album?.name ?? null,
             albumId: item.album?.id ?? null,
             albumType: item.album?.album_type ?? null,

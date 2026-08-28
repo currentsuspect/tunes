@@ -73,7 +73,26 @@ class ArtistPage extends StatelessWidget {
                   Space.lg,
                 ),
                 children: [
-                  Center(child: InitialsAvatar(name: artist, size: 140)),
+                  Center(
+                    child: () {
+                      final photo = manifest.artistArt(artist);
+                      if (photo == null) {
+                        return InitialsAvatar(name: artist, size: 140);
+                      }
+                      return ClipOval(
+                        child: SizedBox(
+                          width: 140,
+                          height: 140,
+                          child: Image.network(
+                            artUrlFor(photo),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                InitialsAvatar(name: artist, size: 140),
+                          ),
+                        ),
+                      );
+                    }(),
+                  ),
                   const SizedBox(height: Space.lg),
                   Text(
                     artist,

@@ -165,6 +165,56 @@ async function main(): Promise<void> {
     if (!spotify) log.warn({ event: "ENRICH_SPOTIFY_DISABLED" });
     if (!discogs) log.warn({ event: "ENRICH_DISCOGS_DISABLED" });
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const artistsFile = join(env.dataDir, "artists.json");
+    const artists = new Map<string, string>();
+    try {
+      const raw = JSON.parse(await readFile(artistsFile, "utf8")) as {
+        artists: Record<string, string>;
+      };
+      for (const [name, sha] of Object.entries(raw.artists ?? {})) artists.set(name, sha);
+    } catch {
+      // fresh start
+    }
+    const persistArtists = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.artists-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ artists: Object.fromEntries(artists) }, null, 1));
+      await rename(tmp, artistsFile);
+    };
+    const artistImageFor = async (artistId: string, artistName: string) => {
+      if (artists.has(artistName)) return;
+      const url = await spotify?.artistImage(artistId);
+      if (!url) return;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) return;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.length < 1000) return;
+        const { sha } = await storeCoverBytes(env.dataDir, bytes);
+        artists.set(artistName, sha);
+        log.info({ event: "ARTIST_IMAGE", artist: artistName, sha: sha.slice(0, 8) });
+        await persistArtists();
+      } catch {
+        // never fail enrichment over an artist image
+      }
+    };
+    const backfillArtistPhotos = async () => {
+      if (!spotify) return;
+      const names = new Set<string>();
+      for (const t of probeCache.values()) {
+        if (t.tags.artist) names.add(t.tags.artist);
+      }
+      for (const e of enrich.values()) {
+        if (e.artist) names.add(e.artist);
+      }
+      for (const name of names) {
+        if (artists.has(name)) continue;
+        if (name === "unknown artist") continue;
+        const id = await spotify.searchArtistId(name);
+        if (!id) continue;
+        await artistImageFor(id, name);
+      }
+    };
 
     let enrichPassRunning = false;
     const runEnrichPass = async () => {
@@ -335,6 +385,7 @@ async function main(): Promise<void> {
               year: sp.year,
               artSha: artSha?.slice(0, 8) ?? null,
             });
+            if (sp.artistId) await artistImageFor(sp.artistId, sp.artist);
             await persistEnrich();
             continue;
           }
@@ -483,6 +534,8 @@ async function main(): Promise<void> {
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
+      await backfillArtistPhotos();
+      const artistList = [...artists.entries()].map(([name, artSha]) => ({ name, artSha }));
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
         enrichForManifest.set(sha, {
@@ -496,7 +549,13 @@ async function main(): Promise<void> {
           discNumber: e.discNumber,
         });
       }
-      return buildManifest([...probeCache.values()], metaBySha, enrichForManifest, objects);
+      return buildManifest(
+        [...probeCache.values()],
+        metaBySha,
+        enrichForManifest,
+        objects,
+        artistList
+      );
     };
 
     const run = async (): Promise<void> => {

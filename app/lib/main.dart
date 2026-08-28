@@ -475,6 +475,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           2 => LibraryView(
             tracks: tracks,
             releases: manifest.releases,
+            artists: manifest.artists,
             filter: _libraryFilter,
             player: widget.player,
             store: widget.store,

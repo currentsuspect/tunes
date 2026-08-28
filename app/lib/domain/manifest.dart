@@ -115,11 +115,37 @@ class ManifestRelease {
   }
 }
 
+class ManifestArtist {
+  const ManifestArtist({required this.name, required this.artSha});
+
+  final String name;
+  final String? artSha;
+
+  factory ManifestArtist.fromJson(Map<String, dynamic> json) {
+    return ManifestArtist(
+      name: (json['name'] as String?) ?? '',
+      artSha: json['artSha'] as String?,
+    );
+  }
+}
+
 class TunesManifest {
-  const TunesManifest({required this.tracks, required this.releases});
+  const TunesManifest({
+    required this.tracks,
+    required this.releases,
+    this.artists = const [],
+  });
 
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
+  final List<ManifestArtist> artists;
+
+  String? artistArt(String name) {
+    for (final a in artists) {
+      if (a.name == name) return a.artSha;
+    }
+    return null;
+  }
 
   factory TunesManifest.fromJson(Map<String, dynamic> json) {
     final tracks = (json['tracks'] as List<dynamic>? ?? const [])
@@ -128,10 +154,17 @@ class TunesManifest {
     final releases = (json['releases'] as List<dynamic>? ?? const [])
         .map((r) => ManifestRelease.fromJson(r as Map<String, dynamic>))
         .toList();
+    final artists = (json['artists'] as List<dynamic>? ?? const [])
+        .map((a) => ManifestArtist.fromJson(a as Map<String, dynamic>))
+        .toList();
     if (releases.isEmpty) {
-      return TunesManifest(tracks: tracks, releases: groupReleases(tracks));
+      return TunesManifest(
+        tracks: tracks,
+        releases: groupReleases(tracks),
+        artists: artists,
+      );
     }
-    return TunesManifest(tracks: tracks, releases: releases);
+    return TunesManifest(tracks: tracks, releases: releases, artists: artists);
   }
 
   List<ManifestTrack> tracksFor(String releaseId) {

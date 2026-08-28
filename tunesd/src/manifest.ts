@@ -35,6 +35,7 @@ export interface ManifestV2 {
   integrity: string;
   tracks: ManifestTrack[];
   releases: ManifestRelease[];
+  artists: Array<{ name: string; artSha: string | null }>;
 }
 
 export interface TrackMeta {
@@ -100,7 +101,8 @@ export function buildManifest(
   probes: ProbeResult[],
   metaBySha: Map<string, TrackMeta> = new Map(),
   enrichBySha: Map<string, TrackEnrichment> = new Map(),
-  objects: Array<{ sha: string; size: number }> = []
+  objects: Array<{ sha: string; size: number }> = [],
+  artists: Array<{ name: string; artSha: string | null }> = []
 ): ManifestV2 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -262,5 +264,6 @@ export function buildManifest(
     integrity,
     tracks,
     releases,
+    artists: [...artists].sort((a, b) => a.name.localeCompare(b.name)),
   };
 }

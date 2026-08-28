@@ -12,6 +12,7 @@ class LibraryView extends StatefulWidget {
     super.key,
     required this.tracks,
     required this.releases,
+    this.artists = const [],
     required this.filter,
     required this.player,
     required this.store,
@@ -25,6 +26,7 @@ class LibraryView extends StatefulWidget {
 
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
+  final List<ManifestArtist> artists;
   final String filter;
   final TunePlayer player;
   final DownloadStore store;
@@ -205,7 +207,27 @@ class _LibraryViewState extends State<LibraryView> {
             ),
             child: Row(
               children: [
-                InitialsAvatar(name: name, size: 48),
+                () {
+                  String? photo;
+                  for (final a in widget.artists) {
+                    if (a.name == name) photo = a.artSha;
+                  }
+                  if (photo == null) {
+                    return InitialsAvatar(name: name, size: 48);
+                  }
+                  return ClipOval(
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Image.network(
+                        widget.artUrlFor(photo),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            InitialsAvatar(name: name, size: 48),
+                      ),
+                    ),
+                  );
+                }(),
                 const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(

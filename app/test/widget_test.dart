@@ -320,6 +320,24 @@ void main() {
     expect(find.text('Bassline'), findsWidgets);
   });
 
+  testWidgets('artist circles render provider photos when available', (
+    tester,
+  ) async {
+    final tracks = [_track('One', 'flac', 950000, artist: 'Vax')];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: groupReleases(tracks),
+      artists: [ManifestArtist(name: 'Vax', artSha: 'c' * 64)],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
+
+    expect(find.byType(Image), findsOneWidget); // the photo widget is engaged
+
+    await tester.tap(find.byType(Image));
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsWidgets); // photo on the artist page too
+  });
+
   testWidgets('artist on home opens the artist page', (tester) async {
     await pumpApp(
       tester,

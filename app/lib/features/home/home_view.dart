@@ -73,6 +73,7 @@ class HomeView extends StatelessWidget {
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
             itemBuilder: (context, i) {
               final e = artistList[i];
+              final artSha = manifest.artistArt(e.key);
               return InkWell(
                 onTap: () => onArtistTap(e.key),
                 borderRadius: BorderRadius.circular(RadiusTokens.control),
@@ -80,7 +81,21 @@ class HomeView extends StatelessWidget {
                   width: 76,
                   child: Column(
                     children: [
-                      InitialsAvatar(name: e.key, size: 64),
+                      if (artSha != null)
+                        ClipOval(
+                          child: SizedBox(
+                            width: 64,
+                            height: 64,
+                            child: Image.network(
+                              artUrlFor(artSha),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  InitialsAvatar(name: e.key, size: 64),
+                            ),
+                          ),
+                        )
+                      else
+                        InitialsAvatar(name: e.key, size: 64),
                       const SizedBox(height: Space.xs),
                       Text(
                         e.key,
