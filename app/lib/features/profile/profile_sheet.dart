@@ -28,11 +28,18 @@ void showProfileSheet(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.person_rounded, color: Tones.textMuted, size: 44),
-                  SizedBox(width: Space.md),
-                  Column(
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset(
+                      'assets/icon.png',
+                      width: 44,
+                      height: 44,
+                    ),
+                  ),
+                  const SizedBox(width: Space.md),
+                  const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('tunes', style: TypeScale.title),
