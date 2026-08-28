@@ -50,7 +50,7 @@ describe("buildManifest", () => {
     const enrich = new Map([
       [
         "a".repeat(64),
-        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single" },
+        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1 },
       ],
     ]);
     const untagged = buildManifest([probe()], new Map(), enrich);
@@ -87,6 +87,7 @@ describe("buildManifest", () => {
           artSha: "c".repeat(64),
           releaseId: "sp:album1",
           releaseType: "single",
+          trackNumber: 1,
         },
       ],
       [
@@ -98,6 +99,7 @@ describe("buildManifest", () => {
           artSha: null,
           releaseId: "sp:album1",
           releaseType: "single",
+          trackNumber: 1,
         },
       ],
     ]);
@@ -122,6 +124,7 @@ describe("buildManifest", () => {
           artSha: null,
           releaseId: "mb:one",
           releaseType: "Single",
+          trackNumber: 1,
         },
       ],
       [
@@ -133,6 +136,7 @@ describe("buildManifest", () => {
           artSha: null,
           releaseId: "sp:two",
           releaseType: "single",
+          trackNumber: 1,
         },
       ],
     ]);

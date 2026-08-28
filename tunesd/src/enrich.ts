@@ -6,6 +6,7 @@ export interface EnrichmentEntry {
   artSha: string | null;
   releaseId: string | null;
   releaseType: string | null;
+  trackNumber: number | null;
   source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }
@@ -168,6 +169,7 @@ export interface SpotifyLookup {
   albumType: string | null;
   year: string | null;
   artUrl: string | null;
+  trackNumber: number | null;
 }
 
 function norm(s: string): string {
@@ -281,6 +283,7 @@ export class SpotifyClient {
           items?: Array<{
             id?: string;
             name?: string;
+            track_number?: number;
             artists?: Array<{ name?: string }>;
             album?: {
               id?: string;
@@ -307,6 +310,7 @@ export class SpotifyClient {
             albumType: item.album?.album_type ?? null,
             year: item.album?.release_date ? item.album.release_date.slice(0, 4) : null,
             artUrl: art,
+            trackNumber: item.track_number ?? null,
           };
         }
       }

@@ -135,6 +135,7 @@ async function main(): Promise<void> {
             artSha: null,
             releaseId: null,
             releaseType: null,
+            trackNumber: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -152,6 +153,7 @@ async function main(): Promise<void> {
             artSha: null,
             releaseId: null,
             releaseType: null,
+            trackNumber: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -170,6 +172,7 @@ async function main(): Promise<void> {
             artSha: cover?.sha ?? null,
             releaseId: `mb:${hit.album.releaseId}`,
             releaseType: hit.album.primaryType ?? null,
+            trackNumber: null,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -208,6 +211,7 @@ async function main(): Promise<void> {
               artSha,
               releaseId: sp.albumId != null ? `sp:${sp.albumId}` : null,
               releaseType: sp.albumType ?? null,
+              trackNumber: sp.trackNumber,
               source: "spotify",
               enrichedAt: new Date().toISOString(),
             });
@@ -249,6 +253,7 @@ async function main(): Promise<void> {
               artSha,
               releaseId: dg.albumId,
               releaseType: null,
+              trackNumber: null,
               source: "discogs",
               enrichedAt: new Date().toISOString(),
             });
@@ -275,6 +280,7 @@ async function main(): Promise<void> {
           artSha: e.artSha,
           releaseId: e.releaseId,
           releaseType: e.releaseType,
+          trackNumber: e.trackNumber,
         });
       }
       return buildManifest([...probeCache.values()], metaBySha, enrichForManifest);

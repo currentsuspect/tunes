@@ -12,13 +12,13 @@ import 'package:tunes/main.dart';
 class _FakeClient implements TunesClient {
   _FakeClient(this.result);
 
-  final Future<List<ManifestTrack>> Function() result;
+  final Future<TunesManifest> Function() result;
 
   @override
   String get baseUrl => 'http://fake:4780';
 
   @override
-  Future<List<ManifestTrack>> fetchManifest() => result();
+  Future<TunesManifest> fetchManifest() => result();
 
   @override
   Future<bool> ping() async => true;
@@ -153,8 +153,10 @@ ManifestTrack _track(
   int bitrate, {
   String artist = 'Artist',
   String album = 'Album',
+  String? sha,
+  String? releaseId,
 }) => ManifestTrack(
-  sha: title == 'Bassline' ? 'a' * 64 : 'b' * 64,
+  sha: sha ?? (title == 'Bassline' ? 'a' * 64 : 'b' * 64),
   size: 1000,
   codec: codec,
   sampleRate: 44100,
@@ -166,12 +168,17 @@ ManifestTrack _track(
   album: album,
   year: null,
   artSha: null,
+  releaseId: releaseId ?? (title == 'Bassline' ? 'rel-1' : 'rel-2'),
+  trackNumber: null,
 );
 
 List<ManifestTrack> _library() => [
   _track('Bassline', 'flac', 950000),
   _track('Nightdrive', 'mp3', 320000),
 ];
+
+TunesManifest _manifestOf(List<ManifestTrack> tracks) =>
+    TunesManifest(tracks: tracks, releases: groupReleases(tracks));
 
 void main() {
   late Directory tempDir;
@@ -214,12 +221,11 @@ void main() {
   testWidgets('home renders dynamic stats from the manifest', (tester) async {
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
 
-    expect(find.text('2'), findsWidgets); // tracks count
-    expect(find.text('tracks'), findsOneWidget);
+    expect(find.text('2 tracks · 1 artist · 2 releases'), findsOneWidget);
     expect(find.text('Artists'), findsOneWidget);
     expect(find.text('Albums'), findsOneWidget);
   });
@@ -237,7 +243,11 @@ void main() {
   });
 
   testWidgets('empty manifest shows the no-library home state', (tester) async {
-    await pumpApp(tester, _FakeClient(() async => []), FakeTunePlayer());
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf([])),
+      FakeTunePlayer(),
+    );
 
     expect(
       find.textContaining('No library yet — channels are configured'),
@@ -248,7 +258,7 @@ void main() {
   testWidgets('library tab lists tracks with quality badges', (tester) async {
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
     await goToLibrary(tester);
@@ -264,7 +274,11 @@ void main() {
     tester,
   ) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Nightdrive'));
@@ -278,7 +292,11 @@ void main() {
 
   testWidgets('playing records recents on the home tab', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
@@ -299,22 +317,30 @@ void main() {
     expect(find.text('Bassline'), findsWidgets);
   });
 
-  testWidgets('artist chip on home filters the library', (tester) async {
+  testWidgets('artist on home opens the artist page', (tester) async {
     await pumpApp(
       tester,
-      _FakeClient(() async => [_track('One', 'flac', 950000, artist: 'Vax')]),
+      _FakeClient(
+        () async => _manifestOf([_track('One', 'flac', 950000, artist: 'Vax')]),
+      ),
       FakeTunePlayer(),
     );
 
-    await tester.tap(find.text('Vax'));
+    await tester.tap(find.text('Vax').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('One'), findsOneWidget);
+    expect(find.text('Artist'), findsOneWidget);
+    expect(find.text('Play all'), findsOneWidget);
+    expect(find.text('Vax'), findsOneWidget); // page title
   });
 
   testWidgets('search filters and plays results', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
 
     await tester.tap(find.text('Search'));
     await tester.pumpAndSettle();
@@ -330,10 +356,109 @@ void main() {
     expect(player.playQueueCalls, 1);
   });
 
+  testWidgets('album card opens the album page with its tracklist', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    final tracks = [
+      _track(
+        'MAFIA',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+      _track(
+        'ESCAPE PLAN',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'b' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'ESCAPE PLAN / MAFIA',
+          artist: 'Travis Scott',
+          year: '2021',
+          artSha: null,
+          type: 'single',
+          trackShas: ['a' * 64, 'b' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), player);
+
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Album'), findsOneWidget);
+    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('MAFIA'), findsOneWidget);
+    expect(find.text('ESCAPE PLAN'), findsOneWidget);
+
+    await tester.tap(find.text('MAFIA'));
+    await tester.pumpAndSettle();
+    expect(player.playQueueCalls, 1);
+    expect(player.queue.length, 2);
+  });
+
+  testWidgets('library albums render one card per release', (tester) async {
+    final tracks = [
+      _track(
+        'MAFIA',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+      _track(
+        'ESCAPE PLAN',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'b' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'ESCAPE PLAN / MAFIA',
+          artist: 'Travis Scott',
+          year: '2021',
+          artSha: null,
+          type: 'single',
+          trackShas: ['a' * 64, 'b' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
+    await goToLibrary(tester);
+
+    await tester.tap(find.text('Albums').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('ESCAPE PLAN / MAFIA'), findsOneWidget);
+    expect(find.text('Travis Scott · 2'), findsOneWidget);
+  });
+
   testWidgets('profile sheet opens from the avatar', (tester) async {
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
 
@@ -347,7 +472,11 @@ void main() {
 
   testWidgets('mini bar toggle and seek reach the player', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -364,7 +493,11 @@ void main() {
     tester,
   ) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -384,7 +517,11 @@ void main() {
 
   testWidgets('stop clears the mini bar', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -402,7 +539,11 @@ void main() {
     tester,
   ) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -417,7 +558,11 @@ void main() {
 
   testWidgets('full page controls reach the player', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -434,7 +579,11 @@ void main() {
 
   testWidgets('queue list jumps to a tapped track', (tester) async {
     final player = FakeTunePlayer();
-    await pumpApp(tester, _FakeClient(() async => _library()), player);
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
     await goToLibrary(tester);
 
     await tester.tap(find.text('Bassline'));
@@ -452,7 +601,7 @@ void main() {
   ) async {
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
     await goToLibrary(tester);
@@ -499,7 +648,7 @@ void main() {
     );
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       player,
       reachability: reach,
     );
@@ -523,7 +672,7 @@ void main() {
     final reach = Reachability();
     await pumpApp(
       tester,
-      _FakeClient(() async => _library()),
+      _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
       reachability: reach,
     );

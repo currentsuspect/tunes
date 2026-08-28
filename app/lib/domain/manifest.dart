@@ -12,6 +12,8 @@ class ManifestTrack {
     required this.album,
     required this.year,
     required this.artSha,
+    required this.releaseId,
+    required this.trackNumber,
   });
 
   final String sha;
@@ -26,6 +28,8 @@ class ManifestTrack {
   final String album;
   final String? year;
   final String? artSha;
+  final String? releaseId;
+  final int? trackNumber;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -41,6 +45,8 @@ class ManifestTrack {
       album: (json['album'] as String?) ?? 'unknown album',
       year: json['year'] as String?,
       artSha: json['artSha'] as String?,
+      releaseId: json['releaseId'] as String?,
+      trackNumber: (json['trackNumber'] as num?)?.toInt(),
     );
   }
 
@@ -59,4 +65,132 @@ class ManifestTrack {
     final s = (seconds % 60).toString().padLeft(2, '0');
     return '$m:$s';
   }
+}
+
+class ManifestRelease {
+  const ManifestRelease({
+    required this.id,
+    required this.title,
+    required this.artist,
+    required this.year,
+    required this.artSha,
+    required this.type,
+    required this.trackShas,
+  });
+
+  final String id;
+  final String title;
+  final String artist;
+  final String? year;
+  final String? artSha;
+  final String? type;
+  final List<String> trackShas;
+
+  factory ManifestRelease.fromJson(Map<String, dynamic> json) {
+    return ManifestRelease(
+      id: json['id'] as String,
+      title: (json['title'] as String?) ?? 'unknown album',
+      artist: (json['artist'] as String?) ?? 'unknown artist',
+      year: json['year'] as String?,
+      artSha: json['artSha'] as String?,
+      type: json['type'] as String?,
+      trackShas: (json['trackShas'] as List<dynamic>? ?? const [])
+          .map((s) => s as String)
+          .toList(),
+    );
+  }
+
+  String get typeLabel {
+    final t = type?.toLowerCase();
+    if (t == null) return 'Release';
+    if (t == 'album') return 'Album';
+    if (t == 'single') return 'Single';
+    if (t == 'ep') return 'EP';
+    if (t == 'compilation') return 'Compilation';
+    if (t == 'live') return 'Live';
+    return type!;
+  }
+}
+
+class TunesManifest {
+  const TunesManifest({required this.tracks, required this.releases});
+
+  final List<ManifestTrack> tracks;
+  final List<ManifestRelease> releases;
+
+  factory TunesManifest.fromJson(Map<String, dynamic> json) {
+    final tracks = (json['tracks'] as List<dynamic>? ?? const [])
+        .map((t) => ManifestTrack.fromJson(t as Map<String, dynamic>))
+        .toList();
+    final releases = (json['releases'] as List<dynamic>? ?? const [])
+        .map((r) => ManifestRelease.fromJson(r as Map<String, dynamic>))
+        .toList();
+    if (releases.isEmpty) {
+      return TunesManifest(tracks: tracks, releases: groupReleases(tracks));
+    }
+    return TunesManifest(tracks: tracks, releases: releases);
+  }
+
+  List<ManifestTrack> tracksFor(String releaseId) {
+    return tracks.where((t) => t.releaseId == releaseId).toList();
+  }
+
+  List<ManifestRelease> releasesFor(String artist) {
+    return releases.where((r) => r.artist == artist).toList()..sort((a, b) {
+      final ta = a.year ?? '9999';
+      final tb = b.year ?? '9999';
+      final byYear = tb.compareTo(ta);
+      if (byYear != 0) return byYear;
+      return a.title.compareTo(b.title);
+    });
+  }
+}
+
+List<ManifestRelease> groupReleases(List<ManifestTrack> tracks) {
+  final map = <String, ManifestRelease>{};
+  for (final t in tracks) {
+    final key =
+        t.releaseId ??
+        (t.artist.toLowerCase() == 'unknown artist' &&
+                t.album.toLowerCase() == 'unknown album'
+            ? 'sha:${t.sha}'
+            : 'name:${t.artist.toLowerCase()}|${t.album.toLowerCase()}');
+    final existing = map[key];
+    if (existing == null) {
+      map[key] = ManifestRelease(
+        id: key,
+        title: t.album,
+        artist: t.artist,
+        year: t.year,
+        artSha: t.artSha,
+        type: null,
+        trackShas: [t.sha],
+      );
+    } else if (!existing.trackShas.contains(t.sha)) {
+      map[key] = ManifestRelease(
+        id: existing.id,
+        title: existing.title,
+        artist: existing.artist,
+        year: existing.year ?? t.year,
+        artSha: existing.artSha ?? t.artSha,
+        type: existing.type,
+        trackShas: [...existing.trackShas, t.sha],
+      );
+    }
+  }
+  final out = map.values.toList()
+    ..sort(
+      (a, b) => a.artist != b.artist
+          ? a.artist.compareTo(b.artist)
+          : a.title.compareTo(b.title),
+    );
+  for (final r in out) {
+    r.trackShas.sort((a, b) {
+      final ta = tracks.firstWhere((t) => t.sha == a).trackNumber ?? 999;
+      final tb = tracks.firstWhere((t) => t.sha == b).trackNumber ?? 999;
+      if (ta != tb) return ta - tb;
+      return a.compareTo(b);
+    });
+  }
+  return out;
 }

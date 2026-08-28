@@ -81,6 +81,8 @@ ManifestTrack _track(String title) => ManifestTrack(
   album: 'Album',
   year: null,
   artSha: null,
+  releaseId: 'rel-1',
+  trackNumber: null,
 );
 
 void main() {

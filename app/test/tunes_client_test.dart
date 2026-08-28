@@ -43,10 +43,10 @@ void main() {
       await File('${tempDir.path}/manifest.json').writeAsString(seededManifest);
 
       final client = TunesClient('http://127.0.0.1:1', tempDir);
-      final tracks = await client.fetchManifest();
+      final manifest = await client.fetchManifest();
 
-      expect(tracks.length, 1);
-      expect(tracks.first.title, 'Cached Title');
+      expect(manifest.tracks.length, 1);
+      expect(manifest.tracks.first.title, 'Cached Title');
     },
   );
 

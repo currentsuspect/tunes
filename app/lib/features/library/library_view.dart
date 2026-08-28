@@ -10,6 +10,7 @@ class LibraryView extends StatefulWidget {
   const LibraryView({
     super.key,
     required this.tracks,
+    required this.releases,
     required this.filter,
     required this.player,
     required this.store,
@@ -17,9 +18,12 @@ class LibraryView extends StatefulWidget {
     required this.onDownload,
     required this.offline,
     required this.artUrlFor,
+    required this.onArtistTap,
+    required this.onAlbumTap,
   });
 
   final List<ManifestTrack> tracks;
+  final List<ManifestRelease> releases;
   final String filter;
   final TunePlayer player;
   final DownloadStore store;
@@ -27,6 +31,8 @@ class LibraryView extends StatefulWidget {
   final void Function(ManifestTrack) onDownload;
   final bool offline;
   final String Function(String sha) artUrlFor;
+  final void Function(String artist) onArtistTap;
+  final void Function(ManifestRelease release) onAlbumTap;
 
   @override
   State<LibraryView> createState() => _LibraryViewState();
@@ -116,12 +122,10 @@ class _LibraryViewState extends State<LibraryView> {
       );
     }
     if (_segment == 1) {
-      final albums = <String, List<ManifestTrack>>{};
-      for (final t in filtered) {
-        albums.putIfAbsent('${t.artist}\u0000${t.album}', () => []).add(t);
-      }
-      final entries = albums.entries.toList()
-        ..sort((a, b) => a.value.first.album.compareTo(b.value.first.album));
+      final available = filtered.map((t) => t.releaseId).toSet();
+      final entries = widget.releases
+          .where((r) => available.contains(r.id))
+          .toList();
       return GridView.builder(
         padding: const EdgeInsets.all(Space.lg),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -132,10 +136,9 @@ class _LibraryViewState extends State<LibraryView> {
         ),
         itemCount: entries.length,
         itemBuilder: (context, i) {
-          final tracks = entries[i].value;
-          final first = tracks.first;
+          final r = entries[i];
           return InkWell(
-            onTap: () => _play(tracks, 0),
+            onTap: () => widget.onAlbumTap(r),
             borderRadius: BorderRadius.circular(RadiusTokens.card),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,9 +147,9 @@ class _LibraryViewState extends State<LibraryView> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(RadiusTokens.card),
                     child: SizedBox.expand(
-                      child: first.artSha != null
+                      child: r.artSha != null
                           ? Image.network(
-                              widget.artUrlFor(first.artSha!),
+                              widget.artUrlFor(r.artSha!),
                               fit: BoxFit.cover,
                               errorBuilder: (_, _, _) =>
                                   const ArtPlaceholder(size: 200),
@@ -157,13 +160,13 @@ class _LibraryViewState extends State<LibraryView> {
                 ),
                 const SizedBox(height: Space.xs),
                 Text(
-                  first.album,
+                  r.title,
                   style: TypeScale.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  '${first.artist} · ${tracks.length}',
+                  '${r.artist} · ${r.trackShas.length}',
                   style: TypeScale.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -195,7 +198,7 @@ class _LibraryViewState extends State<LibraryView> {
           orElse: () => tracks.first,
         );
         return InkWell(
-          onTap: () => _play(tracks, 0),
+          onTap: () => widget.onArtistTap(name),
           borderRadius: BorderRadius.circular(RadiusTokens.control),
           child: Padding(
             padding: const EdgeInsets.symmetric(
@@ -204,7 +207,13 @@ class _LibraryViewState extends State<LibraryView> {
             ),
             child: Row(
               children: [
-                ArtThumb(sha: art.artSha, artUrlFor: widget.artUrlFor),
+                ClipOval(
+                  child: ArtThumb(
+                    sha: art.artSha,
+                    artUrlFor: widget.artUrlFor,
+                    size: 48,
+                  ),
+                ),
                 const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(

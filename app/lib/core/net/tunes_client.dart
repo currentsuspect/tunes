@@ -18,7 +18,7 @@ class TunesClient {
     return File('${dir.path}/manifest.json');
   }
 
-  Future<List<ManifestTrack>> fetchManifest() async {
+  Future<TunesManifest> fetchManifest() async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
       final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
@@ -28,11 +28,9 @@ class TunesClient {
       }
       final body = await res.transform(utf8.decoder).join();
       final json = jsonDecode(body) as Map<String, dynamic>;
-      final tracks = (json['tracks'] as List<dynamic>? ?? const [])
-          .map((t) => ManifestTrack.fromJson(t as Map<String, dynamic>))
-          .toList();
+      final manifest = TunesManifest.fromJson(json);
       await _writeCache(body);
-      return tracks;
+      return manifest;
     } on SocketException catch (e) {
       final cached = await _readCache();
       if (cached != null) return cached;
@@ -102,15 +100,13 @@ class TunesClient {
     } catch (_) {}
   }
 
-  Future<List<ManifestTrack>?> _readCache() async {
+  Future<TunesManifest?> _readCache() async {
     final f = _cacheFile;
     if (f == null) return null;
     try {
       if (!await f.exists()) return null;
       final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      return (json['tracks'] as List<dynamic>? ?? const [])
-          .map((t) => ManifestTrack.fromJson(t as Map<String, dynamic>))
-          .toList();
+      return TunesManifest.fromJson(json);
     } catch (_) {
       return null;
     }

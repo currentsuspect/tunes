@@ -15,6 +15,8 @@ import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 import 'domain/manifest.dart';
+import 'features/album/album_page.dart';
+import 'features/artist/artist_page.dart';
 import 'features/home/home_view.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
@@ -129,9 +131,9 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
-  late Future<List<ManifestTrack>> _tracks;
+  late Future<TunesManifest> _tracks;
   final Set<String> _downloading = {};
-  String _libraryFilter = '';
+  final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
 
   @override
@@ -161,11 +163,11 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<List<ManifestTrack>> _fetch() {
+  Future<TunesManifest> _fetch() {
     return widget.client.fetchManifest().then(
-      (tracks) {
+      (manifest) {
         widget.reachability.setOffline(false);
-        return tracks;
+        return manifest;
       },
       onError: (Object e) {
         widget.reachability.setOffline(true);
@@ -213,6 +215,40 @@ class _AppShellState extends State<AppShell> {
       channel: _channel,
       downloadCount: widget.store.shas.length,
       trackCount: trackCount,
+    );
+  }
+
+  void _openArtist(String artist, TunesManifest manifest) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArtistPage(
+          artist: artist,
+          manifest: manifest,
+          player: widget.player,
+          store: widget.store,
+          downloading: _downloading,
+          onDownload: _download,
+          offline: widget.reachability.offline,
+          artUrlFor: _artUrlFor,
+        ),
+      ),
+    );
+  }
+
+  void _openAlbum(ManifestRelease release, TunesManifest manifest) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AlbumPage(
+          release: release,
+          manifest: manifest,
+          player: widget.player,
+          store: widget.store,
+          downloading: _downloading,
+          onDownload: _download,
+          offline: widget.reachability.offline,
+          artUrlFor: _artUrlFor,
+        ),
+      ),
     );
   }
 
@@ -346,12 +382,12 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  List<ManifestTrack> get _tracksSnapshot => _lastTracks ?? const [];
+  List<ManifestTrack> get _tracksSnapshot => _lastTracks?.tracks ?? const [];
 
-  List<ManifestTrack>? _lastTracks;
+  TunesManifest? _lastTracks;
 
   Widget _buildContent(bool offline) {
-    return FutureBuilder<List<ManifestTrack>>(
+    return FutureBuilder<TunesManifest>(
       future: _tracks,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -387,8 +423,10 @@ class _AppShellState extends State<AppShell> {
             ),
           );
         }
-        final tracks = snapshot.data ?? const <ManifestTrack>[];
-        _lastTracks = tracks;
+        final manifest =
+            snapshot.data ?? const TunesManifest(tracks: [], releases: []);
+        _lastTracks = manifest;
+        final tracks = manifest.tracks;
         final content = switch (_tab) {
           1 => SearchView(
             tracks: tracks,
@@ -401,6 +439,7 @@ class _AppShellState extends State<AppShell> {
           ),
           2 => LibraryView(
             tracks: tracks,
+            releases: manifest.releases,
             filter: _libraryFilter,
             player: widget.player,
             store: widget.store,
@@ -408,22 +447,14 @@ class _AppShellState extends State<AppShell> {
             onDownload: _download,
             offline: offline,
             artUrlFor: _artUrlFor,
+            onArtistTap: (artist) => _openArtist(artist, manifest),
+            onAlbumTap: (release) => _openAlbum(release, manifest),
           ),
           _ => HomeView(
-            tracks: tracks,
+            manifest: manifest,
             recents: _recents,
-            onArtistTap: (artist) {
-              setState(() {
-                _libraryFilter = artist;
-                _tab = 2;
-              });
-            },
-            onAlbumTap: (album, artist) {
-              setState(() {
-                _libraryFilter = album;
-                _tab = 2;
-              });
-            },
+            onArtistTap: (artist) => _openArtist(artist, manifest),
+            onAlbumTap: (release) => _openAlbum(release, manifest),
             onPlay: (list, index) {
               widget.player.playQueue(list, index);
             },

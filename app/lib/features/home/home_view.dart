@@ -7,7 +7,7 @@ import '../library/library_widgets.dart';
 class HomeView extends StatelessWidget {
   const HomeView({
     super.key,
-    required this.tracks,
+    required this.manifest,
     required this.recents,
     required this.onArtistTap,
     required this.onAlbumTap,
@@ -15,15 +15,16 @@ class HomeView extends StatelessWidget {
     required this.artUrlFor,
   });
 
-  final List<ManifestTrack> tracks;
+  final TunesManifest manifest;
   final List<ManifestTrack> recents;
   final void Function(String artist) onArtistTap;
-  final void Function(String album, String artist) onAlbumTap;
+  final void Function(ManifestRelease release) onAlbumTap;
   final void Function(List<ManifestTrack> tracks, int index) onPlay;
   final String Function(String sha) artUrlFor;
 
   @override
   Widget build(BuildContext context) {
+    final tracks = manifest.tracks;
     if (tracks.isEmpty) {
       return const Center(
         child: Padding(
@@ -39,15 +40,12 @@ class HomeView extends StatelessWidget {
     }
 
     final artists = <String, List<ManifestTrack>>{};
-    final albums = <String, List<ManifestTrack>>{};
     for (final t in tracks) {
       artists.putIfAbsent(t.artist, () => []).add(t);
-      albums.putIfAbsent('${t.artist}\u0000${t.album}', () => []).add(t);
     }
-    final topArtists = artists.entries.toList()
+    final artistList = artists.entries.toList()
       ..sort((a, b) => b.value.length.compareTo(a.value.length));
-    final albumEntries = albums.entries.toList()
-      ..sort((a, b) => a.value.first.album.compareTo(b.value.first.album));
+    final releases = manifest.releases;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -57,75 +55,106 @@ class HomeView extends StatelessWidget {
         Space.lg,
       ),
       children: [
-        Row(
-          children: [
-            _Stat(label: '${tracks.length}', caption: 'tracks'),
-            const SizedBox(width: Space.lg),
-            _Stat(label: '${artists.length}', caption: 'artists'),
-            const SizedBox(width: Space.lg),
-            _Stat(label: '${albums.length}', caption: 'albums'),
-          ],
+        Text(
+          '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
+          '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
+          '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
+          style: TypeScale.caption,
         ),
         const SizedBox(height: Space.lg),
         const Text('Artists', style: TypeScale.title),
         const SizedBox(height: Space.sm),
-        Wrap(
-          spacing: Space.sm,
-          runSpacing: Space.sm,
-          children: [
-            for (final e in topArtists.take(10))
-              ActionChip(
-                label: Text(e.key, style: TypeScale.body),
-                backgroundColor: Tones.surfaceRaised,
-                side: const BorderSide(color: Tones.hairline),
-                onPressed: () => onArtistTap(e.key),
-              ),
-          ],
+        SizedBox(
+          height: 108,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: artistList.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final e = artistList[i];
+              final art = e.value.firstWhere(
+                (t) => t.artSha != null,
+                orElse: () => e.value.first,
+              );
+              return InkWell(
+                onTap: () => onArtistTap(e.key),
+                borderRadius: BorderRadius.circular(RadiusTokens.control),
+                child: SizedBox(
+                  width: 76,
+                  child: Column(
+                    children: [
+                      ClipOval(
+                        child: SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: art.artSha != null
+                              ? Image.network(
+                                  artUrlFor(art.artSha!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      const ArtPlaceholder(size: 64),
+                                )
+                              : const ArtPlaceholder(size: 64),
+                        ),
+                      ),
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        e.key,
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         ),
         const SizedBox(height: Space.lg),
         const Text('Albums', style: TypeScale.title),
         const SizedBox(height: Space.sm),
         SizedBox(
-          height: 170,
+          height: 178,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: albumEntries.length,
+            itemCount: releases.length,
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
             itemBuilder: (context, i) {
-              final e = albumEntries[i];
-              final first = e.value.first;
+              final r = releases[i];
               return InkWell(
-                onTap: () => onAlbumTap(first.album, first.artist),
+                onTap: () => onAlbumTap(r),
                 borderRadius: BorderRadius.circular(RadiusTokens.card),
                 child: SizedBox(
-                  width: 120,
+                  width: 130,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(RadiusTokens.card),
                         child: SizedBox(
-                          width: 120,
-                          height: 120,
-                          child: first.artSha != null
+                          width: 130,
+                          height: 130,
+                          child: r.artSha != null
                               ? Image.network(
-                                  artUrlFor(first.artSha!),
+                                  artUrlFor(r.artSha!),
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) =>
-                                      const ArtPlaceholder(size: 120),
+                                      const ArtPlaceholder(size: 130),
                                 )
-                              : const ArtPlaceholder(size: 120),
+                              : const ArtPlaceholder(size: 130),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
-                        first.album,
+                        r.title,
                         style: TypeScale.body,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${first.artist} · ${e.value.length}',
+                        '${r.artist} · ${r.trackShas.length} ${r.trackShas.length == 1 ? 'track' : 'tracks'}',
                         style: TypeScale.caption,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -178,30 +207,6 @@ class HomeView extends StatelessWidget {
               ),
             ),
         ],
-      ],
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.caption});
-
-  final String label;
-  final String caption;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TypeScale.wordmark.copyWith(
-            fontSize: 28,
-            color: Tones.primary,
-          ),
-        ),
-        Text(caption, style: TypeScale.caption),
       ],
     );
   }

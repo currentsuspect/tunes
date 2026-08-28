@@ -15,6 +15,7 @@ export interface ManifestTrack {
   year: string | null;
   artSha: string | null;
   releaseId: string | null;
+  trackNumber: number | null;
 }
 
 export interface ManifestRelease {
@@ -47,6 +48,7 @@ export interface TrackEnrichment {
   artSha: string | null;
   releaseId: string | null;
   releaseType: string | null;
+  trackNumber: number | null;
 }
 
 function norm(s: string): string {
@@ -102,6 +104,7 @@ export function buildManifest(
         year,
         artSha: enrich?.artSha ?? null,
         releaseId: enrich?.releaseId ?? null,
+        trackNumber: enrich?.trackNumber ?? null,
       };
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
@@ -132,7 +135,19 @@ export function buildManifest(
     .sort((a, b) =>
       a.artist !== b.artist ? a.artist.localeCompare(b.artist) : a.title.localeCompare(b.title)
     )
-    .map((r) => ({ ...r, trackShas: [...r.trackShas].sort() }));
+    .map((r) => {
+      const byNumber = new Map<string, number | null>();
+      for (const t of tracks) {
+        if (r.trackShas.includes(t.sha)) byNumber.set(t.sha, t.trackNumber ?? null);
+      }
+      const ordered = [...r.trackShas].sort((a, b) => {
+        const na = byNumber.get(a) ?? 999;
+        const nb = byNumber.get(b) ?? 999;
+        if (na !== nb) return na - nb;
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+      return { ...r, trackShas: ordered };
+    });
 
   const integrityBody = JSON.stringify({ schema: 2, tracks, releases });
   const integrity = createHash("sha256").update(integrityBody).digest("hex").slice(0, 16);
