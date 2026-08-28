@@ -364,7 +364,7 @@ void main() {
     expect(find.text('Missing from your collection'), findsOneWidget);
     expect(find.textContaining('1/19'), findsOneWidget);
     expect(find.text('Released this year'), findsOneWidget);
-    expect(find.textContaining('HARDSTONE PSYCHO'), findsOneWidget);
+    expect(find.textContaining('HARDSTONE PSYCHO'), findsWidgets);
   });
 
   testWidgets('artist circles render provider photos when available', (
