@@ -37,7 +37,9 @@ const _tunesdUrl = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  if (!const bool.fromEnvironment('SKIP_MEDIAKIT')) {
+    MediaKit.ensureInitialized();
+  }
   await DiagLog.init();
   DiagLog.log('main start');
   final support = await getApplicationSupportDirectory();
