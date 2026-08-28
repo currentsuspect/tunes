@@ -1,6 +1,7 @@
 package com.currentsuspect.tunes
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
@@ -10,9 +11,14 @@ import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    override fun createFlutterEngine(context: Context): FlutterEngine {
+        val engine = super.createFlutterEngine(context)
+        FlutterEngineCache.getInstance().put("audio_service_engine", engine)
+        return engine
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        FlutterEngineCache.getInstance().put("audio_service_engine", flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/notifications")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
