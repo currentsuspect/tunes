@@ -23,9 +23,14 @@ command -v gh >/dev/null || { echo "gh CLI required" >&2; exit 1; }
 [ -x "$ADB" ] || { echo "adb not found at $ADB (see header for setup)" >&2; exit 1; }
 
 if [ "${1:-}" != "--no-fetch" ]; then
-  run_id=$(gh run list -R "$REPO" --workflow ci.yml --status success -L 1 \
+  head_sha=$(git -C "$ROOT" rev-parse HEAD)
+  run_id=$(gh run list -R "$REPO" --workflow ci.yml --commit "$head_sha" --status success -L 1 \
     --json databaseId --jq '.[0].databaseId')
-  echo "→ downloading artifact from run $run_id"
+  if [ -z "$run_id" ]; then
+    echo "no green CI run for local HEAD $head_sha — push first" >&2
+    exit 1
+  fi
+  echo "→ downloading artifact from run $run_id (commit $head_sha)"
   rm -f "$ROOT/tools/dist/app-debug.apk"
   rm -rf "$ROOT/tools/dist/$ARTIFACT"
   gh run download "$run_id" -R "$REPO" -n "$ARTIFACT" -D "$ROOT/tools/dist/"

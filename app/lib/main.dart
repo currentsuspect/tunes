@@ -92,8 +92,10 @@ class _LibraryHomeState extends State<LibraryHome> {
   }
 
   void _reload() {
+    final future = widget.client.fetchManifest();
+    future.ignore();
     setState(() {
-      _tracks = widget.client.fetchManifest();
+      _tracks = future;
     });
   }
 
