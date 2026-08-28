@@ -133,7 +133,8 @@ class AlbumPage extends StatelessWidget {
                   ),
                   const SizedBox(height: Space.xs),
                   Text(
-                    '${release.typeLabel} · ${release.year ?? '—'} · ${release.trackShas.length} ${release.trackShas.length == 1 ? 'track' : 'tracks'} · ${_totalMinutes(releaseTracks)} min',
+                    '${release.typeLabel} · ${release.year ?? '—'} · '
+                    '${_trackCountLabel(release)} · ${_totalMinutes(releaseTracks)} min',
                     textAlign: TextAlign.center,
                     style: TypeScale.caption,
                   ),
@@ -202,6 +203,14 @@ class AlbumPage extends StatelessWidget {
       ),
     );
   }
+}
+
+String _trackCountLabel(ManifestRelease release) {
+  final owned = release.trackShas.length;
+  final total = release.totalTracks;
+  if (total == null) return '$owned ${owned == 1 ? 'track' : 'tracks'}';
+  if (owned >= total) return '$owned/$total tracks · complete';
+  return '$owned/$total tracks · ${total - owned} missing';
 }
 
 int _totalMinutes(List<ManifestTrack> tracks) {

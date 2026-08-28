@@ -26,6 +26,7 @@ export interface ManifestRelease {
   year: string | null;
   artSha: string | null;
   type: string | null;
+  totalTracks: number | null;
   trackShas: string[];
 }
 
@@ -52,6 +53,7 @@ export interface TrackEnrichment {
   releaseType: string | null;
   trackNumber: number | null;
   discNumber: number | null;
+  totalTracks: number | null;
 }
 
 function norm(s: string): string {
@@ -162,6 +164,7 @@ export function buildManifest(
         releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
         trackNumber: enrich?.trackNumber ?? null,
         discNumber: enrich?.discNumber ?? null,
+        totalTracks: enrich?.totalTracks ?? null,
       };
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
@@ -181,12 +184,16 @@ export function buildManifest(
         year: enrich?.year ?? t.year,
         artSha: t.artSha,
         type: enrich?.releaseType ?? null,
+        totalTracks: enrich?.totalTracks ?? null,
         trackShas: [],
       };
       releaseMap.set(key, release);
     }
     if (!release.trackShas.includes(t.sha)) release.trackShas.push(t.sha);
     if (release.artSha == null) release.artSha = t.artSha;
+    if (release.totalTracks == null && enrich?.totalTracks != null) {
+      release.totalTracks = enrich.totalTracks;
+    }
   }
   const merged = new Map<string, ManifestRelease>();
   for (const r of releaseMap.values()) {

@@ -320,6 +320,53 @@ void main() {
     expect(find.text('Bassline'), findsWidgets);
   });
 
+  testWidgets('home surfaces missing-from-collection and released-this-year', (
+    tester,
+  ) async {
+    final tracks = [
+      _track(
+        'XSCAPE',
+        'flac',
+        950000,
+        artist: 'Don Toliver',
+        album: 'Life of a DON',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'Life of a DON',
+          artist: 'Don Toliver',
+          year: '2021',
+          artSha: null,
+          type: 'album',
+          totalTracks: 19,
+          trackShas: ['a' * 64],
+        ),
+        ManifestRelease(
+          id: 'rel-2',
+          title: 'HARDSTONE PSYCHO',
+          artist: 'Don Toliver',
+          year: '2026',
+          artSha: null,
+          type: 'album',
+          totalTracks: 15,
+          trackShas: ['a' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
+
+    expect(find.text('Missing from your collection'), findsOneWidget);
+    expect(find.textContaining('1/19'), findsOneWidget);
+    expect(find.text('Released this year'), findsOneWidget);
+    expect(find.textContaining('HARDSTONE PSYCHO'), findsOneWidget);
+  });
+
   testWidgets('artist circles render provider photos when available', (
     tester,
   ) async {
@@ -411,6 +458,7 @@ void main() {
           year: '2021',
           artSha: null,
           type: 'single',
+          totalTracks: null,
           trackShas: ['a' * 64, 'b' * 64],
         ),
       ],
@@ -462,6 +510,7 @@ void main() {
           year: '2021',
           artSha: null,
           type: 'single',
+          totalTracks: null,
           trackShas: ['a' * 64, 'b' * 64],
         ),
       ],
@@ -654,6 +703,7 @@ void main() {
           year: '2021',
           artSha: null,
           type: 'single',
+          totalTracks: null,
           trackShas: ['a' * 64],
         ),
       ],
@@ -731,6 +781,7 @@ void main() {
           year: '2021',
           artSha: null,
           type: 'single',
+          totalTracks: null,
           trackShas: ['a' * 64, 'b' * 64],
         ),
       ],

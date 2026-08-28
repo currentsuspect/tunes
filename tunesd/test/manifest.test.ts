@@ -51,7 +51,7 @@ describe("buildManifest", () => {
     const enrich = new Map([
       [
         "a".repeat(64),
-        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1, discNumber: null },
+        { artist: "Travis Scott", album: "ESCAPE PLAN", year: "2021", artSha: "c".repeat(64), releaseId: "mb:x", releaseType: "Single", trackNumber: 1, discNumber: null, totalTracks: null },
       ],
     ]);
     const untagged = buildManifest([probe()], new Map(), enrich);
@@ -90,6 +90,7 @@ describe("buildManifest", () => {
           releaseType: "single",
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
       [
@@ -103,6 +104,7 @@ describe("buildManifest", () => {
           releaseType: "single",
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -129,6 +131,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
       [
@@ -142,6 +145,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 2,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -168,6 +172,7 @@ describe("buildManifest", () => {
       releaseType: null,
       trackNumber: i,
       discNumber: null,
+          totalTracks: null,
     });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 3; i++) {
@@ -198,6 +203,7 @@ describe("buildManifest", () => {
       releaseType: null,
       trackNumber: null,
       discNumber: null,
+          totalTracks: null,
     });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 2; i++) enrich.set(`a${i}`.repeat(32), mk(i, `a${i}`.repeat(32)));
@@ -223,6 +229,7 @@ describe("buildManifest", () => {
       releaseType: null,
       trackNumber: null,
       discNumber: null,
+          totalTracks: null,
     });
     const enrich = new Map<string, TrackEnrichment>();
     for (let i = 0; i < 6; i++) enrich.set(`x${i}`.repeat(32), mk(i, `x${i}`.repeat(32)));
@@ -249,6 +256,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
       [
@@ -262,6 +270,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -282,6 +291,7 @@ describe("buildManifest", () => {
           releaseType: "Single",
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
       [
@@ -295,6 +305,7 @@ describe("buildManifest", () => {
           releaseType: "single",
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -315,6 +326,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: null,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -340,6 +352,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 1,
           discNumber: null,
+          totalTracks: null,
         },
       ],
       [
@@ -353,6 +366,7 @@ describe("buildManifest", () => {
           releaseType: null,
           trackNumber: 2,
           discNumber: null,
+          totalTracks: null,
         },
       ],
     ]);
@@ -380,6 +394,7 @@ describe("buildManifest", () => {
             releaseType: null,
             trackNumber: null,
             discNumber: null,
+          totalTracks: null,
           },
         ],
       ])
@@ -405,6 +420,7 @@ describe("buildManifest", () => {
             releaseType: null,
             trackNumber: null,
             discNumber: null,
+          totalTracks: null,
           },
         ],
         [
@@ -418,6 +434,7 @@ describe("buildManifest", () => {
             releaseType: null,
             trackNumber: 1,
             discNumber: null,
+          totalTracks: null,
           },
         ],
       ])

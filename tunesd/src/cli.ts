@@ -267,6 +267,7 @@ async function main(): Promise<void> {
                 releaseType: member.type,
                 trackNumber: member.position,
                 discNumber: member.discNumber,
+                totalTracks: null,
                 source: "musicbrainz",
                 enrichedAt: new Date().toISOString(),
               });
@@ -296,6 +297,7 @@ async function main(): Promise<void> {
             releaseType: null,
             trackNumber: null,
             discNumber: null,
+            totalTracks: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -315,6 +317,7 @@ async function main(): Promise<void> {
             releaseType: null,
             trackNumber: null,
             discNumber: null,
+            totalTracks: null,
             source: null,
             enrichedAt: new Date().toISOString(),
           });
@@ -335,6 +338,7 @@ async function main(): Promise<void> {
             releaseType: hit.album.primaryType ?? null,
             trackNumber: null,
             discNumber: null,
+            totalTracks: null,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -375,6 +379,7 @@ async function main(): Promise<void> {
               releaseType: sp.albumType ?? null,
               trackNumber: sp.trackNumber,
               discNumber: null,
+              totalTracks: null,
               source: "spotify",
               enrichedAt: new Date().toISOString(),
             });
@@ -404,6 +409,7 @@ async function main(): Promise<void> {
             releaseType: member.type,
             trackNumber: member.position,
             discNumber: member.discNumber,
+            totalTracks: null,
             source: "musicbrainz",
             enrichedAt: new Date().toISOString(),
           });
@@ -444,6 +450,7 @@ async function main(): Promise<void> {
               releaseType: null,
               trackNumber: null,
               discNumber: null,
+              totalTracks: null,
               source: "discogs",
               enrichedAt: new Date().toISOString(),
             });
@@ -477,6 +484,11 @@ async function main(): Promise<void> {
         }
         let changed = false;
         for (const sha of shas) {
+          const entry = enrich.get(sha);
+          if (entry && entry.totalTracks == null && release.tracks.length > 0) {
+            enrich.set(sha, { ...entry, totalTracks: release.tracks.length });
+            changed = true;
+          }
           const e = enrich.get(sha);
           if (!e || e.trackNumber != null) continue;
           const probe = probeCache.get(sha);
@@ -549,6 +561,7 @@ async function main(): Promise<void> {
           releaseType: e.releaseType,
           trackNumber: e.trackNumber,
           discNumber: e.discNumber,
+          totalTracks: e.totalTracks,
         });
       }
       return buildManifest(

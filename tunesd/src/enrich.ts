@@ -8,6 +8,7 @@ export interface EnrichmentEntry {
   releaseType: string | null;
   trackNumber: number | null;
   discNumber: number | null;
+  totalTracks: number | null;
   source: "musicbrainz" | "spotify" | "discogs" | null;
   enrichedAt: string;
 }

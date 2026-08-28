@@ -78,6 +78,7 @@ class ManifestRelease {
     required this.year,
     required this.artSha,
     required this.type,
+    required this.totalTracks,
     required this.trackShas,
   });
 
@@ -87,6 +88,7 @@ class ManifestRelease {
   final String? year;
   final String? artSha;
   final String? type;
+  final int? totalTracks;
   final List<String> trackShas;
 
   factory ManifestRelease.fromJson(Map<String, dynamic> json) {
@@ -97,6 +99,7 @@ class ManifestRelease {
       year: json['year'] as String?,
       artSha: json['artSha'] as String?,
       type: json['type'] as String?,
+      totalTracks: (json['totalTracks'] as num?)?.toInt(),
       trackShas: (json['trackShas'] as List<dynamic>? ?? const [])
           .map((s) => s as String)
           .toList(),
@@ -200,6 +203,7 @@ List<ManifestRelease> groupReleases(List<ManifestTrack> tracks) {
         year: t.year,
         artSha: t.artSha,
         type: null,
+        totalTracks: null,
         trackShas: [t.sha],
       );
     } else if (!existing.trackShas.contains(t.sha)) {
@@ -210,6 +214,7 @@ List<ManifestRelease> groupReleases(List<ManifestTrack> tracks) {
         year: existing.year ?? t.year,
         artSha: existing.artSha ?? t.artSha,
         type: existing.type,
+        totalTracks: existing.totalTracks,
         trackShas: [...existing.trackShas, t.sha],
       );
     }

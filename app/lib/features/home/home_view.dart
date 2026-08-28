@@ -48,6 +48,21 @@ class HomeView extends StatelessWidget {
       ..sort((a, b) => b.value.length.compareTo(a.value.length));
     final releases = manifest.releases;
 
+    final now = DateTime.now();
+    final missing =
+        releases
+            .where(
+              (r) =>
+                  r.totalTracks != null && r.trackShas.length < r.totalTracks!,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                ((b.totalTracks ?? 0) - b.trackShas.length) -
+                ((a.totalTracks ?? 0) - a.trackShas.length),
+          );
+    final fresh = releases.where((r) => r.year == '${now.year}').toList()
+      ..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
     return ListView(
       padding: const EdgeInsets.fromLTRB(
         Space.lg,
@@ -62,6 +77,91 @@ class HomeView extends StatelessWidget {
           '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
           style: TypeScale.caption,
         ),
+        if (missing.isNotEmpty) ...[
+          const SizedBox(height: Space.lg),
+          const Text('Missing from your collection', style: TypeScale.title),
+          const SizedBox(height: Space.sm),
+          for (final r in missing.take(4)) ...[
+            InkWell(
+              onTap: () => onAlbumTap(r),
+              borderRadius: BorderRadius.circular(RadiusTokens.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: Space.sm,
+                  horizontal: Space.xs,
+                ),
+                child: Row(
+                  children: [
+                    ArtThumb(sha: r.artSha, artUrlFor: artUrlFor, size: 48),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            r.title,
+                            style: TypeScale.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '${r.artist} · ${r.trackShas.length}/${r.totalTracks} · ${(r.totalTracks ?? 0) - r.trackShas.length} missing',
+                            style: TypeScale.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Tones.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (r != missing.take(4).last) const Divider(),
+          ],
+        ],
+        if (fresh.isNotEmpty) ...[
+          const SizedBox(height: Space.lg),
+          const Text('Released this year', style: TypeScale.title),
+          const SizedBox(height: Space.sm),
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            children: [
+              for (final r in fresh)
+                ActionChip(
+                  avatar: r.artSha != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: Image.network(
+                              artUrlFor(r.artSha!),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const ArtPlaceholder(size: 26),
+                            ),
+                          ),
+                        )
+                      : null,
+                  label: Text(
+                    '${r.title} · ${r.artist}',
+                    style: TypeScale.caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  backgroundColor: Tones.surfaceRaised,
+                  side: const BorderSide(color: Tones.hairline),
+                  onPressed: () => onAlbumTap(r),
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: Space.lg),
         const Text('Artists', style: TypeScale.title),
         const SizedBox(height: Space.sm),
