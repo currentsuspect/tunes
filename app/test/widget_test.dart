@@ -287,7 +287,7 @@ void main() {
     expect(player.playQueueCalls, 1);
     expect(player.index, 1);
     expect(player.current?.title, 'Nightdrive');
-    expect(find.textContaining('playing'), findsOneWidget);
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
   });
 
   testWidgets('playing records recents on the home tab', (tester) async {
@@ -470,7 +470,7 @@ void main() {
     expect(find.text('Library'), findsWidgets);
   });
 
-  testWidgets('mini bar toggle and seek reach the player', (tester) async {
+  testWidgets('mini bar is minimal: art, title, play only', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(
       tester,
@@ -482,11 +482,15 @@ void main() {
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(Slider), findsNothing); // no progress in the bar
+    expect(
+      find.byIcon(Icons.close_rounded),
+      findsNothing,
+    ); // no stop in the bar
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
     await tester.tap(find.byIcon(Icons.pause_rounded));
     expect(player.toggleCalls, 1);
-
-    await tester.tap(find.byType(Slider));
-    expect(player.seekCalls, greaterThan(0));
   });
 
   testWidgets('orientation change keeps the mini bar on the same player', (
@@ -515,7 +519,7 @@ void main() {
     expect(player.playQueueCalls, 1);
   });
 
-  testWidgets('stop clears the mini bar', (tester) async {
+  testWidgets('stop lives in the Now Playing menu', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(
       tester,
@@ -526,9 +530,12 @@ void main() {
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    await tester.tap(find.text('Bassline').last);
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stop'));
     await tester.pumpAndSettle();
 
     expect(player.stopCalls, 1);
@@ -552,7 +559,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Now Playing'), findsOneWidget);
-    expect(find.text('Up next'), findsOneWidget);
+    expect(find.text('Up next'), findsNothing); // queue is a secondary surface
     expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
   });
 
@@ -577,7 +584,7 @@ void main() {
     expect(player.previousCalls, 1);
   });
 
-  testWidgets('queue list jumps to a tapped track', (tester) async {
+  testWidgets('queue is a secondary sheet that jumps tracks', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(
       tester,
@@ -591,9 +598,58 @@ void main() {
     await tester.tap(find.text('Bassline').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Nightdrive').last);
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Queue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Now playing'), findsOneWidget);
+    await tester.tap(find.text('Nightdrive'));
+    await tester.pumpAndSettle();
     expect(player.playAtCalls, 1);
     expect(player.index, 1);
+  });
+
+  testWidgets('now playing menu opens the album page', (tester) async {
+    final player = FakeTunePlayer();
+    final tracks = [
+      _track(
+        'MAFIA',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'ESCAPE PLAN / MAFIA',
+          artist: 'Travis Scott',
+          year: '2021',
+          artSha: null,
+          type: 'single',
+          trackShas: ['a' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), player);
+    await goToLibrary(tester);
+    await tester.tap(find.text('MAFIA'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MAFIA').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Go to album'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Play'), findsOneWidget);
   });
 
   testWidgets('download icon downloads and marks the track offline-ready', (

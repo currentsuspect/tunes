@@ -136,17 +136,30 @@ class _AppShellState extends State<AppShell> {
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
 
+  bool _wasOffline = false;
+
   @override
   void initState() {
     super.initState();
     _tracks = _fetch();
+    _wasOffline = widget.reachability.offline;
+    widget.reachability.addListener(_onReachability);
     widget.player.addListener(_trackRecents);
   }
 
   @override
   void dispose() {
+    widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
     super.dispose();
+  }
+
+  void _onReachability() {
+    final offline = widget.reachability.offline;
+    if (_wasOffline && !offline) {
+      _reload();
+    }
+    _wasOffline = offline;
   }
 
   void _trackRecents() {
@@ -255,8 +268,16 @@ class _AppShellState extends State<AppShell> {
   void _openNowPlaying() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            NowPlayingPage(player: widget.player, artUrlFor: _artUrlFor),
+        builder: (_) => NowPlayingPage(
+          player: widget.player,
+          manifest:
+              _lastTracks ?? const TunesManifest(tracks: [], releases: []),
+          store: widget.store,
+          downloading: _downloading,
+          onDownload: _download,
+          offline: widget.reachability.offline,
+          artUrlFor: _artUrlFor,
+        ),
       ),
     );
   }
@@ -467,6 +488,24 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
+class _MiniArtPlaceholder extends StatelessWidget {
+  const _MiniArtPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      color: Tones.surfaceRaised,
+      child: const Icon(
+        Icons.music_note_rounded,
+        size: 18,
+        color: Tones.textMuted,
+      ),
+    );
+  }
+}
+
 class _MiniPlayerBar extends StatelessWidget {
   const _MiniPlayerBar({required this.player, required this.onTap});
 
@@ -480,10 +519,6 @@ class _MiniPlayerBar extends StatelessWidget {
       builder: (context, _) {
         final current = player.current;
         if (current == null) return const SizedBox.shrink();
-        final max = player.duration.inMilliseconds.toDouble();
-        final value = player.position.inMilliseconds
-            .clamp(0, player.duration.inMilliseconds)
-            .toDouble();
         return InkWell(
           onTap: onTap,
           child: Container(
@@ -499,6 +534,20 @@ class _MiniPlayerBar extends StatelessWidget {
             ),
             child: Row(
               children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: current.artSha != null
+                      ? Image.network(
+                          '$_tunesdUrl/art/${current.artSha}',
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              const _MiniArtPlaceholder(),
+                        )
+                      : const _MiniArtPlaceholder(),
+                ),
+                const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -511,32 +560,13 @@ class _MiniPlayerBar extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        player.playing
-                            ? 'playing · ${current.durationLabel}'
-                            : 'paused · ${current.durationLabel}',
+                        current.artist,
                         style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
-                ),
-                if (max > 0)
-                  SizedBox(
-                    width: 120,
-                    child: Slider(
-                      value: value,
-                      max: max,
-                      onChanged: (v) =>
-                          player.seek(Duration(milliseconds: v.round())),
-                    ),
-                  ),
-                IconButton(
-                  onPressed: player.stop,
-                  icon: const Icon(
-                    Icons.close_rounded,
-                    size: 20,
-                    color: Tones.textMuted,
-                  ),
-                  tooltip: 'Stop playback',
                 ),
                 IconButton(
                   onPressed: player.toggle,

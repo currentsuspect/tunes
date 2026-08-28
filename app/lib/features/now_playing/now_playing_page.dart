@@ -1,25 +1,236 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
-import '../../core/platform/notifications.dart';
+import '../../core/data/download_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../domain/manifest.dart';
+import '../artist/artist_page.dart';
+import '../album/album_page.dart';
+import '../library/library_widgets.dart';
 
 class NowPlayingPage extends StatelessWidget {
   const NowPlayingPage({
     super.key,
     required this.player,
+    required this.manifest,
+    required this.store,
+    required this.downloading,
+    required this.onDownload,
+    required this.offline,
     required this.artUrlFor,
   });
 
   final TunePlayer player;
+  final TunesManifest manifest;
+  final DownloadStore store;
+  final Set<String> downloading;
+  final void Function(ManifestTrack) onDownload;
+  final bool offline;
   final String Function(String sha) artUrlFor;
 
   String _label(Duration d) {
     final s = d.inSeconds;
     final m = (s ~/ 60).toString().padLeft(2, '0');
     return '$m:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  void _openQueue(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Tones.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(RadiusTokens.card),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SizedBox(
+            height: 420,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    Space.md,
+                    Space.lg,
+                    Space.sm,
+                  ),
+                  child: Text('Queue', style: TypeScale.title),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(
+                      Space.lg,
+                      0,
+                      Space.lg,
+                      Space.lg,
+                    ),
+                    itemCount: player.queue.length,
+                    itemBuilder: (context, i) {
+                      final t = player.queue[i];
+                      final isCurrent = i == player.index;
+                      return InkWell(
+                        onTap: () {
+                          player.playAt(i);
+                          Navigator.of(sheetContext).pop();
+                        },
+                        borderRadius: BorderRadius.circular(
+                          RadiusTokens.control,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: Space.sm,
+                            horizontal: Space.xs,
+                          ),
+                          child: Row(
+                            children: [
+                              Text(
+                                isCurrent ? 'Now playing' : (i + 1).toString(),
+                                style: TypeScale.caption.copyWith(
+                                  color: isCurrent
+                                      ? Tones.primary
+                                      : Tones.textMuted,
+                                ),
+                              ),
+                              const SizedBox(width: Space.md),
+                              ArtThumb(
+                                sha: t.artSha,
+                                artUrlFor: artUrlFor,
+                                size: 36,
+                              ),
+                              const SizedBox(width: Space.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      t.title,
+                                      style: TypeScale.title.copyWith(
+                                        color: isCurrent ? Tones.primary : null,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      t.artist,
+                                      style: TypeScale.body,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openAlbum(BuildContext context, ManifestTrack track) {
+    ManifestRelease? release;
+    if (track.releaseId != null) {
+      for (final r in manifest.releases) {
+        if (r.id == track.releaseId) {
+          release = r;
+          break;
+        }
+      }
+    }
+    if (release == null) {
+      for (final r in manifest.releases) {
+        if (r.artist == track.artist && r.title == track.album) {
+          release = r;
+          break;
+        }
+      }
+    }
+    final resolved = release;
+    if (resolved == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AlbumPage(
+          release: resolved,
+          manifest: manifest,
+          player: player,
+          store: store,
+          downloading: downloading,
+          onDownload: onDownload,
+          offline: offline,
+          artUrlFor: artUrlFor,
+        ),
+      ),
+    );
+  }
+
+  void _showTrackInfo(BuildContext context, ManifestTrack track) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Tones.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(RadiusTokens.card),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(Space.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(track.title, style: TypeScale.title),
+                const SizedBox(height: Space.md),
+                _InfoRow(label: 'Artist', value: track.artist),
+                _InfoRow(label: 'Album', value: track.album),
+                _InfoRow(label: 'Quality', value: track.qualityLabel),
+                _InfoRow(
+                  label: 'Sample rate',
+                  value: track.sampleRate != null
+                      ? '${track.sampleRate} Hz'
+                      : '—',
+                ),
+                _InfoRow(
+                  label: 'Channels',
+                  value: track.channels != null ? '${track.channels}' : '—',
+                ),
+                _InfoRow(
+                  label: 'Bitrate',
+                  value: track.bitrate != null
+                      ? '${(track.bitrate! / 1000).round()} kbps'
+                      : '—',
+                ),
+                _InfoRow(label: 'Duration', value: track.durationLabel),
+                _InfoRow(
+                  label: 'Size',
+                  value: track.size > 0
+                      ? '${(track.size / 1048576).toStringAsFixed(1)} MB'
+                      : '—',
+                ),
+                _InfoRow(label: 'Release', value: track.releaseId ?? '—'),
+                const SizedBox(height: Space.sm),
+                const Text(
+                  'Quality and identity are derived from the source file '
+                  'and enrichment providers. Enrichment never changes audio.',
+                  style: TypeScale.caption,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -42,15 +253,16 @@ class NowPlayingPage extends StatelessWidget {
             final value = position.inMilliseconds
                 .clamp(0, duration.inMilliseconds)
                 .toDouble();
+            final downloaded = store.pathFor(current.sha) != null;
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
+                    Space.xs,
                     Space.sm,
-                    Space.sm,
-                    Space.sm,
+                    Space.xs,
                     0,
                   ),
                   child: Row(
@@ -62,7 +274,96 @@ class NowPlayingPage extends StatelessWidget {
                           color: Tones.textMuted,
                         ),
                       ),
-                      const Text('Now Playing', style: TypeScale.caption),
+                      const Expanded(
+                        child: Text(
+                          'Now Playing',
+                          textAlign: TextAlign.center,
+                          style: TypeScale.caption,
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(
+                          Icons.more_horiz_rounded,
+                          color: Tones.textMuted,
+                        ),
+                        color: Tones.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            RadiusTokens.control,
+                          ),
+                        ),
+                        onSelected: (action) {
+                          switch (action) {
+                            case 'queue':
+                              _openQueue(context);
+                              break;
+                            case 'artist':
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ArtistPage(
+                                    artist: current.artist,
+                                    manifest: manifest,
+                                    player: player,
+                                    store: store,
+                                    downloading: downloading,
+                                    onDownload: onDownload,
+                                    offline: offline,
+                                    artUrlFor: artUrlFor,
+                                  ),
+                                ),
+                              );
+                              break;
+                            case 'album':
+                              _openAlbum(context, current);
+                              break;
+                            case 'download':
+                              if (downloaded) {
+                                store.remove(current.sha);
+                              } else {
+                                onDownload(current);
+                              }
+                              break;
+                            case 'stop':
+                              player.stop();
+                              break;
+                            case 'info':
+                              _showTrackInfo(context, current);
+                              break;
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'queue',
+                            child: Text('Queue', style: TypeScale.body),
+                          ),
+                          const PopupMenuItem(
+                            value: 'artist',
+                            child: Text('Go to artist', style: TypeScale.body),
+                          ),
+                          const PopupMenuItem(
+                            value: 'album',
+                            child: Text('Go to album', style: TypeScale.body),
+                          ),
+                          PopupMenuItem(
+                            value: 'download',
+                            child: Text(
+                              downloaded ? 'Remove download' : 'Download',
+                              style: TypeScale.body,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'stop',
+                            child: Text('Stop', style: TypeScale.body),
+                          ),
+                          const PopupMenuItem(
+                            value: 'info',
+                            child: Text(
+                              'Track information',
+                              style: TypeScale.body,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -88,28 +389,21 @@ class NowPlayingPage extends StatelessWidget {
                                   RadiusTokens.card,
                                 ),
                               ),
-                              child: current.artSha != null
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(
-                                        RadiusTokens.card,
-                                      ),
-                                      child: Image.network(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(
+                                  RadiusTokens.card,
+                                ),
+                                child: current.artSha != null
+                                    ? Image.network(
                                         artUrlFor(current.artSha!),
                                         width: 220,
                                         height: 220,
                                         fit: BoxFit.cover,
-                                        errorBuilder: (_, _, _) => const Icon(
-                                          Icons.music_note_rounded,
-                                          size: 72,
-                                          color: Tones.textMuted,
-                                        ),
-                                      ),
-                                    )
-                                  : const Icon(
-                                      Icons.music_note_rounded,
-                                      size: 72,
-                                      color: Tones.textMuted,
-                                    ),
+                                        errorBuilder: (_, _, _) =>
+                                            ArtPlaceholder(size: 220),
+                                      )
+                                    : const ArtPlaceholder(size: 220),
+                              ),
                             ),
                             const SizedBox(height: Space.md),
                             Text(
@@ -209,93 +503,37 @@ class NowPlayingPage extends StatelessWidget {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    Space.sm,
-                    Space.lg,
-                    Space.xs,
-                  ),
-                  child: Text('Up next', style: TypeScale.caption),
-                ),
-                Expanded(
-                  flex: 4,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.lg,
-                      0,
-                      Space.lg,
-                      Space.lg,
-                    ),
-                    itemCount: player.queue.length,
-                    itemBuilder: (context, i) {
-                      final t = player.queue[i];
-                      final isCurrent = i == player.index;
-                      return InkWell(
-                        onTap: () {
-                          unawaited(requestNotificationPermissionIfNeeded());
-                          player.playAt(i);
-                        },
-                        borderRadius: BorderRadius.circular(
-                          RadiusTokens.control,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: Space.sm,
-                            horizontal: Space.xs,
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                (i + 1).toString().padLeft(2, '0'),
-                                style: TypeScale.caption.copyWith(
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                  color: isCurrent
-                                      ? Tones.primary
-                                      : Tones.textMuted,
-                                ),
-                              ),
-                              const SizedBox(width: Space.md),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      t.title,
-                                      style: TypeScale.title.copyWith(
-                                        color: isCurrent ? Tones.primary : null,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text(
-                                      t.artist,
-                                      style: TypeScale.body,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (isCurrent)
-                                const Icon(
-                                  Icons.graphic_eq_rounded,
-                                  size: 18,
-                                  color: Tones.primary,
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
               ],
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: Space.xs),
+      child: Row(
+        children: [
+          SizedBox(width: 110, child: Text(label, style: TypeScale.caption)),
+          Expanded(
+            child: Text(
+              value,
+              style: TypeScale.body,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
