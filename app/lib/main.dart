@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/net/tunes_client.dart';
+import 'core/platform/diag_log.dart';
 import 'core/platform/notifications.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
@@ -27,6 +28,7 @@ const _tunesdUrl = String.fromEnvironment(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  DiagLog.init();
   final client = TunesClient(_tunesdUrl);
   final player = MediaKitTunePlayer(
     trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
@@ -41,13 +43,13 @@ Future<void> main() async {
         androidStopForegroundOnPause: true,
       ),
     );
-    AudioService.asyncError.listen(
-      (e) => debugPrint('audio_service async error: $e'),
-    );
-    debugPrint('audio_service init ok');
+    AudioService.asyncError.listen((e) => DiagLog.log('async error: $e'));
+    DiagLog.log('audio_service init ok');
   } catch (e) {
+    DiagLog.log('AudioService.init failed: $e');
     debugPrint('AudioService.init failed (notification disabled): $e');
   }
+  DiagLog.log('runApp');
   runApp(TunesApp(client: client, player: player));
 }
 

@@ -1,6 +1,7 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 
+import '../platform/diag_log.dart';
 import 'tune_player.dart';
 
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
@@ -12,7 +13,7 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   final TunePlayer player;
 
   void _sync() {
-    debugPrint(
+    DiagLog.log(
       'handler sync: playing=${player.playing} current=${player.current?.title}',
     );
     final controls = [
