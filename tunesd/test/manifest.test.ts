@@ -165,6 +165,7 @@ describe("buildManifest", () => {
     expect(m.releases[0]?.artist).toBe("Don Toliver");
     expect(m.tracks[0]?.album).toBe("unknown album");
     expect(m.tracks[0]?.releaseId).toBeNull();
+    expect(m.tracks[0]?.artSha).toBeNull();
   });
 
   it("merges single/combo releases whose titles are token-subsets", () => {

@@ -136,7 +136,7 @@ export function buildManifest(
         artist,
         album: categoryRelease ? "unknown album" : album,
         year,
-        artSha: enrich?.artSha ?? null,
+        artSha: categoryRelease ? null : enrich?.artSha ?? null,
         releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
         trackNumber: enrich?.trackNumber ?? null,
       };

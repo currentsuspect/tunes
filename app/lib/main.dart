@@ -129,7 +129,7 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
   late Future<TunesManifest> _tracks;
   final Set<String> _downloading = {};
@@ -141,6 +141,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tracks = _fetch();
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
@@ -149,9 +150,17 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !widget.reachability.offline) {
+      _reload();
+    }
   }
 
   void _onReachability() {
