@@ -142,27 +142,33 @@ async function main(): Promise<void> {
     if (!discogs) log.warn({ event: "ENRICH_DISCOGS_DISABLED" });
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-    const manifestBuilder = async () => {
+    let enrichPassRunning = false;
+    const runEnrichPass = async () => {
+      if (enrichPassRunning) return;
+      enrichPassRunning = true;
+      try {
       const metaBySha = state.allSeenMeta();
-      for (const obj of await store.listObjects()) {
-        if (!probeCache.has(obj.sha)) {
-          try {
-            probeCache.set(obj.sha, await probeFile(obj.sha, obj.size, store.pathOf(obj.sha)));
-          } catch {
-            log.warn({ event: "PROBE_FAILED", sha: obj.sha });
-            probeCache.set(obj.sha, {
-              sha: obj.sha,
-              size: obj.size,
-              codec: null,
-              sampleRate: null,
-              channels: null,
-              bitrate: null,
-              durationMs: null,
-              tags: {},
-              probedAt: new Date().toISOString(),
-            });
-          }
+      const objects = await store.listObjects();
+      for (const obj of objects) {
+        if (probeCache.has(obj.sha)) continue;
+        try {
+          probeCache.set(obj.sha, await probeFile(obj.sha, obj.size, store.pathOf(obj.sha)));
+        } catch {
+          log.warn({ event: "PROBE_FAILED", sha: obj.sha });
+          probeCache.set(obj.sha, {
+            sha: obj.sha,
+            size: obj.size,
+            codec: null,
+            sampleRate: null,
+            channels: null,
+            bitrate: null,
+            durationMs: null,
+            tags: {},
+            probedAt: new Date().toISOString(),
+          });
         }
+      }
+      for (const obj of objects) {
         const existing = enrich.get(obj.sha);
         const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
         const needsReleaseId = existing && !existing.releaseId;
@@ -371,6 +377,13 @@ async function main(): Promise<void> {
         }
         log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
       }
+      } finally {
+        enrichPassRunning = false;
+      }
+    };
+
+    const manifestBuilder = async () => {
+      const metaBySha = state.allSeenMeta();
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
         enrichForManifest.set(sha, {
@@ -419,6 +432,9 @@ async function main(): Promise<void> {
         log
       );
       await server.start();
+      void runEnrichPass();
+      const enrichTimer = setInterval(() => void runEnrichPass(), 90_000);
+      process.on("exit", () => clearInterval(enrichTimer));
 
       if (immediate) {
         try {

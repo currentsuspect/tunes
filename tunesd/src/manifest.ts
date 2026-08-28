@@ -165,10 +165,6 @@ export function buildManifest(
     if (!release.trackShas.includes(t.sha)) release.trackShas.push(t.sha);
     if (release.artSha == null) release.artSha = t.artSha;
   }
-  const sourceOf = (release: ManifestRelease): string | null => {
-    const md = /^(mb|sp|discogs):/.exec(release.id);
-    return md ? md[1]! : null;
-  };
   const merged = new Map<string, ManifestRelease>();
   for (const r of releaseMap.values()) {
     let target = r;
@@ -176,7 +172,7 @@ export function buildManifest(
     for (const other of releaseMap.values()) {
       if (other === r) continue;
       if (other.artist !== r.artist) continue;
-      if (sourceOf(other) !== sourceOf(r)) continue;
+      if (other.year !== r.year) continue;
       const rSmaller = r.trackShas.length <= other.trackShas.length;
       const small = rSmaller ? r : other;
       const big = rSmaller ? other : r;

@@ -113,7 +113,71 @@ describe("buildManifest", () => {
     expect(m.tracks[0]?.releaseId).toBe("sp:album1");
   });
 
-  it("never merges releases with different external ids", () => {
+  it("merges same-artist single/combo releases across sources when years align", () => {
+    const enrich = new Map([
+      [
+        "a".repeat(64),
+        {
+          artist: "Ken Carson",
+          album: "cartunez",
+          year: "2026",
+          artSha: null,
+          releaseId: "mb:one",
+          releaseType: null,
+          trackNumber: 1,
+        },
+      ],
+      [
+        "b".repeat(64),
+        {
+          artist: "Ken Carson",
+          album: "xperiment - cartunez",
+          year: "2026",
+          artSha: null,
+          releaseId: "sp:two",
+          releaseType: null,
+          trackNumber: 2,
+        },
+      ],
+    ]);
+    const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
+    expect(m.releases.length).toBe(1);
+    expect(m.releases[0]?.title).toBe("xperiment - cartunez");
+    expect(m.releases[0]?.trackShas).toHaveLength(2);
+  });
+
+  it("keeps same-token releases apart when years differ", () => {
+    const enrich = new Map([
+      [
+        "a".repeat(64),
+        {
+          artist: "Artist",
+          album: "Cartunez",
+          year: "2020",
+          artSha: null,
+          releaseId: "mb:one",
+          releaseType: null,
+          trackNumber: 1,
+        },
+      ],
+      [
+        "b".repeat(64),
+        {
+          artist: "Artist",
+          album: "Cartunez (Deluxe)",
+          year: "2024",
+          artSha: null,
+          releaseId: "mb:two",
+          releaseType: null,
+          trackNumber: 1,
+        },
+      ],
+    ]);
+    const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
+    expect(m.releases.length).toBe(2);
+  });
+
+  it("never merges releases that differ in year even with token-subsets", () => {
     const enrich = new Map([
       [
         "a".repeat(64),
@@ -132,7 +196,7 @@ describe("buildManifest", () => {
         {
           artist: "Travis Scott",
           album: "ESCAPE PLAN / MAFIA",
-          year: "2021",
+          year: "2023",
           artSha: null,
           releaseId: "sp:two",
           releaseType: "single",
