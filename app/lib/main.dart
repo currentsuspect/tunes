@@ -28,11 +28,13 @@ const _tunesdUrl = String.fromEnvironment(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  DiagLog.init();
+  await DiagLog.init();
+  DiagLog.log('main start');
   final client = TunesClient(_tunesdUrl);
   final player = MediaKitTunePlayer(
     trackUrlFor: (sha) => '$_tunesdUrl/track/$sha',
   );
+  DiagLog.log('init begin');
   try {
     await AudioService.init(
       builder: () => TuneAudioHandler(player),
