@@ -11,8 +11,8 @@ import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    override fun createFlutterEngine(context: Context): FlutterEngine {
-        val engine = super.createFlutterEngine(context)
+    override fun provideFlutterEngine(context: Context): FlutterEngine? {
+        val engine = super.provideFlutterEngine(context) ?: FlutterEngine(context)
         FlutterEngineCache.getInstance().put("audio_service_engine", engine)
         return engine
     }
