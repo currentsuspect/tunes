@@ -110,6 +110,7 @@ class _SearchViewState extends State<SearchView> {
                     return TrackRow(
                       track: t,
                       onTap: () => widget.player.playQueue(results, i),
+                      player: widget.player,
                       store: widget.store,
                       downloading: widget.downloading.contains(t.sha),
                       onDownload: () => widget.onDownload(t),

@@ -652,6 +652,80 @@ void main() {
     expect(find.text('Play'), findsOneWidget);
   });
 
+  testWidgets('active track is highlighted in the library list', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    await goToLibrary(tester);
+
+    expect(find.byIcon(Icons.graphic_eq_rounded), findsNothing);
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+  });
+
+  testWidgets('album rows highlight the active track compactly', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    final tracks = [
+      _track(
+        'MAFIA',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+      _track(
+        'ESCAPE PLAN',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'b' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'ESCAPE PLAN / MAFIA',
+          artist: 'Travis Scott',
+          year: '2021',
+          artSha: null,
+          type: 'single',
+          trackShas: ['a' * 64, 'b' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), player);
+    await goToLibrary(tester);
+    await tester.tap(find.text('Albums').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('MAFIA'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+    expect(
+      find.textContaining('FLAC'),
+      findsNothing,
+    ); // no quality pill in album rows
+  });
+
   testWidgets('download icon downloads and marks the track offline-ready', (
     tester,
   ) async {

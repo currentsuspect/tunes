@@ -68,7 +68,7 @@ class _FakePlayer extends TunePlayer {
   void toggle() => _playing = !_playing;
 }
 
-ManifestTrack _track(String title) => ManifestTrack(
+ManifestTrack _track(String title, {String? artSha}) => ManifestTrack(
   sha: 'b' * 64,
   size: 10,
   codec: 'flac',
@@ -80,7 +80,7 @@ ManifestTrack _track(String title) => ManifestTrack(
   artist: 'Artist',
   album: 'Album',
   year: null,
-  artSha: null,
+  artSha: artSha,
   releaseId: 'rel-1',
   trackNumber: null,
 );
@@ -135,5 +135,16 @@ void main() {
     expect(item?.title, 'One');
     expect(item?.artist, 'Artist');
     expect(handler.queue.valueOrNull?.length, 2);
+  });
+
+  test('media item carries the track artwork for the notification', () {
+    final withArt = TuneAudioHandler(player, artBase: 'http://box:4780');
+    expect(withArt.mediaItem.valueOrNull?.artUri, isNull);
+
+    player.playQueue([_track('Art', artSha: 'a' * 64)], 0);
+    expect(
+      withArt.mediaItem.valueOrNull?.artUri?.toString(),
+      'http://box:4780/art/${'a' * 64}',
+    );
   });
 }

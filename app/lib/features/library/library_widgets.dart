@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
@@ -9,6 +10,7 @@ class TrackRow extends StatelessWidget {
     super.key,
     required this.track,
     required this.onTap,
+    required this.player,
     required this.store,
     required this.downloading,
     required this.onDownload,
@@ -18,6 +20,7 @@ class TrackRow extends StatelessWidget {
 
   final ManifestTrack track;
   final VoidCallback onTap;
+  final TunePlayer player;
   final DownloadStore store;
   final bool downloading;
   final VoidCallback onDownload;
@@ -28,86 +31,103 @@ class TrackRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final local = store.pathFor(track.sha) != null;
     final dimmed = offline && !local;
-    return Opacity(
-      opacity: dimmed ? 0.45 : 1,
-      child: IgnorePointer(
-        ignoring: dimmed,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(RadiusTokens.control),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              vertical: Space.sm,
-              horizontal: Space.xs,
-            ),
-            child: Row(
-              children: [
-                ArtThumb(sha: track.artSha, artUrlFor: artUrlFor),
-                const SizedBox(width: Space.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        track.title,
-                        style: TypeScale.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${track.artist} — ${track.album}',
-                        style: TypeScale.body,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final active = player.current?.sha == track.sha;
+        final titleColor = active ? Tones.primary : null;
+        return Opacity(
+          opacity: dimmed ? 0.45 : 1,
+          child: IgnorePointer(
+            ignoring: dimmed,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(RadiusTokens.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: Space.sm,
+                  horizontal: Space.xs,
+                ),
+                child: Row(
+                  children: [
+                    ArtThumb(sha: track.artSha, artUrlFor: artUrlFor),
+                    if (active && player.playing) ...[
+                      const SizedBox(width: Space.sm),
+                      const Icon(
+                        Icons.graphic_eq_rounded,
+                        size: 16,
+                        color: Tones.primary,
                       ),
                     ],
-                  ),
-                ),
-                const SizedBox(width: Space.md),
-                QualityBadge(label: track.qualityLabel),
-                const SizedBox(width: Space.md),
-                Text(
-                  track.durationLabel,
-                  style: TypeScale.caption.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-                ListenableBuilder(
-                  listenable: store,
-                  builder: (context, _) {
-                    if (downloading) {
-                      return const Padding(
-                        padding: EdgeInsets.all(Space.sm),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Tones.primary,
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            track.title,
+                            style: TypeScale.title.copyWith(color: titleColor),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      );
-                    }
-                    final dl = store.pathFor(track.sha) != null;
-                    return IconButton(
-                      onPressed: dl || offline ? null : onDownload,
-                      icon: Icon(
-                        dl ? Icons.offline_pin_rounded : Icons.download_rounded,
-                        color: dl ? Tones.primary : Tones.textMuted,
-                        size: 20,
+                          const SizedBox(height: 2),
+                          Text(
+                            '${track.artist} — ${track.album}',
+                            style: TypeScale.body,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      tooltip: dl
-                          ? 'Downloaded — offline ready'
-                          : 'Download to device',
-                    );
-                  },
+                    ),
+                    const SizedBox(width: Space.md),
+                    QualityBadge(label: track.qualityLabel),
+                    const SizedBox(width: Space.md),
+                    Text(
+                      track.durationLabel,
+                      style: TypeScale.caption.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    ListenableBuilder(
+                      listenable: store,
+                      builder: (context, _) {
+                        if (downloading) {
+                          return const Padding(
+                            padding: EdgeInsets.all(Space.sm),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Tones.primary,
+                              ),
+                            ),
+                          );
+                        }
+                        final dl = store.pathFor(track.sha) != null;
+                        return IconButton(
+                          onPressed: dl || offline ? null : onDownload,
+                          icon: Icon(
+                            dl
+                                ? Icons.offline_pin_rounded
+                                : Icons.download_rounded,
+                            color: dl ? Tones.primary : Tones.textMuted,
+                            size: 20,
+                          ),
+                          tooltip: dl
+                              ? 'Downloaded — offline ready'
+                              : 'Download to device',
+                        );
+                      },
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

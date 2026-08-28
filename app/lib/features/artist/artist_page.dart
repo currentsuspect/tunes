@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
 import '../library/library_widgets.dart';
@@ -33,10 +34,6 @@ class ArtistPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final tracks = manifest.tracks.where((t) => t.artist == artist).toList();
     final releases = manifest.releasesFor(artist);
-    final portrait = tracks.firstWhere(
-      (t) => t.artSha != null,
-      orElse: () => tracks.first,
-    );
 
     return Scaffold(
       body: SafeArea(
@@ -74,22 +71,7 @@ class ArtistPage extends StatelessWidget {
                   Space.lg,
                 ),
                 children: [
-                  Center(
-                    child: ClipOval(
-                      child: SizedBox(
-                        width: 140,
-                        height: 140,
-                        child: portrait.artSha != null
-                            ? Image.network(
-                                artUrlFor(portrait.artSha!),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) =>
-                                    const ArtPlaceholder(size: 140),
-                              )
-                            : const ArtPlaceholder(size: 140),
-                      ),
-                    ),
-                  ),
+                  Center(child: InitialsAvatar(name: artist, size: 140)),
                   const SizedBox(height: Space.lg),
                   Text(
                     artist,

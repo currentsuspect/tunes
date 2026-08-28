@@ -4,12 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'tune_player.dart';
 
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
-  TuneAudioHandler(this.player) {
+  TuneAudioHandler(this.player, {this.artBase = ''}) {
     player.addListener(_sync);
     _sync();
   }
 
   final TunePlayer player;
+  final String artBase;
 
   void _sync() {
     final controls = [
@@ -48,6 +49,9 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
         title: current.title,
         artist: current.artist,
         album: current.album,
+        artUri: current.artSha != null
+            ? Uri.parse('$artBase/art/${current.artSha}')
+            : null,
         duration: current.durationMs != null
             ? Duration(milliseconds: current.durationMs!)
             : null,

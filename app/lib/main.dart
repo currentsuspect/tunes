@@ -55,7 +55,7 @@ Future<void> main() async {
   DiagLog.log('init begin');
   try {
     await AudioService.init(
-      builder: () => TuneAudioHandler(player),
+      builder: () => TuneAudioHandler(player, artBase: _tunesdUrl),
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.currentsuspect.tunes.channel.audio',
         androidNotificationChannelName: 'Tunes playback',

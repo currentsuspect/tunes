@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import '../library/library_widgets.dart';
 
@@ -72,10 +73,6 @@ class HomeView extends StatelessWidget {
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
             itemBuilder: (context, i) {
               final e = artistList[i];
-              final art = e.value.firstWhere(
-                (t) => t.artSha != null,
-                orElse: () => e.value.first,
-              );
               return InkWell(
                 onTap: () => onArtistTap(e.key),
                 borderRadius: BorderRadius.circular(RadiusTokens.control),
@@ -83,20 +80,7 @@ class HomeView extends StatelessWidget {
                   width: 76,
                   child: Column(
                     children: [
-                      ClipOval(
-                        child: SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: art.artSha != null
-                              ? Image.network(
-                                  artUrlFor(art.artSha!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      const ArtPlaceholder(size: 64),
-                                )
-                              : const ArtPlaceholder(size: 64),
-                        ),
-                      ),
+                      InitialsAvatar(name: e.key, size: 64),
                       const SizedBox(height: Space.xs),
                       Text(
                         e.key,

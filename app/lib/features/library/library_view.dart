@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import 'library_widgets.dart';
 
@@ -110,6 +111,7 @@ class _LibraryViewState extends State<LibraryView> {
         itemBuilder: (context, i) {
           final t = filtered[i];
           return TrackRow(
+            player: widget.player,
             track: t,
             onTap: () => _play(filtered, i),
             store: widget.store,
@@ -193,10 +195,6 @@ class _LibraryViewState extends State<LibraryView> {
       itemBuilder: (context, i) {
         final name = entries[i].key;
         final tracks = entries[i].value;
-        final art = tracks.firstWhere(
-          (t) => t.artSha != null,
-          orElse: () => tracks.first,
-        );
         return InkWell(
           onTap: () => widget.onArtistTap(name),
           borderRadius: BorderRadius.circular(RadiusTokens.control),
@@ -207,13 +205,7 @@ class _LibraryViewState extends State<LibraryView> {
             ),
             child: Row(
               children: [
-                ClipOval(
-                  child: ArtThumb(
-                    sha: art.artSha,
-                    artUrlFor: widget.artUrlFor,
-                    size: 48,
-                  ),
-                ),
+                InitialsAvatar(name: name, size: 48),
                 const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(

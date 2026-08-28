@@ -131,30 +131,47 @@ class AlbumPage extends StatelessWidget {
                   ),
                   const SizedBox(height: Space.xs),
                   Text(
-                    '${release.typeLabel} · ${release.year ?? '—'} · ${release.trackShas.length} ${release.trackShas.length == 1 ? 'track' : 'tracks'}',
+                    '${release.typeLabel} · ${release.year ?? '—'} · ${release.trackShas.length} ${release.trackShas.length == 1 ? 'track' : 'tracks'} · ${_totalMinutes(releaseTracks)} min',
                     textAlign: TextAlign.center,
                     style: TypeScale.caption,
                   ),
                   const SizedBox(height: Space.lg),
-                  FilledButton.icon(
-                    onPressed: () => player.playQueue(releaseTracks, 0),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                    label: const Text('Play'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Tones.primary,
-                      foregroundColor: Tones.onPrimary,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () => player.playQueue(releaseTracks, 0),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                        label: const Text('Play'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Tones.primary,
+                          foregroundColor: Tones.onPrimary,
+                        ),
+                      ),
+                      const SizedBox(width: Space.md),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          for (final t in releaseTracks) {
+                            onDownload(t);
+                          }
+                        },
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Download'),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: Space.md),
                   const SizedBox(height: Space.lg),
                   for (var i = 0; i < releaseTracks.length; i++) ...[
-                    TrackRow(
+                    _AlbumTrackRow(
                       track: releaseTracks[i],
-                      onTap: () => player.playQueue(releaseTracks, i),
+                      position: releaseTracks[i].trackNumber ?? i + 1,
+                      player: player,
+                      onPlay: () => player.playQueue(releaseTracks, i),
                       store: store,
                       downloading: downloading.contains(releaseTracks[i].sha),
                       onDownload: () => onDownload(releaseTracks[i]),
                       offline: offline,
-                      artUrlFor: artUrlFor,
                     ),
                     if (i < releaseTracks.length - 1) const Divider(),
                   ],
@@ -164,6 +181,116 @@ class AlbumPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+int _totalMinutes(List<ManifestTrack> tracks) {
+  final ms = tracks.fold<int>(0, (sum, t) => sum + (t.durationMs ?? 0));
+  return (ms / 60000).round();
+}
+
+class _AlbumTrackRow extends StatelessWidget {
+  const _AlbumTrackRow({
+    required this.track,
+    required this.position,
+    required this.player,
+    required this.onPlay,
+    required this.store,
+    required this.downloading,
+    required this.onDownload,
+    required this.offline,
+  });
+
+  final ManifestTrack track;
+  final int position;
+  final TunePlayer player;
+  final VoidCallback onPlay;
+  final DownloadStore store;
+  final bool downloading;
+  final VoidCallback onDownload;
+  final bool offline;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final active = player.current?.sha == track.sha;
+        return InkWell(
+          onTap: onPlay,
+          borderRadius: BorderRadius.circular(RadiusTokens.control),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: Space.sm,
+              horizontal: Space.xs,
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 30,
+                  child: active && player.playing
+                      ? const Icon(
+                          Icons.graphic_eq_rounded,
+                          size: 16,
+                          color: Tones.primary,
+                        )
+                      : Text(
+                          position.toString().padLeft(2, '0'),
+                          style: TypeScale.caption.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                            color: active ? Tones.primary : Tones.textMuted,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: Space.md),
+                Expanded(
+                  child: Text(
+                    track.title,
+                    style: TypeScale.title.copyWith(
+                      color: active ? Tones.primary : null,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: Space.md),
+                ListenableBuilder(
+                  listenable: store,
+                  builder: (context, _) {
+                    if (downloading) {
+                      return const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Tones.primary,
+                        ),
+                      );
+                    }
+                    final dl = store.pathFor(track.sha) != null;
+                    return IconButton(
+                      onPressed: dl || offline ? null : onDownload,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        dl ? Icons.offline_pin_rounded : Icons.download_rounded,
+                        color: dl ? Tones.primary : Tones.textMuted,
+                        size: 18,
+                      ),
+                    );
+                  },
+                ),
+                Text(
+                  track.durationLabel,
+                  style: TypeScale.caption.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
