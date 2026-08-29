@@ -218,7 +218,8 @@ export class MusicBrainzClient {
     score: number | null;
   }>> {
     const query = `artist:"${q.replace(/"/g, "")}"`;
-    const body = await this.getJson<{
+    const url = `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json&limit=${limit}`;
+    let body = await this.getJson<{
       artists?: Array<{
         id?: string;
         name?: string;
@@ -226,9 +227,19 @@ export class MusicBrainzClient {
         disambiguation?: string | null;
         score?: number | null;
       }>;
-    }>(
-      `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json&limit=${limit}`
-    );
+    }>(url);
+    if (!body) {
+      await new Promise((r) => setTimeout(r, 3_000));
+      body = await this.getJson<{
+        artists?: Array<{
+          id?: string;
+          name?: string;
+          type?: string | null;
+          disambiguation?: string | null;
+          score?: number | null;
+        }>;
+      }>(url);
+    }
     return (body?.artists ?? [])
       .filter((a) => a.id && a.name)
       .map((a) => ({
@@ -240,25 +251,89 @@ export class MusicBrainzClient {
       }));
   }
 
+  async searchReleaseGroups(
+    q: string,
+    limit = 6
+  ): Promise<DiscographyGroup[]> {
+    const terms = q
+      .replace(/"/g, "")
+      .split(/\s+/)
+      .filter((t) => t !== "");
+    if (terms.length === 0) return [];
+    const query = terms.map((t) => `releasegroup:${t}`).join(" AND ");
+    const url = `https://musicbrainz.org/ws/2/release-group?query=${encodeURIComponent(query)}&fmt=json&limit=${limit}`;
+    let body = await this.getJson<{
+      "release-groups"?: Array<{
+        id?: string;
+        title?: string;
+        "primary-type"?: string | null;
+        "first-release-date"?: string | null;
+        "artist-credit"?: Array<{ name?: string }>;
+      }>;
+    }>(url);
+    if (!body) {
+      await new Promise((r) => setTimeout(r, 3_000));
+      body = await this.getJson<{
+        "release-groups"?: Array<{
+          id?: string;
+          title?: string;
+          "primary-type"?: string | null;
+          "first-release-date"?: string | null;
+          "artist-credit"?: Array<{ name?: string }>;
+        }>;
+      }>(url);
+    }
+    return (body?.["release-groups"] ?? [])
+      .filter((g) => g.id && g.title)
+      .map((g) => ({
+        id: g.id ?? "",
+        title: g.title ?? "",
+        type: g["primary-type"] ?? null,
+        year: g["first-release-date"] ? g["first-release-date"].slice(0, 4) : null,
+        date: g["first-release-date"] ?? null,
+        artist: g["artist-credit"]?.[0]?.name ?? null,
+      }));
+  }
+
   async artistDiscography(
     name: string
   ): Promise<{ mbid: string; groups: DiscographyGroup[] } | null> {
     const q = `artist:"${name.replace(/"/g, "")}"`;
-    const search = await this.getJson<{
+    let search = await this.getJson<{
       artists?: Array<{ id: string; name?: string }>;
     }>(
       `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(q)}&fmt=json&limit=1`
     );
+    if (!search) {
+      await new Promise((r) => setTimeout(r, 3_000));
+      search = await this.getJson<{
+        artists?: Array<{ id: string; name?: string }>;
+      }>(
+        `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(q)}&fmt=json&limit=1`
+      );
+    }
     const mbid = search?.artists?.[0]?.id;
     if (!mbid) return null;
-    const body = await this.getJson<{
+    const url = `https://musicbrainz.org/ws/2/artist/${mbid}?inc=release-groups&fmt=json`;
+    let body = await this.getJson<{
       "release-groups"?: Array<{
         id?: string;
         title?: string;
         "primary-type"?: string | null;
         "first-release-date"?: string | null;
       }>;
-    }>(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=release-groups&fmt=json`);
+    }>(url);
+    if (!body) {
+      await new Promise((r) => setTimeout(r, 3_000));
+      body = await this.getJson<{
+        "release-groups"?: Array<{
+          id?: string;
+          title?: string;
+          "primary-type"?: string | null;
+          "first-release-date"?: string | null;
+        }>;
+      }>(url);
+    }
     const groups = (body?.["release-groups"] ?? [])
       .map((g) => ({
         id: g.id ?? "",

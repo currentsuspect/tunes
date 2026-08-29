@@ -5,8 +5,18 @@ import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV2 } from "./manifest.js";
-import type { ArtistDiscography, ExternalArtist, JoinedGroup } from "./discography.js";
-import { dedupeExternalArtists, joinDiscography, normName } from "./discography.js";
+import type {
+  ArtistDiscography,
+  DiscographyGroup,
+  ExternalArtist,
+  JoinedGroup,
+} from "./discography.js";
+import {
+  dedupeExternalArtists,
+  dedupeExternalReleases,
+  joinDiscography,
+  normName,
+} from "./discography.js";
 
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -36,6 +46,9 @@ export class ManifestServer {
     private readonly searchExternalArtists:
       | ((q: string) => Promise<ExternalArtist[]>)
       | null = null,
+    private readonly searchExternalReleases:
+      | ((q: string) => Promise<DiscographyGroup[]>)
+      | null = null,
     private readonly fetchDiscography:
       | ((name: string) => Promise<ArtistDiscography | null>)
       | null = null
@@ -45,7 +58,7 @@ export class ManifestServer {
 
   private readonly externalCache: Map<
     string,
-    { at: number; hits: ExternalArtist[] }
+    { at: number; artists: ExternalArtist[]; releases: DiscographyGroup[] }
   >;
 
   private async getManifest(force = false): Promise<ManifestV2> {
@@ -108,34 +121,49 @@ export class ManifestServer {
             .slice(0, limit);
           const artists = manifest.artists.filter((a) => norm(a.name).includes(qn)).slice(0, limit);
           let externalArtists: ExternalArtist[] = [];
-          const searcher = this.searchExternalArtists;
-          if (searcher) {
+          let externalReleases: JoinedGroup[] = [];
+          const artistSearcher = this.searchExternalArtists;
+          const releaseSearcher = this.searchExternalReleases;
+          if (artistSearcher && releaseSearcher) {
+            let artists: ExternalArtist[] = [];
+            let rg: DiscographyGroup[] = [];
             const cached = this.externalCache.get(qn);
             if (cached && Date.now() - cached.at < 30 * 60_000) {
-              externalArtists = cached.hits;
+              artists = cached.artists;
+              rg = cached.releases;
             } else {
               try {
-                const hits = await searcher(q);
-                this.externalCache.set(qn, { at: Date.now(), hits });
+                [artists, rg] = await Promise.all([
+                  artistSearcher(q),
+                  releaseSearcher(q),
+                ]);
+                if (artists.length > 0 || rg.length > 0) {
+                  this.externalCache.set(qn, { at: Date.now(), artists, releases: rg });
+                }
                 if (this.externalCache.size > 64) {
                   const oldest = [...this.externalCache.entries()].sort(
                     (a, b) => a[1].at - b[1].at
                   )[0]?.[0];
                   if (oldest) this.externalCache.delete(oldest);
                 }
-                externalArtists = hits;
               } catch {
-                externalArtists = [];
+                // both stay empty; search still answers with local results
               }
             }
             const localNames = [
               ...manifest.artists.map((a) => a.name),
               ...manifest.tracks.map((t) => t.artist),
             ];
-            externalArtists = dedupeExternalArtists(externalArtists, localNames);
+            const localTitles = manifest.releases.map((r) => r.title);
+            externalArtists = dedupeExternalArtists(artists, localNames);
+            externalReleases = joinDiscography(
+              dedupeExternalReleases(rg, localTitles),
+              manifest.releases
+            );
           }
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ tracks, releases, artists, externalArtists }));
+          res.end(
+            JSON.stringify({ tracks, releases, artists, externalArtists, externalReleases })
+          );
           return;
         }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinDiscography } from "../src/discography.js";
+import { dedupeExternalArtists, dedupeExternalReleases, joinDiscography } from "../src/discography.js";
 import type { DiscographyGroup } from "../src/discography.js";
 import type { ManifestRelease } from "../src/manifest.js";
 
@@ -50,7 +50,7 @@ describe("joinDiscography", () => {
     expect(first?.date).toBe("2024-08-09");
   });
 });
-import { dedupeExternalArtists } from "../src/discography.js";
+
 
 describe("dedupeExternalArtists", () => {
   it("drops hits that match local library names", () => {
@@ -70,5 +70,17 @@ describe("dedupeExternalArtists", () => {
     ];
     const out = dedupeExternalArtists(hits, []);
     expect(out.map((h) => h.name)).toEqual(["Octane"]);
+  });
+});
+
+describe("dedupeExternalReleases", () => {
+  it("drops hits whose title matches a local release", () => {
+    const hits: DiscographyGroup[] = [
+      { id: "rg1", title: "HARDSTONE PSYCHO", type: "Album", year: "2024", date: "2024-08-09" },
+      { id: "rg2", title: "OCTANE", type: "Album", year: "2026", date: "2026-06-26" },
+      { id: "rg3", title: "HARDSTONE PSYCHO (DELUXE)", type: "Album", year: "2024", date: null },
+    ];
+    const out = dedupeExternalReleases(hits, ["hardstone psycho"]);
+    expect(out.map((h) => h.title)).toEqual(["OCTANE", "HARDSTONE PSYCHO (DELUXE)"]);
   });
 });

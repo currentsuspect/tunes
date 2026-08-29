@@ -6,6 +6,7 @@ export interface DiscographyGroup {
   type: string | null;
   year: string | null;
   date: string | null;
+  artist?: string | null;
 }
 
 export interface ArtistDiscography {
@@ -53,6 +54,22 @@ export interface ExternalArtist {
   type: string | null;
   disambiguation: string | null;
   score: number | null;
+}
+
+export function dedupeExternalReleases(
+  hits: DiscographyGroup[],
+  localTitles: Iterable<string>
+): DiscographyGroup[] {
+  const local = new Set([...localTitles].map((t) => normName(t)));
+  const seen = new Set<string>();
+  const out: DiscographyGroup[] = [];
+  for (const h of hits) {
+    const key = normName(h.title);
+    if (local.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(h);
+  }
+  return out;
 }
 
 export function dedupeExternalArtists(

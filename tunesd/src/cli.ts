@@ -734,6 +734,7 @@ async function main(): Promise<void> {
         log,
         () => discographies,
         (q) => mb.searchArtists(q),
+        (q) => mb.searchReleaseGroups(q),
         async (name) => {
           const d = await mb.artistDiscography(name);
           if (!d) return null;

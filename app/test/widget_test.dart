@@ -445,6 +445,53 @@ void main() {
     expect(find.text('Album'), findsWidgets);
   });
 
+  testWidgets(
+    'search surfaces releases from MusicBrainz with ownership flags',
+    (tester) async {
+      final manifest = _manifestOf(_library());
+      final client = _FakeClient(
+        () async => manifest,
+        onSearch: (q) async => SearchResults(
+          tracks: [],
+          releases: [],
+          artists: [],
+          externalArtists: const [],
+          externalReleases: const [
+            ExternalRelease(
+              id: 'rg-octane',
+              title: 'OCTANE',
+              artist: 'Don Toliver',
+              type: 'Album',
+              year: '2026',
+              date: '2026-06-26',
+              owned: false,
+              releaseId: null,
+              ownedTracks: 0,
+              totalTracks: null,
+            ),
+          ],
+        ),
+      );
+      await pumpApp(tester, client, FakeTunePlayer());
+
+      await tester.tap(find.text('Search'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'octane');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Albums on MusicBrainz'), findsOneWidget);
+      expect(find.text('OCTANE'), findsOneWidget);
+      expect(find.text('Don Toliver · Album · 2026'), findsOneWidget);
+      expect(find.text('not in library'), findsOneWidget);
+
+      await tester.tap(find.text('OCTANE'));
+      await tester.pumpAndSettle();
+      expect(find.text('Don Toliver'), findsWidgets);
+    },
+  );
+
   testWidgets('search surfaces artists from MusicBrainz and opens their page', (
     tester,
   ) async {

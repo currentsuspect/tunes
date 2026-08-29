@@ -156,12 +156,14 @@ class SearchResults {
     required this.releases,
     required this.artists,
     this.externalArtists = const [],
+    this.externalReleases = const [],
   });
 
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
   final List<ManifestArtist> artists;
   final List<ExternalArtist> externalArtists;
+  final List<ExternalRelease> externalReleases;
 
   factory SearchResults.fromJson(Map<String, dynamic> json) {
     return SearchResults(
@@ -176,6 +178,9 @@ class SearchResults {
           .toList(),
       externalArtists: (json['externalArtists'] as List<dynamic>? ?? const [])
           .map((a) => ExternalArtist.fromJson(a as Map<String, dynamic>))
+          .toList(),
+      externalReleases: (json['externalReleases'] as List<dynamic>? ?? const [])
+          .map((a) => ExternalRelease.fromJson(a as Map<String, dynamic>))
           .toList(),
     );
   }

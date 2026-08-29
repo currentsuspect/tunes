@@ -169,6 +169,98 @@ class _SearchViewState extends State<SearchView> {
                         const Divider(),
                       ],
                     ],
+                    if (fromServer && _server!.externalReleases.isNotEmpty) ...[
+                      const SizedBox(height: Space.md),
+                      const Text(
+                        'Albums on MusicBrainz',
+                        style: TypeScale.title,
+                      ),
+                      const SizedBox(height: Space.sm),
+                      for (final r in _server!.externalReleases) ...[
+                        InkWell(
+                          onTap: () {
+                            if (r.owned && r.releaseId != null) {
+                              for (final local in widget.releases) {
+                                if (local.id == r.releaseId) {
+                                  widget.onAlbumTap?.call(local);
+                                  return;
+                                }
+                              }
+                            }
+                            if (r.artist != null) {
+                              widget.onArtistTap?.call(r.artist!);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(
+                            RadiusTokens.control,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: Space.sm,
+                              horizontal: Space.xs,
+                            ),
+                            child: Row(
+                              children: [
+                                ArtThumb(
+                                  sha: null,
+                                  artUrlFor: widget.artUrlFor,
+                                  size: 44,
+                                ),
+                                const SizedBox(width: Space.md),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        r.title,
+                                        style: TypeScale.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        [
+                                          if (r.artist != null) r.artist!,
+                                          r.typeLabel,
+                                          r.year ?? '—',
+                                        ].join(' · '),
+                                        style: TypeScale.caption,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: Space.sm),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: Space.sm,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Tones.surfaceRaised,
+                                    borderRadius: BorderRadius.circular(
+                                      RadiusTokens.control,
+                                    ),
+                                    border: Border.all(color: Tones.hairline),
+                                  ),
+                                  child: Text(
+                                    r.owned ? 'in library' : 'not in library',
+                                    style: TypeScale.caption.copyWith(
+                                      color: r.owned
+                                          ? Tones.primary
+                                          : Tones.textMuted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Divider(),
+                      ],
+                    ],
                     if (fromServer && _server!.externalArtists.isNotEmpty) ...[
                       const SizedBox(height: Space.md),
                       const Text(
