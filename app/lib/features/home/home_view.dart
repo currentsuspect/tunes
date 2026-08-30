@@ -49,6 +49,14 @@ class HomeView extends StatelessWidget {
     final releases = manifest.releases;
 
     final now = DateTime.now();
+    final justAdded = <ManifestTrack>[];
+    final cutoff = now.subtract(const Duration(hours: 24));
+    for (final t in tracks) {
+      if (t.addedAt == null) continue;
+      if (t.addedAt!.isAfter(cutoff)) justAdded.add(t);
+    }
+    final justAddedSorted = [...justAdded]
+      ..sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
     final missing =
         releases
             .where(
@@ -77,6 +85,47 @@ class HomeView extends StatelessWidget {
           '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
           style: TypeScale.caption,
         ),
+        if (justAddedSorted.isNotEmpty) ...[
+          const SizedBox(height: Space.lg),
+          const Text('Just added', style: TypeScale.title),
+          const SizedBox(height: Space.sm),
+          for (final t in justAddedSorted.take(6))
+            InkWell(
+              onTap: () => onPlay([t], 0),
+              borderRadius: BorderRadius.circular(RadiusTokens.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: Space.sm,
+                  horizontal: Space.xs,
+                ),
+                child: Row(
+                  children: [
+                    ArtThumb(sha: t.artSha, artUrlFor: artUrlFor),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            t.title,
+                            style: TypeScale.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '${t.artist} · ${_addedAgo(t.addedAt!, now)}',
+                            style: TypeScale.body,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
         if (missing.isNotEmpty) ...[
           const SizedBox(height: Space.lg),
           const Text('Missing from your collection', style: TypeScale.title),
@@ -308,5 +357,13 @@ class HomeView extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  String _addedAgo(DateTime addedAt, DateTime now) {
+    final diff = now.difference(addedAt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }

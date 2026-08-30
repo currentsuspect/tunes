@@ -18,6 +18,8 @@ class ManifestTrack {
     required this.trackNumber,
     required this.discNumber,
     this.releaseIds = const [],
+    this.addedAt,
+    this.totalTracks,
   });
 
   final String sha;
@@ -36,6 +38,8 @@ class ManifestTrack {
   final int? trackNumber;
   final int? discNumber;
   final List<String> releaseIds;
+  final int? totalTracks;
+  final DateTime? addedAt;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -57,7 +61,15 @@ class ManifestTrack {
           .toList(),
       trackNumber: (json['trackNumber'] as num?)?.toInt(),
       discNumber: (json['discNumber'] as num?)?.toInt(),
+      totalTracks: (json['totalTracks'] as num?)?.toInt(),
+      addedAt: _parseAddedAt(json['addedAt']),
     );
+  }
+
+  static DateTime? _parseAddedAt(Object? raw) {
+    if (raw == null) return null;
+    if (raw is String && raw.isEmpty) return null;
+    return DateTime.tryParse(raw as String);
   }
 
   String get qualityLabel {

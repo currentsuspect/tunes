@@ -48,6 +48,10 @@ jobs:
         run: flutter pub get
         working-directory: app
 
+      - name: Generate drift code
+        run: dart run build_runner build --delete-conflicting-outputs
+        working-directory: app
+
       - name: Format check
         run: dart format --output=none --set-exit-if-changed lib test
         working-directory: app

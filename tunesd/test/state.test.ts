@@ -61,4 +61,50 @@ describe("State", () => {
     expect(s.cursorOf("1").headCursor).toBe(0);
     expect(s.allSeenShas()).toEqual([]);
   });
+
+  it("stamps addedAt on first markSeen and preserves it across re-marks", async () => {
+    const s = await new State(path).load();
+    s.markSeen("42", 7, "abc", null, null);
+    const first = s.addedAtFor("abc");
+    expect(first).not.toBeNull();
+
+    s.markSeen("42", 7, "abc", "different caption", null);
+    const second = s.addedAtFor("abc");
+    expect(second).toBe(first);
+  });
+
+  it("resets addedAt when the same message points at a new sha", async () => {
+    const s = await new State(path).load();
+    s.markSeen("42", 7, "abc", null, null);
+    const original = s.addedAtFor("abc");
+    expect(original).not.toBeNull();
+
+    // Mutate the prior entry's addedAt to a known past value, then re-mark
+    // with a new sha. The fresh stamp must overwrite that past value.
+    const past = "2020-01-01T00:00:00.000Z";
+    const internal = s as unknown as {
+      data: { seen: Record<string, { addedAt: string }> };
+    };
+    const entry = internal.data.seen["42:7"]!;
+    entry.addedAt = past;
+    expect(s.addedAtFor("abc")).toBe(past);
+
+    s.markSeen("42", 7, "xyz", null, null);
+    const fresh = s.addedAtFor("xyz");
+    expect(fresh).not.toBeNull();
+    expect(fresh === past).toBe(false);
+    // Old sha's addedAt is no longer reachable from this key.
+    expect(s.addedAtFor("abc")).toBeNull();
+  });
+
+  it("allAddedAt returns one entry per unique sha, first-seen wins", async () => {
+    const s = await new State(path).load();
+    s.markSeen("42", 1, "sha-a", null, null);
+    s.markSeen("42", 2, "sha-a", null, null);
+    s.markSeen("42", 3, "sha-b", null, null);
+    const all = s.allAddedAt();
+    expect(all.size).toBe(2);
+    expect(all.has("sha-a")).toBe(true);
+    expect(all.has("sha-b")).toBe(true);
+  });
 });

@@ -169,6 +169,7 @@ tracks          id, content_sha, duration_ms, title, artists[], album
                 recording_identity: v1 = sha+duration+normalized tags (M4: fingerprint-verified)
                 musicbrainz_id (nullable, enrichment only — never canonical)
                 quality_rank, canonical_object_id, dupe_object_ids[], r128_lufs, r128_peak
+                added_at (v3: server-stamped on first-seen, sticky across re-syncs; clients sort Library by this)
 albums          id, musicbrainz_release_id (nullable), title, artist, year, cover_id
 sync_state      schema_version, last_manifest_sha, last_sync_at
 downloads       track_id, status, local_path, added_at, size

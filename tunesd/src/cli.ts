@@ -697,7 +697,8 @@ async function main(): Promise<void> {
         enrichForManifest,
         objects,
         artistList,
-        linkMeta
+        linkMeta,
+        state.allAddedAt()
       );
     };
 

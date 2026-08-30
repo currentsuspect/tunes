@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
+import 'core/data/database.dart';
 import 'core/data/download_store.dart';
+import 'core/data/manifest_store.dart';
 import 'core/data/reachability.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
@@ -45,6 +47,8 @@ Future<void> main() async {
   final support = await getApplicationSupportDirectory();
   final store = DownloadStore(support);
   await store.load();
+  final db = TunesDatabase();
+  final manifestStore = ManifestStore(db);
   final client = TunesClient(_tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
@@ -87,6 +91,7 @@ Future<void> main() async {
       player: player,
       store: store,
       reachability: reachability,
+      manifestStore: manifestStore,
     ),
   );
 }
@@ -98,12 +103,14 @@ class TunesApp extends StatelessWidget {
     required this.player,
     required this.store,
     required this.reachability,
+    required this.manifestStore,
   });
 
   final TunesClient client;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
+  final ManifestStore manifestStore;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +124,7 @@ class TunesApp extends StatelessWidget {
         player: player,
         store: store,
         reachability: reachability,
+        manifestStore: manifestStore,
       ),
     );
   }
@@ -129,12 +137,14 @@ class AppShell extends StatefulWidget {
     required this.player,
     required this.store,
     required this.reachability,
+    required this.manifestStore,
   });
 
   final TunesClient client;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
+  final ManifestStore manifestStore;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -142,7 +152,9 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
-  late Future<TunesManifest> _tracks;
+  TunesManifest? _manifest;
+  bool _syncing = false;
+  Object? _lastSyncError;
   final Set<String> _downloading = {};
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
@@ -153,10 +165,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tracks = _fetch();
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
     widget.player.addListener(_trackRecents);
+    // Hydrate from the store before kicking off a sync, so the sync's
+    // setState doesn't race against a stale in-memory snapshot.
+    _bootstrap();
   }
 
   @override
@@ -196,25 +210,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<TunesManifest> _fetch() {
-    return widget.client.fetchManifest().then(
-      (manifest) {
-        widget.reachability.setOffline(false);
-        return manifest;
-      },
-      onError: (Object e) {
-        widget.reachability.setOffline(true);
-        throw e;
-      },
-    );
+  Future<void> _hydrateFromStore() async {
+    try {
+      final manifest = await _manifestFromStore();
+      if (mounted) setState(() => _manifest = manifest);
+    } catch (_) {
+      // cold start with empty db is fine; _sync will fill it.
+    }
+  }
+
+  Future<void> _bootstrap() async {
+    await _hydrateFromStore();
+    if (mounted) await _sync();
+  }
+
+  Future<TunesManifest> _manifestFromStore() async {
+    final tracks = await widget.manifestStore.allTracksNewestFirst();
+    final releases = await widget.manifestStore.allReleases();
+    final artists = await widget.manifestStore.allArtists();
+    return TunesManifest(tracks: tracks, releases: releases, artists: artists);
+  }
+
+  Future<void> _sync() async {
+    if (_syncing) return;
+    setState(() {
+      _syncing = true;
+      _lastSyncError = null;
+    });
+    TunesManifest? raw;
+    Object? fetchError;
+    try {
+      raw = await widget.client.fetchManifest();
+      widget.reachability.setOffline(false);
+    } catch (e) {
+      fetchError = e;
+      widget.reachability.setOffline(true);
+    }
+    if (raw != null && mounted) {
+      try {
+        await widget.manifestStore.apply(raw);
+        final fresh = await _manifestFromStore();
+        if (mounted) setState(() => _manifest = fresh);
+      } catch (e) {
+        // Local store failure: surface but don't flip reachability.
+        if (mounted) setState(() => _lastSyncError = e);
+      }
+    } else if (fetchError != null && mounted) {
+      setState(() => _lastSyncError = fetchError);
+    }
+    if (mounted) setState(() => _syncing = false);
   }
 
   void _reload() {
-    final future = _fetch();
-    future.ignore();
-    setState(() {
-      _tracks = future;
-    });
+    _sync();
   }
 
   Future<void> _download(ManifestTrack track) async {
@@ -291,13 +339,41 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) => NowPlayingPage(
           player: widget.player,
-          manifest:
-              _lastTracks ?? const TunesManifest(tracks: [], releases: []),
+          manifest: _manifest ?? const TunesManifest(tracks: [], releases: []),
           store: widget.store,
           downloading: _downloading,
           onDownload: _download,
           offline: widget.reachability.offline,
           artUrlFor: _artUrlFor,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUnreachableState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(Space.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: Tones.textMuted,
+              size: 40,
+            ),
+            const SizedBox(height: Space.md),
+            Text('No library yet', style: TypeScale.title),
+            const SizedBox(height: Space.sm),
+            Text(
+              'tunesd is not answering at $_tunesdUrl.\n'
+              'Start the daemon on the box, then refresh.',
+              textAlign: TextAlign.center,
+              style: TypeScale.body,
+            ),
+            const SizedBox(height: Space.lg),
+            FilledButton(onPressed: _reload, child: const Text('Retry')),
+          ],
         ),
       ),
     );
@@ -325,8 +401,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     children: [
                       GestureDetector(
                         onTap: () {
-                          final tracks = _tracksSnapshot;
-                          _openProfile(tracks.length);
+                          final count = _manifest?.tracks.length ?? 0;
+                          _openProfile(count);
                         },
                         child: Container(
                           width: 38,
@@ -428,92 +504,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  List<ManifestTrack> get _tracksSnapshot => _lastTracks?.tracks ?? const [];
-
-  TunesManifest? _lastTracks;
-
   Widget _buildContent(bool offline) {
-    return FutureBuilder<TunesManifest>(
-      future: _tracks,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: CircularProgressIndicator(color: Tones.primary),
-          );
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(Space.lg),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.cloud_off_outlined,
-                    color: Tones.textMuted,
-                    size: 40,
-                  ),
-                  const SizedBox(height: Space.md),
-                  Text('No library yet', style: TypeScale.title),
-                  const SizedBox(height: Space.sm),
-                  Text(
-                    'tunesd is not answering at $_tunesdUrl.\n'
-                    'Start the daemon on the box, then refresh.',
-                    textAlign: TextAlign.center,
-                    style: TypeScale.body,
-                  ),
-                  const SizedBox(height: Space.lg),
-                  FilledButton(onPressed: _reload, child: const Text('Retry')),
-                ],
-              ),
-            ),
-          );
-        }
-        final manifest =
-            snapshot.data ?? const TunesManifest(tracks: [], releases: []);
-        _lastTracks = manifest;
-        final tracks = manifest.tracks;
-        final content = switch (_tab) {
-          1 => SearchView(
-            tracks: tracks,
-            releases: manifest.releases,
-            client: widget.client,
-            player: widget.player,
-            store: widget.store,
-            downloading: _downloading,
-            onDownload: _download,
-            offline: offline,
-            artUrlFor: _artUrlFor,
-            onAlbumTap: (release) => _openAlbum(release, manifest),
-            onArtistTap: (artist) => _openArtist(artist, manifest),
-          ),
-          2 => LibraryView(
-            tracks: tracks,
-            releases: manifest.releases,
-            artists: manifest.artists,
-            filter: _libraryFilter,
-            player: widget.player,
-            store: widget.store,
-            downloading: _downloading,
-            onDownload: _download,
-            offline: offline,
-            artUrlFor: _artUrlFor,
-            onArtistTap: (artist) => _openArtist(artist, manifest),
-            onAlbumTap: (release) => _openAlbum(release, manifest),
-          ),
-          _ => HomeView(
-            manifest: manifest,
-            recents: _recents,
-            onArtistTap: (artist) => _openArtist(artist, manifest),
-            onAlbumTap: (release) => _openAlbum(release, manifest),
-            onPlay: (list, index) {
-              widget.player.playQueue(list, index);
-            },
-            artUrlFor: _artUrlFor,
-          ),
-        };
-        return content;
-      },
-    );
+    if (_manifest == null) {
+      if (_lastSyncError != null) {
+        return _buildUnreachableState();
+      }
+      return const Center(
+        child: CircularProgressIndicator(color: Tones.primary),
+      );
+    }
+    if (_manifest!.tracks.isEmpty && _lastSyncError != null) {
+      return _buildUnreachableState();
+    }
+    final manifest = _manifest!;
+    final tracks = manifest.tracks;
+    final content = switch (_tab) {
+      1 => SearchView(
+        tracks: tracks,
+        releases: manifest.releases,
+        client: widget.client,
+        player: widget.player,
+        store: widget.store,
+        downloading: _downloading,
+        onDownload: _download,
+        offline: offline,
+        artUrlFor: _artUrlFor,
+        onAlbumTap: (release) => _openAlbum(release, manifest),
+        onArtistTap: (artist) => _openArtist(artist, manifest),
+      ),
+      2 => LibraryView(
+        tracks: tracks,
+        releases: manifest.releases,
+        artists: manifest.artists,
+        filter: _libraryFilter,
+        player: widget.player,
+        store: widget.store,
+        downloading: _downloading,
+        onDownload: _download,
+        offline: offline,
+        artUrlFor: _artUrlFor,
+        onArtistTap: (artist) => _openArtist(artist, manifest),
+        onAlbumTap: (release) => _openAlbum(release, manifest),
+      ),
+      _ => HomeView(
+        manifest: manifest,
+        recents: _recents,
+        onArtistTap: (artist) => _openArtist(artist, manifest),
+        onAlbumTap: (release) => _openAlbum(release, manifest),
+        onPlay: (list, index) {
+          widget.player.playQueue(list, index);
+        },
+        artUrlFor: _artUrlFor,
+      ),
+    };
+    return content;
   }
 }

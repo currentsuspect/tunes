@@ -111,7 +111,7 @@ describe("buildManifest", () => {
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
-    expect(m.schema).toBe(2);
+    expect(m.schema).toBe(3);
     expect(m.releases.length).toBe(1);
     const r = m.releases[0]!;
     expect(r.id).toBe("sp:album1");
@@ -584,4 +584,28 @@ describe("buildManifest", () => {
     expect(m.releases).toHaveLength(1);
     expect(m.releases[0]?.trackShas.length).toBe(30);
     expect(m.releases[0]?.totalTracks).toBe(30);
+  });
+
+  it("carries addedAt per track from the lookup map", () => {
+    const sha = "a".repeat(64);
+    const other = "b".repeat(64);
+    const added = new Map<string, string>([
+      [sha, "2026-08-30T10:00:00.000Z"],
+    ]);
+    const m = buildManifest(
+      [probe({ sha }), probe({ sha: other })],
+      new Map(),
+      new Map(),
+      [],
+      [],
+      new Map(),
+      added,
+    );
+    expect(m.tracks[0]?.addedAt).toBe("2026-08-30T10:00:00.000Z");
+    expect(m.tracks[1]?.addedAt).toBeNull();
+  });
+
+  it("addedAt defaults to null when the lookup map is empty", () => {
+    const m = buildManifest([probe()]);
+    expect(m.tracks[0]?.addedAt).toBeNull();
   });

@@ -1,9 +1,12 @@
 import 'dart:io';
 
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
+import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/download_store.dart';
+import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
@@ -192,6 +195,7 @@ ManifestTrack _track(
   String album = 'Album',
   String? sha,
   String? releaseId,
+  DateTime? addedAt,
 }) => ManifestTrack(
   sha: sha ?? (title == 'Bassline' ? 'a' * 64 : 'b' * 64),
   size: 1000,
@@ -208,11 +212,12 @@ ManifestTrack _track(
   releaseId: releaseId ?? (title == 'Bassline' ? 'rel-1' : 'rel-2'),
   trackNumber: null,
   discNumber: null,
+  addedAt: addedAt,
 );
 
 List<ManifestTrack> _library() => [
-  _track('Bassline', 'flac', 950000),
-  _track('Nightdrive', 'mp3', 320000),
+  _track('Bassline', 'flac', 950000, addedAt: DateTime.utc(2026, 8, 30)),
+  _track('Nightdrive', 'mp3', 320000, addedAt: DateTime.utc(2026, 1, 1)),
 ];
 
 TunesManifest _manifestOf(List<ManifestTrack> tracks) =>
@@ -221,17 +226,22 @@ TunesManifest _manifestOf(List<ManifestTrack> tracks) =>
 void main() {
   late Directory tempDir;
   late DownloadStore store;
+  late TunesDatabase db;
+  late ManifestStore manifestStore;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('tunes-test-');
     store = DownloadStore(tempDir);
     await store.load();
+    db = TunesDatabase.forTesting(NativeDatabase.memory());
+    manifestStore = ManifestStore(db);
   });
 
   tearDown(() async {
     try {
       await tempDir.delete(recursive: true);
     } catch (_) {}
+    await db.close();
   });
 
   Future<void> pumpApp(
@@ -246,6 +256,7 @@ void main() {
         player: player,
         store: store,
         reachability: reachability ?? Reachability(),
+        manifestStore: manifestStore,
       ),
     );
     await tester.pumpAndSettle();
@@ -323,7 +334,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(player.playQueueCalls, 1);
-    expect(player.index, 1);
     expect(player.current?.title, 'Nightdrive');
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
   });

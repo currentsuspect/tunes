@@ -19,10 +19,11 @@ export interface SeenEntry {
   sha: string;
   caption: string | null;
   fileName: string | null;
+  addedAt?: string;
 }
 
 interface StateFile {
-  schema: 1;
+  schema: 1 | 2;
   channels: Record<string, ChannelCursor>;
   seen: Record<string, string | SeenEntry>;
   dailyFetched: number;
@@ -35,7 +36,7 @@ function todayKey(): string {
 
 export class State {
   data: StateFile = {
-    schema: 1,
+    schema: 2,
     channels: {},
     seen: {},
     dailyFetched: 0,
@@ -48,9 +49,11 @@ export class State {
     try {
       const raw = await readFile(this.path, "utf8");
       const parsed = JSON.parse(raw) as StateFile;
-      if (parsed.schema !== 1) throw new Error(`unsupported state schema ${parsed.schema}`);
+      if (parsed.schema !== 1 && parsed.schema !== 2) {
+        throw new Error(`unsupported state schema ${parsed.schema}`);
+      }
       this.data = {
-        schema: 1,
+        schema: 2,
         channels: parsed.channels ?? {},
         seen: parsed.seen ?? {},
         dailyFetched: parsed.dailyFetched ?? 0,
@@ -58,7 +61,7 @@ export class State {
       };
     } catch {
       this.data = {
-        schema: 1,
+        schema: 2,
         channels: {},
         seen: {},
         dailyFetched: 0,
@@ -106,10 +109,16 @@ export class State {
     caption: string | null = null,
     fileName: string | null = null
   ): void {
-    this.data.seen[this.seenKey(channelId, messageId)] = {
+    const key = this.seenKey(channelId, messageId);
+    const existing = this.data.seen[key];
+    const sameSha =
+      typeof existing === "object" && existing !== null && existing.sha === sha;
+    const existingAddedAt = sameSha ? existing.addedAt ?? null : null;
+    this.data.seen[key] = {
       sha,
       caption: caption !== "" ? caption : null,
       fileName,
+      addedAt: existingAddedAt ?? new Date().toISOString(),
     };
   }
 
@@ -146,6 +155,23 @@ export class State {
         Object.values(this.data.seen).map((v) => (typeof v === "string" ? v : v.sha))
       ),
     ];
+  }
+
+  addedAtFor(sha: string): string | null {
+    for (const v of Object.values(this.data.seen)) {
+      if (typeof v === "string") continue;
+      if (v.sha === sha) return v.addedAt ?? null;
+    }
+    return null;
+  }
+
+  allAddedAt(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const v of Object.values(this.data.seen)) {
+      if (typeof v === "string") continue;
+      if (v.addedAt && !out.has(v.sha)) out.set(v.sha, v.addedAt);
+    }
+    return out;
   }
 
   allSeenMeta(): Map<string, { caption: string | null; fileName: string | null }> {

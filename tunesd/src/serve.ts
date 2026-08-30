@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
-import type { ManifestV2 } from "./manifest.js";
+import type { ManifestV3 } from "./manifest.js";
 import type {
   ArtistDiscography,
   DiscographyGroup,
@@ -32,13 +32,13 @@ const MIME: Record<string, string> = {
 };
 
 export class ManifestServer {
-  private lastManifest: ManifestV2 | null = null;
+  private lastManifest: ManifestV3 | null = null;
   private lastBuiltAt = 0;
 
   constructor(
     private readonly store: ObjectStore,
     private readonly artDir: string,
-    private readonly buildManifest: () => Promise<ManifestV2>,
+    private readonly buildManifest: () => Promise<ManifestV3>,
     private readonly port: number,
     private readonly log: Log,
     private readonly getDiscographies: () => Map<string, ArtistDiscography> = () =>
@@ -61,7 +61,7 @@ export class ManifestServer {
     { at: number; artists: ExternalArtist[]; releases: DiscographyGroup[] }
   >;
 
-  private async getManifest(force = false): Promise<ManifestV2> {
+  private async getManifest(force = false): Promise<ManifestV3> {
     const now = Date.now();
     if (!force && this.lastManifest && now - this.lastBuiltAt < 30_000) {
       return this.lastManifest;
