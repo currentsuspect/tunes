@@ -479,25 +479,48 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             onTap: _openNowPlaying,
             artUrlFor: _artUrlFor,
           ),
-          NavigationBar(
-            selectedIndex: _tab,
-            onDestinationSelected: (i) => setState(() => _tab = i),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home_rounded),
-                label: 'Home',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.search_rounded),
-                label: 'Search',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.library_music_outlined),
-                selectedIcon: Icon(Icons.library_music_rounded),
-                label: 'Library',
-              ),
-            ],
+          NavigationBarTheme(
+            data: NavigationBarThemeData(
+              height: 64,
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+              indicatorColor: Colors.transparent,
+              backgroundColor: Tones.surface,
+              surfaceTintColor: Colors.transparent,
+              labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                final selected = states.contains(WidgetState.selected);
+                return TypeScale.caption.copyWith(
+                  color: selected ? Tones.text : Tones.textMuted,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                );
+              }),
+            ),
+            child: NavigationBar(
+              selectedIndex: _tab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined, color: Tones.textMuted),
+                  selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search_rounded, color: Tones.textMuted),
+                  selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
+                  label: 'Search',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.library_music_outlined,
+                    color: Tones.textMuted,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.library_music_rounded,
+                    color: Tones.text,
+                  ),
+                  label: 'Library',
+                ),
+              ],
+            ),
           ),
         ],
       ),

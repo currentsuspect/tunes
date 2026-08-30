@@ -23,13 +23,19 @@ class HomeView extends StatelessWidget {
   final void Function(List<ManifestTrack> tracks, int index) onPlay;
   final String Function(String sha) artUrlFor;
 
+  // Edge-to-edge: the screen owns the layout. Sections decide whether
+  // they need horizontal padding (for legibility) or not (carousels
+  // peek at the edge).
+  static const double _sectionPadding = Space.lg;
+  static const double _carouselPeek = Space.md;
+
   @override
   Widget build(BuildContext context) {
     final tracks = manifest.tracks;
     if (tracks.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(Space.lg),
+      return const Padding(
+        padding: EdgeInsets.all(_sectionPadding),
+        child: Center(
           child: Text(
             'No library yet — channels are configured, content appears '
             'here as tunesd fetches it.',
@@ -71,67 +77,208 @@ class HomeView extends StatelessWidget {
           );
     final fresh = releases.where((r) => r.year == '${now.year}').toList()
       ..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        Space.lg,
-        Space.md,
-        Space.lg,
-        Space.lg,
-      ),
+      padding: const EdgeInsets.only(bottom: Space.lg),
       children: [
-        Text(
-          '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
-          '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
-          '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
-          style: TypeScale.caption,
+        // Stats summary — full-bleed caption, padded.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            _sectionPadding,
+            Space.md,
+            _sectionPadding,
+            0,
+          ),
+          child: Text(
+            '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
+            '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
+            '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
+            style: TypeScale.caption,
+          ),
         ),
-        if (justAddedSorted.isNotEmpty) ...[
-          const SizedBox(height: Space.lg),
-          const Text('Just added', style: TypeScale.title),
-          const SizedBox(height: Space.sm),
-          for (final t in justAddedSorted.take(6))
-            InkWell(
-              onTap: () => onPlay([t], 0),
-              borderRadius: BorderRadius.circular(RadiusTokens.control),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: Space.sm,
-                  horizontal: Space.xs,
-                ),
-                child: Row(
-                  children: [
-                    ArtThumb(sha: t.artSha, artUrlFor: artUrlFor),
-                    const SizedBox(width: Space.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t.title,
-                            style: TypeScale.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            '${t.artist} · ${_addedAgo(t.addedAt!, now)}',
-                            style: TypeScale.body,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+        if (justAddedSorted.isNotEmpty)
+          _JustAddedCarousel(
+            tracks: justAddedSorted,
+            now: now,
+            onPlay: onPlay,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
+        if (missing.isNotEmpty)
+          _MissingList(
+            releases: missing,
+            onAlbumTap: onAlbumTap,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+          ),
+        if (fresh.isNotEmpty)
+          _ReleasedThisYear(
+            releases: fresh,
+            manifest: manifest,
+            onAlbumTap: onAlbumTap,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+          ),
+        if (artistList.isNotEmpty)
+          _ArtistsRail(
+            artistList: artistList,
+            manifest: manifest,
+            onArtistTap: onArtistTap,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
+        if (releases.isNotEmpty)
+          _AlbumsRail(
+            releases: releases,
+            onAlbumTap: onAlbumTap,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
+        if (recents.isNotEmpty)
+          _RecentlyPlayed(
+            recents: recents,
+            onPlay: onPlay,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+          ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title, {required this.padding});
+  final String title;
+  final double padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(padding, Space.lg, padding, Space.sm),
+      child: Text(title, style: TypeScale.title),
+    );
+  }
+}
+
+/// Horizontal carousel of "just added" tracks. Edges peek so the user
+/// can tell it's scrollable.
+class _JustAddedCarousel extends StatelessWidget {
+  const _JustAddedCarousel({
+    required this.tracks,
+    required this.now,
+    required this.onPlay,
+    required this.artUrlFor,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final List<ManifestTrack> tracks;
+  final DateTime now;
+  final void Function(List<ManifestTrack>, int) onPlay;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Just added', padding: sectionPadding),
+        SizedBox(
+          height: 156,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            // Leading edge shows a small peek of the next item; trailing
+            // edge respects the section padding so the last card aligns
+            // with the rest of the page.
+            padding: EdgeInsets.fromLTRB(peek, 0, sectionPadding, 0),
+            itemCount: tracks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final t = tracks[i];
+              return SizedBox(
+                width: 132,
+                child: InkWell(
+                  onTap: () => onPlay([t], 0),
+                  borderRadius: BorderRadius.circular(RadiusTokens.card),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(RadiusTokens.card),
+                        child: SizedBox(
+                          width: 132,
+                          height: 100,
+                          child: t.artSha != null
+                              ? Image.network(
+                                  artUrlFor(t.artSha!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      const ArtPlaceholder(size: 100),
+                                )
+                              : const ArtPlaceholder(size: 100),
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        t.title,
+                        style: TypeScale.body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _addedAgo(t.addedAt!, now),
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-        ],
-        if (missing.isNotEmpty) ...[
-          const SizedBox(height: Space.lg),
-          const Text('Missing from your collection', style: TypeScale.title),
-          const SizedBox(height: Space.sm),
-          for (final r in missing.take(4)) ...[
-            InkWell(
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _addedAgo(DateTime addedAt, DateTime now) {
+    final diff = now.difference(addedAt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}
+
+class _MissingList extends StatelessWidget {
+  const _MissingList({
+    required this.releases,
+    required this.onAlbumTap,
+    required this.artUrlFor,
+    required this.sectionPadding,
+  });
+
+  final List<ManifestRelease> releases;
+  final void Function(ManifestRelease) onAlbumTap;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Missing from your collection', padding: sectionPadding),
+        for (final r in releases.take(4)) ...[
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: sectionPadding),
+            child: InkWell(
               onTap: () => onAlbumTap(r),
               borderRadius: BorderRadius.circular(RadiusTokens.control),
               child: Padding(
@@ -154,7 +301,8 @@ class HomeView extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            '${r.artist} · ${r.trackShas.length}/${r.totalTracks} · ${(r.totalTracks ?? 0) - r.trackShas.length} missing',
+                            '${r.artist} · ${r.trackShas.length}/${r.totalTracks} · '
+                            '${(r.totalTracks ?? 0) - r.trackShas.length} missing',
                             style: TypeScale.caption,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -170,64 +318,155 @@ class HomeView extends StatelessWidget {
                 ),
               ),
             ),
-            if (r != missing.take(4).last) const Divider(),
-          ],
-        ],
-        if (fresh.isNotEmpty) ...[
-          const SizedBox(height: Space.lg),
-          const Text('Released this year', style: TypeScale.title),
-          const SizedBox(height: Space.sm),
-          Wrap(
-            spacing: Space.sm,
-            runSpacing: Space.sm,
-            children: [
-              for (final r in fresh)
-                ActionChip(
-                  avatar: r.artSha != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: SizedBox(
-                            width: 26,
-                            height: 26,
-                            child: Image.network(
-                              artUrlFor(r.artSha!),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const ArtPlaceholder(size: 26),
-                            ),
-                          ),
-                        )
-                      : null,
-                  label: Text(
-                    '${r.title} · ${r.artist}',
-                    style: TypeScale.caption,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  backgroundColor: Tones.surfaceRaised,
-                  side: const BorderSide(color: Tones.hairline),
-                  onPressed: () => onAlbumTap(r),
-                ),
-            ],
           ),
+          if (r != releases.take(4).last)
+            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
         ],
-        const SizedBox(height: Space.lg),
-        const Text('Artists', style: TypeScale.title),
-        const SizedBox(height: Space.sm),
+      ],
+    );
+  }
+}
+
+/// "Released this year" — for each release, show a year/artist row with
+/// a completion bar showing how many of the release's tracks are in
+/// the library. Replaces the unreadable giant-pill version.
+class _ReleasedThisYear extends StatelessWidget {
+  const _ReleasedThisYear({
+    required this.releases,
+    required this.manifest,
+    required this.onAlbumTap,
+    required this.artUrlFor,
+    required this.sectionPadding,
+  });
+
+  final List<ManifestRelease> releases;
+  final TunesManifest manifest;
+  final void Function(ManifestRelease) onAlbumTap;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Released this year', padding: sectionPadding),
+        for (final r in releases.take(5))
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: sectionPadding),
+            child: InkWell(
+              onTap: () => onAlbumTap(r),
+              borderRadius: BorderRadius.circular(RadiusTokens.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: Space.sm,
+                  horizontal: Space.xs,
+                ),
+                child: Row(
+                  children: [
+                    ArtThumb(sha: r.artSha, artUrlFor: artUrlFor, size: 40),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            r.title,
+                            style: TypeScale.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            r.artist,
+                            style: TypeScale.body,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          _CompletionBar(release: r),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CompletionBar extends StatelessWidget {
+  const _CompletionBar({required this.release});
+  final ManifestRelease release;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = release.totalTracks;
+    // Unknown total (null) → don't show a misleading empty bar. Show a
+    // neutral rail at full width with the secondary tone, signalling
+    // 'we don't know the album length yet' without faking a 0%.
+    if (total == null || total <= 0) {
+      return SizedBox(height: 3, child: Container(color: Tones.surfaceRaised));
+    }
+    final have = release.trackShas.length;
+    final ratio = ((have / total).clamp(0.0, 1.0)).toDouble();
+    return SizedBox(
+      height: 3,
+      child: LayoutBuilder(
+        builder: (context, c) => Stack(
+          children: [
+            Container(color: Tones.surfaceRaised),
+            FractionallySizedBox(
+              widthFactor: ratio,
+              child: Container(color: Tones.primary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtistsRail extends StatelessWidget {
+  const _ArtistsRail({
+    required this.artistList,
+    required this.manifest,
+    required this.onArtistTap,
+    required this.artUrlFor,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final List<MapEntry<String, List<ManifestTrack>>> artistList;
+  final TunesManifest manifest;
+  final void Function(String) onArtistTap;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Artists', padding: sectionPadding),
         SizedBox(
           height: 108,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(peek, 0, sectionPadding, 0),
             itemCount: artistList.length,
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
             itemBuilder: (context, i) {
               final e = artistList[i];
               final artSha = manifest.artistArt(e.key);
-              return InkWell(
-                onTap: () => onArtistTap(e.key),
-                borderRadius: BorderRadius.circular(RadiusTokens.control),
-                child: SizedBox(
-                  width: 76,
+              return SizedBox(
+                width: 76,
+                child: InkWell(
+                  onTap: () => onArtistTap(e.key),
+                  borderRadius: BorderRadius.circular(RadiusTokens.control),
                   child: Column(
                     children: [
                       if (artSha != null)
@@ -260,22 +499,46 @@ class HomeView extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(height: Space.lg),
-        const Text('Albums', style: TypeScale.title),
-        const SizedBox(height: Space.sm),
+      ],
+    );
+  }
+}
+
+class _AlbumsRail extends StatelessWidget {
+  const _AlbumsRail({
+    required this.releases,
+    required this.onAlbumTap,
+    required this.artUrlFor,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final List<ManifestRelease> releases;
+  final void Function(ManifestRelease) onAlbumTap;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Albums', padding: sectionPadding),
         SizedBox(
           height: 178,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(peek, 0, sectionPadding, 0),
             itemCount: releases.length,
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
             itemBuilder: (context, i) {
               final r = releases[i];
-              return InkWell(
-                onTap: () => onAlbumTap(r),
-                borderRadius: BorderRadius.circular(RadiusTokens.card),
-                child: SizedBox(
-                  width: 130,
+              return SizedBox(
+                width: 130,
+                child: InkWell(
+                  onTap: () => onAlbumTap(r),
+                  borderRadius: BorderRadius.circular(RadiusTokens.card),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -302,7 +565,8 @@ class HomeView extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${r.artist} · ${r.trackShas.length} ${r.trackShas.length == 1 ? 'track' : 'tracks'}',
+                        '${r.artist} · ${r.trackShas.length} '
+                        '${r.trackShas.length == 1 ? 'track' : 'tracks'}',
                         style: TypeScale.caption,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -314,12 +578,34 @@ class HomeView extends StatelessWidget {
             },
           ),
         ),
-        if (recents.isNotEmpty) ...[
-          const SizedBox(height: Space.lg),
-          const Text('Recently played', style: TypeScale.title),
-          const SizedBox(height: Space.sm),
-          for (final t in recents.take(5))
-            InkWell(
+      ],
+    );
+  }
+}
+
+class _RecentlyPlayed extends StatelessWidget {
+  const _RecentlyPlayed({
+    required this.recents,
+    required this.onPlay,
+    required this.artUrlFor,
+    required this.sectionPadding,
+  });
+
+  final List<ManifestTrack> recents;
+  final void Function(List<ManifestTrack>, int) onPlay;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Recently played', padding: sectionPadding),
+        for (final t in recents.take(5))
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: sectionPadding),
+            child: InkWell(
               onTap: () => onPlay(recents, recents.indexOf(t)),
               borderRadius: BorderRadius.circular(RadiusTokens.control),
               child: Padding(
@@ -354,16 +640,8 @@ class HomeView extends StatelessWidget {
                 ),
               ),
             ),
-        ],
+          ),
       ],
     );
-  }
-
-  String _addedAgo(DateTime addedAt, DateTime now) {
-    final diff = now.difference(addedAt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
   }
 }

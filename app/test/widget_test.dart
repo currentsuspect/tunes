@@ -80,6 +80,8 @@ class FakeTunePlayer extends TunePlayer {
   bool _playing = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  PlaybackRepeat _repeat = PlaybackRepeat.off;
+  bool _shuffle = false;
 
   @override
   List<ManifestTrack> get queue => _queue;
@@ -100,6 +102,12 @@ class FakeTunePlayer extends TunePlayer {
   ManifestTrack? get current =>
       (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
 
+  @override
+  PlaybackRepeat get repeat => _repeat;
+
+  @override
+  bool get shuffle => _shuffle;
+
   int playQueueCalls = 0;
   int toggleCalls = 0;
   int seekCalls = 0;
@@ -108,6 +116,10 @@ class FakeTunePlayer extends TunePlayer {
   int playAtCalls = 0;
   int playCalls = 0;
   int pauseCalls = 0;
+  int setRepeatCalls = 0;
+  int setShuffleCalls = 0;
+  List<PlaybackRepeat> repeatHistory = [];
+  List<bool> shuffleHistory = [];
 
   @override
   void toggle() {
@@ -133,10 +145,28 @@ class FakeTunePlayer extends TunePlayer {
   @override
   void next() {
     nextCalls += 1;
-    if (_index < _queue.length - 1) {
-      _index += 1;
+    if (_repeat == PlaybackRepeat.one && _queue.isNotEmpty) {
+      _position = Duration.zero;
+      _playing = true;
       notifyListeners();
+      return;
     }
+    if (_index >= _queue.length - 1) {
+      if (_repeat == PlaybackRepeat.all && _queue.length > 1) {
+        _index = 0;
+        notifyListeners();
+        return;
+      }
+      _queue = const [];
+      _index = -1;
+      _playing = false;
+      _position = Duration.zero;
+      notifyListeners();
+      return;
+    }
+    _index += 1;
+    _position = Duration.zero;
+    notifyListeners();
   }
 
   @override
@@ -144,8 +174,18 @@ class FakeTunePlayer extends TunePlayer {
     previousCalls += 1;
     if (_index > 0) {
       _index -= 1;
+      _position = Duration.zero;
       notifyListeners();
+      return;
     }
+    if (_repeat == PlaybackRepeat.all && _queue.length > 1) {
+      _index = _queue.length - 1;
+      _position = Duration.zero;
+      notifyListeners();
+      return;
+    }
+    _position = Duration.zero;
+    notifyListeners();
   }
 
   @override
@@ -159,11 +199,25 @@ class FakeTunePlayer extends TunePlayer {
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     playQueueCalls += 1;
-    _queue = List.of(tracks);
-    _index = startIndex;
+    if (tracks.isEmpty) return;
+    final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
+    if (_shuffle && tracks.length > 1) {
+      // Mirror MediaKitTunePlayer: pin the start track first, rotate
+      // the remainder. Deterministic enough for tests — the rotation
+      // is intentionally unseeded since we only care about the
+      // contract (start track at index 0, queue size unchanged).
+      final out = List<ManifestTrack>.of(tracks);
+      final pinned = out.removeAt(safeStart);
+      out.shuffle();
+      _queue = [pinned, ...out];
+      _index = 0;
+    } else {
+      _queue = List.of(tracks);
+      _index = safeStart;
+    }
     _playing = true;
     _position = Duration.zero;
-    final ms = tracks[startIndex].durationMs;
+    final ms = _queue[_index].durationMs;
     _duration = ms != null ? Duration(milliseconds: ms) : Duration.zero;
     notifyListeners();
   }
@@ -183,6 +237,24 @@ class FakeTunePlayer extends TunePlayer {
     _queue = const [];
     _index = -1;
     _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  void setRepeat(PlaybackRepeat mode) {
+    if (_repeat == mode) return;
+    setRepeatCalls += 1;
+    repeatHistory.add(mode);
+    _repeat = mode;
+    notifyListeners();
+  }
+
+  @override
+  void setShuffle(bool on) {
+    if (_shuffle == on) return;
+    setShuffleCalls += 1;
+    shuffleHistory.add(on);
+    _shuffle = on;
     notifyListeners();
   }
 }

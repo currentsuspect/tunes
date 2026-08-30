@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../domain/manifest.dart';
+
+enum PlaybackRepeat { off, all, one }
 
 abstract class TunePlayer extends ChangeNotifier {
   List<ManifestTrack> get queue;
@@ -12,6 +15,8 @@ abstract class TunePlayer extends ChangeNotifier {
   Duration get position;
   Duration get duration;
   ManifestTrack? get current;
+  PlaybackRepeat get repeat;
+  bool get shuffle;
 
   void playQueue(List<ManifestTrack> tracks, int startIndex);
   void play();
@@ -22,6 +27,8 @@ abstract class TunePlayer extends ChangeNotifier {
   void playAt(int index);
   void seek(Duration target);
   void stop();
+  void setRepeat(PlaybackRepeat mode);
+  void setShuffle(bool on);
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -39,6 +46,8 @@ class MediaKitTunePlayer extends TunePlayer {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _lastNotifiedPosition = Duration.zero;
+  PlaybackRepeat _repeat = PlaybackRepeat.off;
+  bool _shuffle = false;
 
   @override
   List<ManifestTrack> get queue => _queue;
@@ -60,14 +69,31 @@ class MediaKitTunePlayer extends TunePlayer {
       (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
 
   @override
+  PlaybackRepeat get repeat => _repeat;
+
+  @override
+  bool get shuffle => _shuffle;
+
+  @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     if (tracks.isEmpty) return;
     if (!_firstPlayDone && onFirstPlay != null) {
       _firstPlayDone = true;
       unawaited(onFirstPlay!());
     }
-    _queue = List.of(tracks);
-    _index = startIndex.clamp(0, tracks.length - 1);
+    // Honour shuffle by reordering input. Pin the start track first,
+    // Fisher–Yates the remainder. Repeat: caller passes the canonical
+    // order; we don't reorder for repeat.
+    final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
+    final shuffled = _shuffle && tracks.length > 1;
+    final ordered = shuffled
+        ? _shuffledWithStart(tracks, safeStart)
+        : List<ManifestTrack>.of(tracks);
+    _queue = ordered;
+    // After reordering (when shuffled), the pinned start is always at
+    // index 0. When not shuffled, the queue matches the input order,
+    // so we use the caller's index directly.
+    _index = shuffled ? 0 : safeStart;
     _playing = true;
     _position = Duration.zero;
     _duration = Duration.zero;
@@ -78,13 +104,40 @@ class MediaKitTunePlayer extends TunePlayer {
     unawaited(
       player.open(
         Playlist(
-          tracks.map((t) => Media(trackUriFor(t))).toList(),
+          ordered.map((t) => Media(trackUriFor(t))).toList(),
           index: _index,
         ),
         play: true,
       ),
     );
+    _applyPlaylistMode(player);
     _attachStreams(player);
+  }
+
+  List<ManifestTrack> _shuffledWithStart(
+    List<ManifestTrack> input,
+    int startIndex,
+  ) {
+    final seed = Random();
+    final out = List<ManifestTrack>.of(input);
+    final pinned = out.removeAt(startIndex);
+    out.shuffle(seed);
+    return [pinned, ...out];
+  }
+
+  Future<void> _applyPlaylistMode(Player player) async {
+    final mode = switch (_repeat) {
+      PlaybackRepeat.off => PlaylistMode.none,
+      PlaybackRepeat.all => PlaylistMode.loop,
+      PlaybackRepeat.one => PlaylistMode.single,
+    };
+    try {
+      await player.setPlaylistMode(mode);
+    } catch (_) {
+      // media_kit platform implementations differ; not all support
+      // setPlaylistMode at every lifecycle point. Silently no-op so
+      // the rest of the engine keeps working.
+    }
   }
 
   @override
@@ -115,7 +168,20 @@ class MediaKitTunePlayer extends TunePlayer {
   void next() {
     final player = _player;
     if (player == null) return;
+    if (_queue.isEmpty) return;
+    if (_repeat == PlaybackRepeat.one) {
+      // Repeat-one restarts the current track from the top.
+      player.seek(Duration.zero);
+      player.play();
+      return;
+    }
     if (_index >= _queue.length - 1) {
+      if (_repeat == PlaybackRepeat.all) {
+        player.jump(0);
+        _index = 0;
+        notifyListeners();
+        return;
+      }
       stop();
       return;
     }
@@ -126,11 +192,19 @@ class MediaKitTunePlayer extends TunePlayer {
   void previous() {
     final player = _player;
     if (player == null) return;
-    if (_index <= 0) {
-      player.seek(Duration.zero);
+    if (_queue.isEmpty) return;
+    if (_index > 0) {
+      player.previous();
       return;
     }
-    player.previous();
+    // At first track: wrap to last when repeat-all, else restart.
+    if (_repeat == PlaybackRepeat.all && _queue.length > 1) {
+      player.jump(_queue.length - 1);
+      _index = _queue.length - 1;
+      notifyListeners();
+      return;
+    }
+    player.seek(Duration.zero);
   }
 
   @override
@@ -158,6 +232,28 @@ class MediaKitTunePlayer extends TunePlayer {
     _playing = false;
     _position = Duration.zero;
     _duration = Duration.zero;
+    notifyListeners();
+  }
+
+  @override
+  void setRepeat(PlaybackRepeat mode) {
+    if (_repeat == mode) return;
+    _repeat = mode;
+    final player = _player;
+    if (player != null) _applyPlaylistMode(player);
+    notifyListeners();
+  }
+
+  @override
+  void setShuffle(bool on) {
+    if (_shuffle == on) return;
+    _shuffle = on;
+    // If shuffle turned ON mid-queue, reorder remaining tracks from the
+    // current index (current stays pinned). If turned OFF, restore the
+    // canonical order — but we don't track the original input list, so
+    // the cleanest UX is "takes effect on next playQueue call". A
+    // dedicated queue model would solve this cleanly; for now we keep
+    // the visible ordering stable and document the limitation.
     notifyListeners();
   }
 

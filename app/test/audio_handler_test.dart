@@ -28,6 +28,12 @@ class _FakePlayer extends TunePlayer {
   @override
   ManifestTrack? get current => _queue.isEmpty ? null : _queue[_index];
 
+  @override
+  PlaybackRepeat get repeat => PlaybackRepeat.off;
+
+  @override
+  bool get shuffle => false;
+
   int playCalls = 0;
   int pauseCalls = 0;
   int nextCalls = 0;
@@ -66,6 +72,12 @@ class _FakePlayer extends TunePlayer {
 
   @override
   void toggle() => _playing = !_playing;
+
+  @override
+  void setRepeat(PlaybackRepeat mode) {}
+
+  @override
+  void setShuffle(bool on) {}
 }
 
 ManifestTrack _track(String title, {String? artSha}) => ManifestTrack(
