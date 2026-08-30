@@ -4,6 +4,26 @@ import 'dart:io';
 import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
 
+class ChangesResponse {
+  const ChangesResponse({
+    required this.generatedAt,
+    required this.integrity,
+    required this.addedShas,
+  });
+  final DateTime? generatedAt;
+  final String integrity;
+  final List<String> addedShas;
+}
+
+class TunesFetchException implements Exception {
+  TunesFetchException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'TunesFetchException: $message';
+}
+
 class TunesClient {
   TunesClient(this.baseUrl, [this._cacheDir]);
 
@@ -40,6 +60,32 @@ class TunesClient {
       final cached = await _readCache();
       if (cached != null) return cached;
       throw TunesFetchException('tunesd unreachable: ${e.message}');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Returns the set of shas added since [since] (ISO8601) along
+  /// with the daemon's current integrity hash. Used by the app to
+  /// skip full manifest downloads when nothing has changed.
+  Future<ChangesResponse> fetchChanges(DateTime since) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final iso = Uri.encodeComponent(since.toUtc().toIso8601String());
+      final req = await client.getUrl(Uri.parse('$baseUrl/changes?since=$iso'));
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        throw TunesFetchException('changes ${res.statusCode}');
+      }
+      final body = await res.transform(utf8.decoder).join();
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      return ChangesResponse(
+        generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
+        integrity: json['integrity'] as String,
+        addedShas: ((json['addedShas'] as List?) ?? const [])
+            .cast<String>()
+            .toList(),
+      );
     } finally {
       client.close(force: true);
     }
@@ -148,13 +194,4 @@ class TunesClient {
       return null;
     }
   }
-}
-
-class TunesFetchException implements Exception {
-  TunesFetchException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
 }

@@ -32,10 +32,16 @@ abstract class TunePlayer extends ChangeNotifier {
 }
 
 class MediaKitTunePlayer extends TunePlayer {
-  MediaKitTunePlayer({required this.trackUriFor});
+  MediaKitTunePlayer({required this.trackUriFor, this.onQueuePlayed});
 
   final String Function(ManifestTrack track) trackUriFor;
   Future<void> Function()? onFirstPlay;
+
+  /// Optional side-effect hook fired after [playQueue] applies the new
+  /// queue. Receives the list of tracks as supplied. Used by the app
+  /// to mirror the player's queue into the persistent [QueueStore] so
+  /// it survives restarts and the queue sheet reflects what's playing.
+  void Function(List<ManifestTrack> tracks)? onQueuePlayed;
 
   bool _firstPlayDone = false;
 
@@ -98,6 +104,7 @@ class MediaKitTunePlayer extends TunePlayer {
     _position = Duration.zero;
     _duration = Duration.zero;
     _lastNotifiedPosition = Duration.zero;
+    onQueuePlayed?.call(ordered);
     notifyListeners();
 
     final player = _player ??= Player();
@@ -232,6 +239,7 @@ class MediaKitTunePlayer extends TunePlayer {
     _playing = false;
     _position = Duration.zero;
     _duration = Duration.zero;
+    onQueuePlayed?.call(const []);
     notifyListeners();
   }
 

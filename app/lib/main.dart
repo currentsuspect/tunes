@@ -11,6 +11,7 @@ import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
 import 'core/data/download_store.dart';
 import 'core/data/manifest_store.dart';
+import 'core/data/queue_store.dart';
 import 'core/data/reachability.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
@@ -49,6 +50,7 @@ Future<void> main() async {
   await store.load();
   final db = TunesDatabase();
   final manifestStore = ManifestStore(db);
+  final queueStore = QueueStore(db);
   final client = TunesClient(_tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
@@ -57,6 +59,13 @@ Future<void> main() async {
       final path = store.pathFor(track.sha);
       if (path != null && File(path).existsSync()) return path;
       return '$_tunesdUrl/track/${track.sha}';
+    },
+    onQueuePlayed: (tracks) {
+      // Mirror the play queue into the persistent store so the
+      // QueueSheet reflects what's playing, and the queue survives
+      // restarts. All playback entry points (home, library, album,
+      // artist, search) route through this single hook.
+      unawaited(queueStore.replace(tracks.map((t) => t.sha).toList()));
     },
   );
   var audioServiceReady = false;
@@ -92,6 +101,7 @@ Future<void> main() async {
       store: store,
       reachability: reachability,
       manifestStore: manifestStore,
+      queueStore: queueStore,
     ),
   );
 }
@@ -104,6 +114,7 @@ class TunesApp extends StatelessWidget {
     required this.store,
     required this.reachability,
     required this.manifestStore,
+    required this.queueStore,
   });
 
   final TunesClient client;
@@ -111,6 +122,7 @@ class TunesApp extends StatelessWidget {
   final DownloadStore store;
   final Reachability reachability;
   final ManifestStore manifestStore;
+  final QueueStore queueStore;
 
   @override
   Widget build(BuildContext context) {
@@ -125,6 +137,7 @@ class TunesApp extends StatelessWidget {
         store: store,
         reachability: reachability,
         manifestStore: manifestStore,
+        queueStore: queueStore,
       ),
     );
   }
@@ -138,6 +151,7 @@ class AppShell extends StatefulWidget {
     required this.store,
     required this.reachability,
     required this.manifestStore,
+    required this.queueStore,
   });
 
   final TunesClient client;
@@ -145,6 +159,7 @@ class AppShell extends StatefulWidget {
   final DownloadStore store;
   final Reachability reachability;
   final ManifestStore manifestStore;
+  final QueueStore queueStore;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -155,6 +170,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   TunesManifest? _manifest;
   bool _syncing = false;
   Object? _lastSyncError;
+  DateTime? _lastSyncAt;
   final Set<String> _downloading = {};
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
@@ -237,28 +253,60 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _syncing = true;
       _lastSyncError = null;
     });
-    TunesManifest? raw;
-    Object? fetchError;
-    try {
-      raw = await widget.client.fetchManifest();
-      widget.reachability.setOffline(false);
-    } catch (e) {
-      fetchError = e;
-      widget.reachability.setOffline(true);
-    }
-    if (raw != null && mounted) {
+    // True iff the local store is now in sync with the daemon. Only
+    // advance the watermark when this is true — otherwise a transient
+    // error could mask new tracks behind a stale timestamp.
+    var synced = false;
+    // Try the delta endpoint first. If the daemon says nothing has
+    // changed since our last sync, skip the full manifest download
+    // entirely. Falls through to /manifest on any error.
+    var needFull = true;
+    var lastSync = _lastSyncAt;
+    if (lastSync != null) {
       try {
-        await widget.manifestStore.apply(raw);
-        final fresh = await _manifestFromStore();
-        if (mounted) setState(() => _manifest = fresh);
-      } catch (e) {
-        // Local store failure: surface but don't flip reachability.
-        if (mounted) setState(() => _lastSyncError = e);
+        final changes = await widget.client.fetchChanges(lastSync);
+        if (changes.addedShas.isEmpty) {
+          needFull = false;
+          widget.reachability.setOffline(false);
+          synced = true;
+        }
+      } catch (_) {
+        // Any /changes failure → fall through to /manifest.
       }
-    } else if (fetchError != null && mounted) {
-      setState(() => _lastSyncError = fetchError);
     }
-    if (mounted) setState(() => _syncing = false);
+    if (needFull) {
+      TunesManifest? raw;
+      Object? fetchError;
+      try {
+        raw = await widget.client.fetchManifest();
+        widget.reachability.setOffline(false);
+      } catch (e) {
+        fetchError = e;
+        widget.reachability.setOffline(true);
+      }
+      if (raw != null && mounted) {
+        var applyOk = false;
+        try {
+          await widget.manifestStore.apply(raw);
+          applyOk = true;
+        } catch (e) {
+          if (mounted) setState(() => _lastSyncError = e);
+        }
+        if (mounted && applyOk) {
+          final fresh = await _manifestFromStore();
+          if (mounted) setState(() => _manifest = fresh);
+          synced = true;
+        }
+      } else if (fetchError != null && mounted) {
+        setState(() => _lastSyncError = fetchError);
+      }
+    }
+    if (mounted) {
+      setState(() {
+        if (synced) _lastSyncAt = DateTime.now();
+        _syncing = false;
+      });
+    }
   }
 
   void _reload() {
@@ -312,6 +360,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           onDownload: _download,
           offline: widget.reachability.offline,
           artUrlFor: _artUrlFor,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
         ),
       ),
     );
@@ -329,6 +379,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           onDownload: _download,
           offline: widget.reachability.offline,
           artUrlFor: _artUrlFor,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
         ),
       ),
     );
@@ -345,6 +397,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           onDownload: _download,
           offline: widget.reachability.offline,
           artUrlFor: _artUrlFor,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
         ),
       ),
     );
@@ -568,6 +622,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         artUrlFor: _artUrlFor,
         onArtistTap: (artist) => _openArtist(artist, manifest),
         onAlbumTap: (release) => _openAlbum(release, manifest),
+        queueStore: widget.queueStore,
+        manifestStore: widget.manifestStore,
       ),
       _ => HomeView(
         manifest: manifest,
@@ -575,6 +631,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onArtistTap: (artist) => _openArtist(artist, manifest),
         onAlbumTap: (release) => _openAlbum(release, manifest),
         onPlay: (list, index) {
+          // Mirror is handled by the player's onQueuePlayed hook.
           widget.player.playQueue(list, index);
         },
         artUrlFor: _artUrlFor,

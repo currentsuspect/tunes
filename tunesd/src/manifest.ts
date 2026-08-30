@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+
+import { parseArtistTitle } from "./enrich.js";
 import type { ProbeResult } from "./probe.js";
 
 export interface ManifestTrack {
@@ -19,6 +21,14 @@ export interface ManifestTrack {
   trackNumber: number | null;
   discNumber: number | null;
   addedAt: string | null;
+  // v4: embedded tag values from ffprobe, exposed so the app can
+  // implement a local-wins policy for identity fields.
+  embeddedTitle: string | null;
+  embeddedArtist: string | null;
+  embeddedAlbum: string | null;
+  embeddedYear: string | null;
+  lyrics: string | null;
+  lyricsSource: string | null;
 }
 
 export interface ManifestRelease {
@@ -34,14 +44,18 @@ export interface ManifestRelease {
   tracks: Array<{ sha: string; trackNumber: number | null; discNumber: number | null }>;
 }
 
-export interface ManifestV3 {
-  schema: 3;
+export interface ManifestV4 {
+  schema: 4;
   generatedAt: string;
   integrity: string;
   tracks: ManifestTrack[];
   releases: ManifestRelease[];
   artists: Array<{ name: string; artSha: string | null }>;
 }
+
+// Schema 3 was the v3 wire format. Keep the type so callers that import
+// ManifestV3 still compile while the app rolls over to v4.
+export type ManifestV3 = ManifestV4;
 
 export interface TrackMeta {
   caption: string | null;
@@ -122,7 +136,7 @@ export function buildManifest(
   artists: Array<{ name: string; artSha: string | null }> = [],
   linkMeta: Map<string, ReleaseLinkMeta> = new Map(),
   addedAtBySha: Map<string, string> = new Map()
-): ManifestV3 {
+): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
     if (!probeFor.has(obj.sha)) {
@@ -145,8 +159,19 @@ export function buildManifest(
       const meta = metaBySha.get(p.sha);
       const enrich = enrichBySha.get(p.sha);
       const tagged = Boolean(p.tags.title) || Boolean(p.tags.artist) || Boolean(p.tags.album);
-      let title = p.tags.title?.trim() ?? "";
-      if (title === "" && meta?.caption && meta.caption.trim() !== "") title = meta.caption.trim();
+      // Filename parse is the last-resort seed for both title and artist
+      // when no embedded tags and no enrich hit. Available even when
+      // tags ARE present (e.g. title tagged, artist not), since
+      // parseArtistTitle returns null when the filename doesn't have
+      // the "Artist - Title" shape.
+      const filenameParse = meta?.fileName
+        ? parseArtistTitle(meta.fileName)
+        : null;
+      const captionTitle =
+        meta?.caption && meta.caption.trim() !== ""
+          ? meta.caption.trim()
+          : null;
+      let title = p.tags.title?.trim() ?? captionTitle ?? filenameParse?.title ?? "";
       if (title === "" && meta?.fileName) {
         title = meta.fileName.replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim();
         const dash = title.indexOf(" - ");
@@ -155,13 +180,14 @@ export function buildManifest(
           title = title.slice(dash + 3).trim();
         }
       }
-      const artist = tagged
-        ? p.tags.artist?.trim() ?? "unknown artist"
-        : enrich?.artist ?? "unknown artist";
-      const album = tagged
-        ? p.tags.album?.trim() ?? "unknown album"
-        : enrich?.album ?? "unknown album";
-      const year = tagged ? p.tags.year ?? null : enrich?.year ?? null;
+      const artist = p.tags.artist?.trim()
+        ?? filenameParse?.artist
+        ?? enrich?.artist
+        ?? "unknown artist";
+      const album = p.tags.album?.trim()
+        ?? enrich?.album
+        ?? "unknown album";
+      const year = p.tags.year ?? enrich?.year ?? null;
       const categoryRelease =
         enrich?.releaseId != null &&
         isCategoryRelease(enrich?.album ?? "");
@@ -189,6 +215,14 @@ export function buildManifest(
         discNumber: enrich?.discNumber ?? null,
         totalTracks: enrich?.totalTracks ?? null,
         addedAt: addedAtBySha.get(p.sha) ?? null,
+        // v4: embedded tag values as discovered by ffprobe. The app's
+        // query layer applies a local-wins policy over these.
+        embeddedTitle: p.tags.title?.trim() || null,
+        embeddedArtist: p.tags.artist?.trim() || null,
+        embeddedAlbum: p.tags.album?.trim() || null,
+        embeddedYear: p.tags.year ?? null,
+        lyrics: null,
+        lyricsSource: null,
       };
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
@@ -337,11 +371,11 @@ export function buildManifest(
       return { ...r, groupId, trackShas: sorted.map((x) => x.sha), tracks: sorted };
     });
 
-  const integrityBody = JSON.stringify({ schema: 3, tracks, releases });
+  const integrityBody = JSON.stringify({ schema: 4, tracks, releases });
   const integrity = createHash("sha256").update(integrityBody).digest("hex").slice(0, 16);
 
   return {
-    schema: 3,
+    schema: 4,
     generatedAt: new Date().toISOString(),
     integrity,
     tracks,

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/manifest_store.dart';
+import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import 'library_widgets.dart';
@@ -22,6 +25,8 @@ class LibraryView extends StatefulWidget {
     required this.artUrlFor,
     required this.onArtistTap,
     required this.onAlbumTap,
+    this.queueStore,
+    this.manifestStore,
   });
 
   final List<ManifestTrack> tracks;
@@ -36,6 +41,8 @@ class LibraryView extends StatefulWidget {
   final String Function(String sha) artUrlFor;
   final void Function(String artist) onArtistTap;
   final void Function(ManifestRelease release) onAlbumTap;
+  final QueueStore? queueStore;
+  final ManifestStore? manifestStore;
 
   @override
   State<LibraryView> createState() => _LibraryViewState();
@@ -43,6 +50,9 @@ class LibraryView extends StatefulWidget {
 
 class _LibraryViewState extends State<LibraryView> {
   int _segment = 0;
+
+  bool get _hasActions =>
+      widget.queueStore != null && widget.manifestStore != null;
 
   List<ManifestTrack> get _filtered {
     final f = widget.filter.trim().toLowerCase();
@@ -121,6 +131,52 @@ class _LibraryViewState extends State<LibraryView> {
             onDownload: () => widget.onDownload(t),
             offline: widget.offline,
             artUrlFor: widget.artUrlFor,
+            onPlayNext: _hasActions
+                ? () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final q = await widget.queueStore!.load();
+                    await widget.queueStore!.replace([
+                      t.sha,
+                      ...q.map((e) => e.sha),
+                    ]);
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('"${t.title}" will play next')),
+                    );
+                  }
+                : null,
+            onAddToQueue: _hasActions
+                ? () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    await widget.queueStore!.append(t.sha);
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('"${t.title}" added to queue')),
+                    );
+                  }
+                : null,
+            onEdit: _hasActions
+                ? ({
+                    // Tri-state: a non-null value replaces the edit;
+                    // a null (including empty string) clears the edit so
+                    // the field falls back to embedded-tag or daemon.
+                    String? title,
+                    String? artist,
+                    String? album,
+                    String? year,
+                  }) async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final ms = widget.manifestStore!;
+                    await ms.setEdit(t.sha, 'title', title);
+                    await ms.setEdit(t.sha, 'artist', artist);
+                    await ms.setEdit(t.sha, 'album', album);
+                    await ms.setEdit(t.sha, 'year', year);
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Edit saved')),
+                    );
+                  }
+                : null,
           );
         },
       );
@@ -155,10 +211,12 @@ class _LibraryViewState extends State<LibraryView> {
                           ? Image.network(
                               widget.artUrlFor(r.artSha!),
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const ArtPlaceholder(size: 200),
+                              errorBuilder: (_, _, _) => GeneratedArtwork(
+                                title: r.title,
+                                artist: r.artist,
+                              ),
                             )
-                          : const ArtPlaceholder(size: 200),
+                          : GeneratedArtwork(title: r.title, artist: r.artist),
                     ),
                   ),
                 ),

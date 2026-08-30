@@ -28,9 +28,52 @@ class Tracks extends Table {
   IntColumn get totalTracks => integer().nullable()();
   IntColumn get addedAt => integer().nullable()();
   TextColumn get searchText => text().withDefault(const Constant(''))();
+  // v3: embedded tag values (ffprobe-extracted). The app prefers
+  // user edits > embedded > daemon-supplied identity. When the user
+  // edits a field, an entry appears in TrackEdits; the query layer
+  // COALESCEs the values.
+  TextColumn get embeddedTitle => text().nullable()();
+  TextColumn get embeddedArtist => text().nullable()();
+  TextColumn get embeddedAlbum => text().nullable()();
+  TextColumn get embeddedYear => text().nullable()();
+  // v3: lyrics. Source column records provenance so the UI can
+  // distinguish user-edited from auto-fetched from file.
+  TextColumn get lyrics => text().nullable()();
+  TextColumn get lyricsSource => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {sha};
+}
+
+/// Per-track user edits. When the user fixes "unknown artist" or
+/// overrides a wrong title, the override is written here and the
+/// query layer substitutes it for the value the daemon sent.
+/// Future syncs don't undo edits: this is the local-wins policy.
+class TrackEdits extends Table {
+  TextColumn get sha => text()();
+  TextColumn get field => text()();
+  TextColumn get value => text()();
+  IntColumn get editedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {sha, field};
+}
+
+/// Persistent play queue. The TunePlayer's queue is a *projection*
+/// of this table; the queue survives restarts, the in-memory copy
+/// does not. Order is preserved by `position`. Reorder updates
+/// position on all affected rows in a transaction.
+class QueueEntries extends Table {
+  IntColumn get position => integer()();
+  TextColumn get trackSha => text()();
+  // 0 = ordinary, 1 = played, 2 = skipped (kept for history).
+  // Currently only '0' is used but the column exists for future
+  // "skip track but keep in queue" UX.
+  IntColumn get state => integer().withDefault(const Constant(0))();
+  IntColumn get addedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {position};
 }
 
 class Releases extends Table {
@@ -67,7 +110,9 @@ class SyncState extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [Tracks, Releases, Artists, SyncState])
+@DriftDatabase(
+  tables: [Tracks, Releases, Artists, SyncState, TrackEdits, QueueEntries],
+)
 class TunesDatabase extends _$TunesDatabase {
   TunesDatabase() : super(_openDefault());
 
@@ -77,7 +122,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -87,8 +132,21 @@ class TunesDatabase extends _$TunesDatabase {
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) {
+        // v1 -> v2: releaseTracksJson + type on Releases.
         await m.addColumn(releases, releases.releaseTracksJson);
         await m.addColumn(releases, releases.type);
+      }
+      if (from < 3) {
+        // v2 -> v3: embedded tag fields, lyrics, track_edits,
+        // queue_entries.
+        await m.addColumn(tracks, tracks.embeddedTitle);
+        await m.addColumn(tracks, tracks.embeddedArtist);
+        await m.addColumn(tracks, tracks.embeddedAlbum);
+        await m.addColumn(tracks, tracks.embeddedYear);
+        await m.addColumn(tracks, tracks.lyrics);
+        await m.addColumn(tracks, tracks.lyricsSource);
+        await m.createTable(trackEdits);
+        await m.createTable(queueEntries);
       }
     },
   );

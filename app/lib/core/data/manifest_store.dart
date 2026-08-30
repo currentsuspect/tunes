@@ -50,6 +50,12 @@ class ManifestStore {
                 totalTracks: Value(t.totalTracks),
                 addedAt: Value(effectiveAddedAt),
                 searchText: Value(searchText),
+                // v3: embedded tags from the daemon. Stored raw; the
+                // local-wins policy lives in the query layer.
+                embeddedTitle: Value(t.embeddedTitle),
+                embeddedArtist: Value(t.embeddedArtist),
+                embeddedAlbum: Value(t.embeddedAlbum),
+                embeddedYear: Value(t.embeddedYear),
               ),
             );
         if (priorAdded == null && effectiveAddedAt != null) {
@@ -161,7 +167,7 @@ class ManifestStore {
               ])
               ..limit(limit))
             .get();
-    return rows.map(_trackFromRow).toList();
+    return _rowsToResolvedTracks(rows);
   }
 
   Future<List<ManifestRelease>> allReleases({int limit = 200000}) async {
@@ -201,7 +207,24 @@ class ManifestStore {
               ..orderBy([(t) => OrderingTerm.desc(t.addedAt)])
               ..limit(limit))
             .get();
-    return rows.map(_trackFromRow).toList();
+    return _rowsToResolvedTracks(rows);
+  }
+
+  Future<List<ManifestTrack>> _rowsToResolvedTracks(List<Track> rows) async {
+    if (rows.isEmpty) return [];
+    final shas = rows.map((r) => r.sha).toList();
+    // Batch-load all edits for these tracks in one round trip.
+    final editRows = await (_db.select(
+      _db.trackEdits,
+    )..where((t) => t.sha.isIn(shas))).get();
+    final editsBySha = <String, Map<String, String>>{};
+    for (final e in editRows) {
+      editsBySha.putIfAbsent(e.sha, () => {})[e.field] = e.value;
+    }
+    return [
+      for (final r in rows)
+        _applyEdits(_trackFromRow(r), editsBySha[r.sha] ?? const {}),
+    ];
   }
 
   Future<List<SearchHit>> searchTracks(String query, {int limit = 50}) async {
@@ -268,6 +291,12 @@ class ManifestStore {
       addedAt: row.addedAt == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(row.addedAt!),
+      embeddedTitle: row.embeddedTitle,
+      embeddedArtist: row.embeddedArtist,
+      embeddedAlbum: row.embeddedAlbum,
+      embeddedYear: row.embeddedYear,
+      lyrics: row.lyrics,
+      lyricsSource: row.lyricsSource,
     );
   }
 
@@ -296,6 +325,139 @@ class ManifestStore {
 
   ManifestArtist _artistFromRow(Artist row) {
     return ManifestArtist(name: row.name, artSha: row.artSha);
+  }
+
+  // --- User edits --------------------------------------------------------
+
+  /// Persist a user edit for a single field. Future syncs won't undo
+  /// it. Pass null/empty to clear the edit and revert to the daemon-
+  /// supplied (or embedded-tag) value.
+  Future<void> setEdit(String sha, String field, String? value) async {
+    final key = _validateField(field);
+    if (value == null || value.isEmpty) {
+      await (_db.delete(
+        _db.trackEdits,
+      )..where((t) => t.sha.equals(sha) & t.field.equals(key))).go();
+    } else {
+      await _db
+          .into(_db.trackEdits)
+          .insertOnConflictUpdate(
+            TrackEditsCompanion.insert(
+              sha: sha,
+              field: key,
+              value: value,
+              editedAt: DateTime.now().millisecondsSinceEpoch,
+            ),
+          );
+    }
+  }
+
+  /// Reads all edits for a track in one round trip; cheap because the
+  /// edit table is keyed on (sha, field). Returns a map keyed by field.
+  Future<Map<String, String>> editsFor(String sha) async {
+    final rows = await (_db.select(
+      _db.trackEdits,
+    )..where((t) => t.sha.equals(sha))).get();
+    return {for (final r in rows) r.field: r.value};
+  }
+
+  /// Applies the local-wins policy: user edit > embedded tag >
+  /// daemon-supplied value. Returns a [ManifestTrack] with the resolved
+  /// identity fields, ready for UI display.
+  Future<ManifestTrack> trackBySha(String sha) async {
+    final row = await (_db.select(
+      _db.tracks,
+    )..where((t) => t.sha.equals(sha))).getSingleOrNull();
+    if (row == null) {
+      throw StateError('no track with sha $sha');
+    }
+    final track = _trackFromRow(row);
+    final edits = await editsFor(sha);
+    return _applyEdits(track, edits);
+  }
+
+  static const _editableFields = {'title', 'artist', 'album', 'year'};
+
+  String _validateField(String field) {
+    if (!_editableFields.contains(field)) {
+      throw ArgumentError('non-editable field: $field');
+    }
+    return field;
+  }
+
+  ManifestTrack _applyEdits(ManifestTrack t, Map<String, String> edits) {
+    return applyEditsStatic(t, edits);
+  }
+
+  /// Public for [QueueStore] which also needs to apply the same
+  /// local-wins policy when materialising tracks from its table.
+  static ManifestTrack applyEditsStatic(
+    ManifestTrack t,
+    Map<String, String> edits,
+  ) {
+    if (edits.isEmpty) return t;
+    return ManifestTrack(
+      sha: t.sha,
+      size: t.size,
+      codec: t.codec,
+      sampleRate: t.sampleRate,
+      channels: t.channels,
+      bitrate: t.bitrate,
+      durationMs: t.durationMs,
+      title: edits['title'] ?? t.embeddedTitle ?? t.title,
+      artist: edits['artist'] ?? t.embeddedArtist ?? t.artist,
+      album: edits['album'] ?? t.embeddedAlbum ?? t.album,
+      year: edits['year'] ?? t.embeddedYear ?? t.year,
+      artSha: t.artSha,
+      releaseId: t.releaseId,
+      releaseIds: t.releaseIds,
+      trackNumber: t.trackNumber,
+      discNumber: t.discNumber,
+      totalTracks: t.totalTracks,
+      addedAt: t.addedAt,
+      embeddedTitle: t.embeddedTitle,
+      embeddedArtist: t.embeddedArtist,
+      embeddedAlbum: t.embeddedAlbum,
+      embeddedYear: t.embeddedYear,
+      lyrics: t.lyrics,
+      lyricsSource: t.lyricsSource,
+    );
+  }
+
+  /// Public for [QueueStore]. Converts a drift row to a domain
+  /// track without applying edits (caller does the edit batch).
+  static ManifestTrack rowToTrackStatic(Track row) {
+    final releaseIds = (jsonDecode(row.releaseIdsJson) as List)
+        .cast<String>()
+        .toList();
+    return ManifestTrack(
+      sha: row.sha,
+      size: row.size,
+      codec: row.codec,
+      sampleRate: row.sampleRate,
+      channels: row.channels,
+      bitrate: row.bitrate,
+      durationMs: row.durationMs,
+      title: row.title,
+      artist: row.artist,
+      album: row.album,
+      year: row.year,
+      artSha: row.artSha,
+      releaseId: row.releaseId,
+      releaseIds: releaseIds,
+      trackNumber: row.trackNumber,
+      discNumber: row.discNumber,
+      totalTracks: row.totalTracks,
+      addedAt: row.addedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(row.addedAt!),
+      embeddedTitle: row.embeddedTitle,
+      embeddedArtist: row.embeddedArtist,
+      embeddedAlbum: row.embeddedAlbum,
+      embeddedYear: row.embeddedYear,
+      lyrics: row.lyrics,
+      lyricsSource: row.lyricsSource,
+    );
   }
 }
 

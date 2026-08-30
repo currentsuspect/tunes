@@ -34,15 +34,20 @@ describe("buildManifest", () => {
       [probe()],
       new Map([["a".repeat(64), { caption: "", fileName: "Travis Scott - ESCAPE PLAN.flac" }]])
     );
-    expect(filenamed.tracks[0]?.title).toBe("Travis Scott - ESCAPE PLAN");
+    // Filenames with the "Artist - Title" shape contribute title + artist
+    // separately; the joined "Travis Scott - ESCAPE PLAN" is no longer
+    // the title itself, just the original filename string we parsed.
+    expect(filenamed.tracks[0]?.title).toBe("ESCAPE PLAN");
+    expect(filenamed.tracks[0]?.artist).toBe("Travis Scott");
   });
 
-  it("never invents artist/album from filenames", () => {
+  it("falls back to filename-parsed artist when no tags and no enrichment", () => {
     const m = buildManifest(
       [probe()],
       new Map([["a".repeat(64), { caption: null, fileName: "Some Artist - Track.flac" }]])
     );
-    expect(m.tracks[0]?.artist).toBe("unknown artist");
+    expect(m.tracks[0]?.artist).toBe("Some Artist");
+    expect(m.tracks[0]?.title).toBe("Track");
     expect(m.tracks[0]?.album).toBe("unknown album");
     expect(m.tracks[0]?.artSha).toBeNull();
   });
@@ -111,7 +116,7 @@ describe("buildManifest", () => {
       ],
     ]);
     const m = buildManifest([probe(), probe({ sha: "b".repeat(64) })], new Map(), enrich);
-    expect(m.schema).toBe(3);
+    expect(m.schema).toBe(4);
     expect(m.releases.length).toBe(1);
     const r = m.releases[0]!;
     expect(r.id).toBe("sp:album1");
@@ -608,4 +613,24 @@ describe("buildManifest", () => {
   it("addedAt defaults to null when the lookup map is empty", () => {
     const m = buildManifest([probe()]);
     expect(m.tracks[0]?.addedAt).toBeNull();
+  });
+
+  it("exposes embedded tag values on every track", () => {
+    const m = buildManifest([
+      probe({ tags: { title: "T", artist: "A", album: "B", year: "2024" } }),
+    ]);
+    const t = m.tracks[0]!;
+    expect(t.embeddedTitle).toBe("T");
+    expect(t.embeddedArtist).toBe("A");
+    expect(t.embeddedAlbum).toBe("B");
+    expect(t.embeddedYear).toBe("2024");
+  });
+
+  it("embedded fields are null when no tags are present", () => {
+    const m = buildManifest([probe()]);
+    const t = m.tracks[0]!;
+    expect(t.embeddedTitle).toBeNull();
+    expect(t.embeddedArtist).toBeNull();
+    expect(t.embeddedAlbum).toBeNull();
+    expect(t.embeddedYear).toBeNull();
   });

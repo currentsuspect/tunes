@@ -6,6 +6,8 @@ import '../../core/theme/tokens.dart';
 import '../../core/theme/tokens.dart'
     show Tones, TypeScale, Space, RadiusTokens;
 import '../../domain/manifest.dart';
+import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/track_actions_sheet.dart';
 
 class TrackRow extends StatelessWidget {
   const TrackRow({
@@ -18,6 +20,9 @@ class TrackRow extends StatelessWidget {
     required this.onDownload,
     required this.offline,
     required this.artUrlFor,
+    this.onPlayNext,
+    this.onAddToQueue,
+    this.onEdit,
   });
 
   final ManifestTrack track;
@@ -28,6 +33,18 @@ class TrackRow extends StatelessWidget {
   final VoidCallback onDownload;
   final bool offline;
   final String Function(String sha) artUrlFor;
+  final Future<void> Function()? onPlayNext;
+  final Future<void> Function()? onAddToQueue;
+  final Future<void> Function({
+    String? title,
+    String? artist,
+    String? album,
+    String? year,
+  })?
+  onEdit;
+
+  bool get _hasActions =>
+      onPlayNext != null && onAddToQueue != null && onEdit != null;
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +61,15 @@ class TrackRow extends StatelessWidget {
             ignoring: dimmed,
             child: InkWell(
               onTap: onTap,
+              onLongPress: _hasActions
+                  ? () => TrackActionsSheet.show(
+                      context,
+                      track: track,
+                      onPlayNext: onPlayNext!,
+                      onAddToQueue: onAddToQueue!,
+                      onEdit: onEdit!,
+                    )
+                  : null,
               borderRadius: BorderRadius.circular(RadiusTokens.control),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -52,7 +78,12 @@ class TrackRow extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    ArtThumb(sha: track.artSha, artUrlFor: artUrlFor),
+                    ArtThumb(
+                      sha: track.artSha,
+                      artUrlFor: artUrlFor,
+                      title: track.title,
+                      artist: track.artist,
+                    ),
                     if (active && player.playing) ...[
                       const SizedBox(width: Space.sm),
                       const Icon(
@@ -158,26 +189,46 @@ class ArtThumb extends StatelessWidget {
     required this.sha,
     required this.artUrlFor,
     this.size = 40,
+    this.title = '',
+    this.artist = '',
+    this.borderRadius = 8,
   });
 
   final String? sha;
   final String Function(String sha) artUrlFor;
   final double size;
+  final String title;
+  final String artist;
+  final double borderRadius;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: sha != null
-          ? Image.network(
-              artUrlFor(sha!),
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => ArtPlaceholder(size: size),
-            )
-          : ArtPlaceholder(size: size),
-    );
+    if (sha != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Image.network(
+          artUrlFor(sha!),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => GeneratedArtwork(
+            title: title,
+            artist: artist,
+            size: size,
+            borderRadius: borderRadius,
+          ),
+        ),
+      );
+    }
+    if (title.isNotEmpty || artist.isNotEmpty) {
+      return GeneratedArtwork(
+        title: title,
+        artist: artist,
+        size: size,
+        borderRadius: borderRadius,
+      );
+    }
+    return const ArtPlaceholder();
   }
 }
 

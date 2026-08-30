@@ -83,6 +83,34 @@ export class ManifestServer {
           return;
         }
 
+        if (url.pathname === "/changes") {
+          // /changes?since=<iso8601>
+          // Returns the set of tracks whose addedAt is strictly greater
+          // than the cutoff. The full tracks/releases/artists array is
+          // returned when `since` is missing or invalid (i.e. cold
+          // start). The app uses this to avoid re-downloading the
+          // entire manifest on every poll.
+          const since = url.searchParams.get("since");
+          const cutoff = since ? Date.parse(since) : NaN;
+          const manifest = await this.getManifest(true);
+          const cutoffMs = Number.isFinite(cutoff) ? cutoff : -Infinity;
+          const added = manifest.tracks
+            .filter((t) => {
+              const ts = t.addedAt ? Date.parse(t.addedAt) : NaN;
+              return Number.isFinite(ts) && ts > cutoffMs;
+            })
+            .map((t) => t.sha);
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              generatedAt: manifest.generatedAt,
+              integrity: manifest.integrity,
+              addedShas: added,
+            }),
+          );
+          return;
+        }
+
         const trackMatch = /^\/track\/([0-9a-f]{64})$/.exec(url.pathname);
         if (trackMatch) {
           const sha = trackMatch[1] ?? "";

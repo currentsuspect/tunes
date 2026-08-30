@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/manifest_store.dart';
+import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
-import '../library/library_widgets.dart';
 import '../now_playing/now_playing_page.dart';
 import '../player/mini_player_bar.dart';
 
@@ -20,6 +22,8 @@ class AlbumPage extends StatelessWidget {
     required this.onDownload,
     required this.offline,
     required this.artUrlFor,
+    required this.manifestStore,
+    this.queueStore,
   });
 
   final ManifestRelease release;
@@ -30,6 +34,8 @@ class AlbumPage extends StatelessWidget {
   final void Function(ManifestTrack) onDownload;
   final bool offline;
   final String Function(String sha) artUrlFor;
+  final ManifestStore manifestStore;
+  final QueueStore? queueStore;
 
   @override
   Widget build(BuildContext context) {
@@ -106,10 +112,19 @@ class AlbumPage extends StatelessWidget {
                             ? Image.network(
                                 artUrlFor(release.artSha!),
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) =>
-                                    const ArtPlaceholder(size: 220),
+                                errorBuilder: (_, _, _) => GeneratedArtwork(
+                                  title: release.title,
+                                  artist: release.artist,
+                                  size: 220,
+                                  borderRadius: RadiusTokens.card,
+                                ),
                               )
-                            : const ArtPlaceholder(size: 220),
+                            : GeneratedArtwork(
+                                title: release.title,
+                                artist: release.artist,
+                                size: 220,
+                                borderRadius: RadiusTokens.card,
+                              ),
                       ),
                     ),
                   ),
@@ -134,6 +149,8 @@ class AlbumPage extends StatelessWidget {
                           onDownload: onDownload,
                           offline: offline,
                           artUrlFor: artUrlFor,
+                          manifestStore: manifestStore,
+                          queueStore: queueStore,
                         ),
                       ),
                     ),
@@ -213,6 +230,8 @@ class AlbumPage extends StatelessWidget {
               onDownload: onDownload,
               offline: offline,
               artUrlFor: artUrlFor,
+              manifestStore: manifestStore,
+              queueStore: queueStore,
             ),
           ),
         ),

@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/manifest_store.dart';
+import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
 import '../album/album_page.dart';
-import '../library/library_widgets.dart';
+import '../lyrics/lyrics_sheet.dart';
+import '../queue/queue_sheet.dart';
 
 class NowPlayingPage extends StatelessWidget {
   const NowPlayingPage({
@@ -18,6 +22,8 @@ class NowPlayingPage extends StatelessWidget {
     required this.onDownload,
     required this.offline,
     required this.artUrlFor,
+    required this.manifestStore,
+    this.queueStore,
   });
 
   final TunePlayer player;
@@ -27,6 +33,8 @@ class NowPlayingPage extends StatelessWidget {
   final void Function(ManifestTrack) onDownload;
   final bool offline;
   final String Function(String sha) artUrlFor;
+  final ManifestStore manifestStore;
+  final QueueStore? queueStore;
 
   String _label(Duration d) {
     final s = d.inSeconds;
@@ -35,106 +43,9 @@ class NowPlayingPage extends StatelessWidget {
   }
 
   void _openQueue(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Tones.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(RadiusTokens.card),
-        ),
-      ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: SizedBox(
-            height: 420,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    Space.md,
-                    Space.lg,
-                    Space.sm,
-                  ),
-                  child: Text('Queue', style: TypeScale.title),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.lg,
-                      0,
-                      Space.lg,
-                      Space.lg,
-                    ),
-                    itemCount: player.queue.length,
-                    itemBuilder: (context, i) {
-                      final t = player.queue[i];
-                      final isCurrent = i == player.index;
-                      return InkWell(
-                        onTap: () {
-                          player.playAt(i);
-                          Navigator.of(sheetContext).pop();
-                        },
-                        borderRadius: BorderRadius.circular(
-                          RadiusTokens.control,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: Space.sm,
-                            horizontal: Space.xs,
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                isCurrent ? 'Now playing' : (i + 1).toString(),
-                                style: TypeScale.caption.copyWith(
-                                  color: isCurrent
-                                      ? Tones.primary
-                                      : Tones.textMuted,
-                                ),
-                              ),
-                              const SizedBox(width: Space.md),
-                              ArtThumb(
-                                sha: t.artSha,
-                                artUrlFor: artUrlFor,
-                                size: 36,
-                              ),
-                              const SizedBox(width: Space.md),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      t.title,
-                                      style: TypeScale.title.copyWith(
-                                        color: isCurrent ? Tones.primary : null,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text(
-                                      t.artist,
-                                      style: TypeScale.body,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    final qs = queueStore;
+    if (qs == null) return;
+    QueueSheet.show(context, queueStore: qs, player: player);
   }
 
   void _openAlbum(BuildContext context, ManifestTrack track) {
@@ -168,6 +79,8 @@ class NowPlayingPage extends StatelessWidget {
           onDownload: onDownload,
           offline: offline,
           artUrlFor: artUrlFor,
+          manifestStore: manifestStore,
+          queueStore: queueStore,
         ),
       ),
     );
@@ -310,6 +223,8 @@ class NowPlayingPage extends StatelessWidget {
                                       onDownload: onDownload,
                                       offline: offline,
                                       artUrlFor: artUrlFor,
+                                      manifestStore: manifestStore,
+                                      queueStore: queueStore,
                                     ),
                                   ),
                                 );
@@ -329,6 +244,20 @@ class NowPlayingPage extends StatelessWidget {
                                 break;
                               case 'info':
                                 _showTrackInfo(context, current);
+                                break;
+                              case 'lyrics':
+                                LyricsSheet.show(
+                                  context,
+                                  track: current,
+                                  player: player,
+                                  onSave: (text) async {
+                                    await manifestStore.setEdit(
+                                      current.sha,
+                                      'lyrics',
+                                      text,
+                                    );
+                                  },
+                                );
                                 break;
                             }
                           },
@@ -365,6 +294,10 @@ class NowPlayingPage extends StatelessWidget {
                                 'Track information',
                                 style: TypeScale.body,
                               ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'lyrics',
+                              child: Text('Lyrics', style: TypeScale.body),
                             ),
                           ],
                         ),
@@ -579,9 +512,17 @@ class _Artwork extends StatelessWidget {
                 ? Image.network(
                     artUrlFor(track.artSha!),
                     fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => ArtPlaceholder(size: side),
+                    errorBuilder: (_, _, _) => GeneratedArtwork(
+                      title: track.title,
+                      artist: track.artist,
+                      size: side,
+                    ),
                   )
-                : ArtPlaceholder(size: side),
+                : GeneratedArtwork(
+                    title: track.title,
+                    artist: track.artist,
+                    size: side,
+                  ),
           ),
         );
         // Subtle "alive" motion: slow rotation while playing, snap-back

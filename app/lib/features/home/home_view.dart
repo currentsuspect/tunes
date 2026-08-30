@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 import '../library/library_widgets.dart';
@@ -217,10 +218,19 @@ class _JustAddedCarousel extends StatelessWidget {
                               ? Image.network(
                                   artUrlFor(t.artSha!),
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      const ArtPlaceholder(size: 100),
+                                  errorBuilder: (_, _, _) => GeneratedArtwork(
+                                    title: t.title,
+                                    artist: t.artist,
+                                    size: 100,
+                                    borderRadius: RadiusTokens.card,
+                                  ),
                                 )
-                              : const ArtPlaceholder(size: 100),
+                              : GeneratedArtwork(
+                                  title: t.title,
+                                  artist: t.artist,
+                                  size: 100,
+                                  borderRadius: RadiusTokens.card,
+                                ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -288,7 +298,13 @@ class _MissingList extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    ArtThumb(sha: r.artSha, artUrlFor: artUrlFor, size: 48),
+                    ArtThumb(
+                      sha: r.artSha,
+                      artUrlFor: artUrlFor,
+                      size: 48,
+                      title: r.title,
+                      artist: r.artist,
+                    ),
                     const SizedBox(width: Space.md),
                     Expanded(
                       child: Column(
@@ -364,7 +380,13 @@ class _ReleasedThisYear extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    ArtThumb(sha: r.artSha, artUrlFor: artUrlFor, size: 40),
+                    ArtThumb(
+                      sha: r.artSha,
+                      artUrlFor: artUrlFor,
+                      size: 40,
+                      title: r.title,
+                      artist: r.artist,
+                    ),
                     const SizedBox(width: Space.md),
                     Expanded(
                       child: Column(
@@ -551,10 +573,19 @@ class _AlbumsRail extends StatelessWidget {
                               ? Image.network(
                                   artUrlFor(r.artSha!),
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      const ArtPlaceholder(size: 130),
+                                  errorBuilder: (_, _, _) => GeneratedArtwork(
+                                    title: r.title,
+                                    artist: r.artist,
+                                    size: 130,
+                                    borderRadius: RadiusTokens.card,
+                                  ),
                                 )
-                              : const ArtPlaceholder(size: 130),
+                              : GeneratedArtwork(
+                                  title: r.title,
+                                  artist: r.artist,
+                                  size: 130,
+                                  borderRadius: RadiusTokens.card,
+                                ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -615,7 +646,12 @@ class _RecentlyPlayed extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    ArtThumb(sha: t.artSha, artUrlFor: artUrlFor),
+                    ArtThumb(
+                      sha: t.artSha,
+                      artUrlFor: artUrlFor,
+                      title: t.title,
+                      artist: t.artist,
+                    ),
                     const SizedBox(width: Space.md),
                     Expanded(
                       child: Column(

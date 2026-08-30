@@ -205,6 +205,8 @@ class _SearchViewState extends State<SearchView> {
                                   sha: null,
                                   artUrlFor: widget.artUrlFor,
                                   size: 44,
+                                  title: r.title,
+                                  artist: r.artist ?? '',
                                 ),
                                 const SizedBox(width: Space.md),
                                 Expanded(
@@ -345,6 +347,8 @@ class _SearchViewState extends State<SearchView> {
                                     sha: r.artSha,
                                     artUrlFor: widget.artUrlFor,
                                     size: 44,
+                                    title: r.title,
+                                    artist: r.artist,
                                   ),
                                   const SizedBox(width: Space.md),
                                   Expanded(
@@ -401,6 +405,8 @@ class _SearchViewState extends State<SearchView> {
                                     sha: a.artSha,
                                     artUrlFor: widget.artUrlFor,
                                     size: 44,
+                                    title: a.name,
+                                    artist: a.name,
                                   ),
                                   const SizedBox(width: Space.md),
                                   Expanded(

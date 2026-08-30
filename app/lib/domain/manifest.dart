@@ -20,6 +20,12 @@ class ManifestTrack {
     this.releaseIds = const [],
     this.addedAt,
     this.totalTracks,
+    this.embeddedTitle,
+    this.embeddedArtist,
+    this.embeddedAlbum,
+    this.embeddedYear,
+    this.lyrics,
+    this.lyricsSource,
   });
 
   final String sha;
@@ -40,6 +46,18 @@ class ManifestTrack {
   final List<String> releaseIds;
   final int? totalTracks;
   final DateTime? addedAt;
+  // v4 wire: extracted from embedded tags by ffprobe on the daemon.
+  // The app's query layer applies the local-wins policy (user edit >
+  // embedded > daemon-supplied) so these stay raw.
+  final String? embeddedTitle;
+  final String? embeddedArtist;
+  final String? embeddedAlbum;
+  final String? embeddedYear;
+  // Lyrics content + provenance. Source is one of: 'user' (typed by
+  // the user in-app), 'lrc' (parsed from a sidecar LRC), or a remote
+  // source identifier.
+  final String? lyrics;
+  final String? lyricsSource;
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -63,6 +81,12 @@ class ManifestTrack {
       discNumber: (json['discNumber'] as num?)?.toInt(),
       totalTracks: (json['totalTracks'] as num?)?.toInt(),
       addedAt: _parseAddedAt(json['addedAt']),
+      embeddedTitle: json['embeddedTitle'] as String?,
+      embeddedArtist: json['embeddedArtist'] as String?,
+      embeddedAlbum: json['embeddedAlbum'] as String?,
+      embeddedYear: json['embeddedYear'] as String?,
+      lyrics: json['lyrics'] as String?,
+      lyricsSource: json['lyricsSource'] as String?,
     );
   }
 

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/manifest_store.dart';
+import '../../core/data/queue_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/initials.dart';
@@ -24,6 +26,8 @@ class ArtistPage extends StatefulWidget {
     required this.onDownload,
     required this.offline,
     required this.artUrlFor,
+    required this.manifestStore,
+    this.queueStore,
   });
 
   final String artist;
@@ -35,6 +39,8 @@ class ArtistPage extends StatefulWidget {
   final void Function(ManifestTrack) onDownload;
   final bool offline;
   final String Function(String sha) artUrlFor;
+  final ManifestStore manifestStore;
+  final QueueStore? queueStore;
 
   @override
   State<ArtistPage> createState() => _ArtistPageState();
@@ -197,6 +203,8 @@ class _ArtistPageState extends State<ArtistPage> {
                                   sha: null,
                                   artUrlFor: widget.artUrlFor,
                                   size: 48,
+                                  title: g.title,
+                                  artist: widget.artist,
                                 ),
                               ),
                               const SizedBox(width: Space.md),
@@ -263,6 +271,8 @@ class _ArtistPageState extends State<ArtistPage> {
                             onDownload: widget.onDownload,
                             offline: widget.offline,
                             artUrlFor: widget.artUrlFor,
+                            manifestStore: widget.manifestStore,
+                            queueStore: widget.queueStore,
                           ),
                         ),
                       ),
@@ -287,6 +297,8 @@ class _ArtistPageState extends State<ArtistPage> {
               onDownload: widget.onDownload,
               offline: widget.offline,
               artUrlFor: widget.artUrlFor,
+              manifestStore: widget.manifestStore,
+              queueStore: widget.queueStore,
             ),
           ),
         ),
@@ -316,7 +328,13 @@ class _ReleaseCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(RadiusTokens.card),
       child: Row(
         children: [
-          ArtThumb(sha: release.artSha, artUrlFor: artUrlFor, size: 56),
+          ArtThumb(
+            sha: release.artSha,
+            artUrlFor: artUrlFor,
+            size: 56,
+            title: release.title,
+            artist: release.artist,
+          ),
           const SizedBox(width: Space.md),
           Expanded(
             child: Column(
