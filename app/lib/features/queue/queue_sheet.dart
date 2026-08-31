@@ -4,7 +4,6 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/generated_artwork.dart';
-import '../../domain/manifest.dart';
 
 /// Bottom sheet that shows the persistent play queue, lets the user
 /// drag-reorder tracks, and "play now" or remove individual entries.
@@ -41,20 +40,11 @@ class QueueSheet extends StatefulWidget {
 }
 
 class _QueueSheetState extends State<QueueSheet> {
-  late final Stream<List<ManifestTrack>> _stream;
-  List<ManifestTrack> _tracks = const [];
   String? _activeSha;
-  bool _dragInProgress = false;
 
   @override
   void initState() {
     super.initState();
-    _stream = widget.queueStore.watch();
-    _stream.listen((t) {
-      if (!_dragInProgress) {
-        setState(() => _tracks = t);
-      }
-    });
     widget.player.addListener(_onPlayerChange);
     _refreshActive();
   }
@@ -76,17 +66,13 @@ class _QueueSheetState extends State<QueueSheet> {
     }
   }
 
-  Future<void> _reorder(List<ManifestTrack> next) async {
-    final shas = next.map((t) => t.sha).toList();
-    setState(() {
-      _dragInProgress = true;
-      _tracks = next;
-    });
-    try {
-      await widget.queueStore.reorder(shas);
-    } finally {
-      if (mounted) setState(() => _dragInProgress = false);
-    }
+  Future<void> _reorder(List<QueueItem> next) async {
+    final ids = next.map((e) => e.id).toList();
+    await widget.queueStore.reorder(ids);
+  }
+
+  Future<void> _onRemove(QueueItem e) async {
+    await widget.queueStore.removeById(e.id);
   }
 
   @override
@@ -98,72 +84,73 @@ class _QueueSheetState extends State<QueueSheet> {
       expand: false,
       builder: (context, scrollController) {
         return SafeArea(
-          child: Column(
-            children: [
-              _Header(
-                onClose: () => Navigator.of(context).pop(),
-                onClear: _tracks.isEmpty
-                    ? null
-                    : () async {
-                        await widget.queueStore.clear();
-                        if (!mounted) return;
-                        setState(() => _tracks = const []);
-                      },
-              ),
-              const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
-              if (_tracks.isEmpty)
-                const Expanded(
-                  child: Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(Space.xl),
-                      child: Text(
-                        'Queue is empty.\nTap a track in your library and '
-                        'choose "Add to queue" or "Play next".',
-                        textAlign: TextAlign.center,
-                        style: TypeScale.body,
-                      ),
-                    ),
+          child: StreamBuilder<List<QueueItem>>(
+            stream: widget.queueStore.watch(),
+            builder: (context, snapshot) {
+              final entries = snapshot.data ?? const [];
+              return Column(
+                children: [
+                  _Header(
+                    onClose: () => Navigator.of(context).pop(),
+                    onClear: entries.isEmpty
+                        ? null
+                        : () => widget.queueStore.clear(),
                   ),
-                )
-              else
-                Expanded(
-                  child: ReorderableListView.builder(
-                    scrollController: scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: Space.sm),
-                    buildDefaultDragHandles: false,
-                    itemCount: _tracks.length,
-                    onReorderItem: (oldIndex, newIndex) {
-                      final next = [..._tracks];
-                      final moved = next.removeAt(oldIndex);
-                      next.insert(newIndex, moved);
-                      _reorder(next);
-                    },
-                    itemBuilder: (context, i) {
-                      final t = _tracks[i];
-                      return _QueueRow(
-                        key: ValueKey(t.sha),
-                        index: i,
-                        track: t,
-                        isActive: t.sha == _activeSha,
-                        onPlay: () {
-                          widget.player.playQueue(_tracks.sublist(i), 0);
-                          Navigator.of(context).pop();
-                        },
-                        onRemove: () async {
-                          await widget.queueStore.remove(t.sha);
-                          if (!mounted) return;
-                          setState(
-                            () => _tracks = [
-                              for (final x in _tracks)
-                                if (x.sha != t.sha) x,
-                            ],
-                          );
-                        },
-                      );
-                    },
+                  const Divider(
+                    height: 1,
+                    thickness: 0.5,
+                    color: Tones.hairline,
                   ),
-                ),
-            ],
+                  Expanded(
+                    child: entries.isEmpty
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(Space.xl),
+                              child: Text(
+                                'Queue is empty.\nTap a track in your '
+                                'library and choose "Add to queue" or '
+                                '"Play next".',
+                                textAlign: TextAlign.center,
+                                style: TypeScale.body,
+                              ),
+                            ),
+                          )
+                        : ReorderableListView.builder(
+                            scrollController: scrollController,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: Space.sm,
+                            ),
+                            buildDefaultDragHandles: false,
+                            itemCount: entries.length,
+                            onReorderItem: (oldIndex, newIndex) {
+                              final next = [...entries];
+                              final moved = next.removeAt(oldIndex);
+                              next.insert(newIndex, moved);
+                              _reorder(next);
+                            },
+                            itemBuilder: (context, i) {
+                              final e = entries[i];
+                              return _QueueRow(
+                                key: ValueKey(e.id),
+                                index: i,
+                                entry: e,
+                                isActive: e.track.sha == _activeSha,
+                                onPlay: () {
+                                  final remaining = entries
+                                      .skip(i)
+                                      .map((x) => x.track)
+                                      .toList();
+                                  widget.player.playQueue(remaining, 0);
+                                  Navigator.of(context).pop();
+                                },
+                                onRemove: () => _onRemove(e),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              );
+            },
           ),
         );
       },
@@ -208,14 +195,14 @@ class _QueueRow extends StatelessWidget {
   const _QueueRow({
     super.key,
     required this.index,
-    required this.track,
+    required this.entry,
     required this.isActive,
     required this.onPlay,
     required this.onRemove,
   });
 
   final int index;
-  final ManifestTrack track;
+  final QueueItem entry;
   final bool isActive;
   final VoidCallback onPlay;
   final VoidCallback onRemove;
@@ -243,8 +230,8 @@ class _QueueRow extends StatelessWidget {
                 child: Row(
                   children: [
                     GeneratedArtwork(
-                      title: track.title,
-                      artist: track.artist,
+                      title: entry.track.title,
+                      artist: entry.track.artist,
                       size: 44,
                     ),
                     const SizedBox(width: Space.md),
@@ -253,7 +240,7 @@ class _QueueRow extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            track.title,
+                            entry.track.title,
                             style: TypeScale.body.copyWith(
                               fontWeight: isActive
                                   ? FontWeight.w600
@@ -264,7 +251,7 @@ class _QueueRow extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            track.artist,
+                            entry.track.artist,
                             style: TypeScale.caption,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

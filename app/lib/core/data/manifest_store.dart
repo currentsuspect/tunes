@@ -376,7 +376,7 @@ class ManifestStore {
     return _applyEdits(track, edits);
   }
 
-  static const _editableFields = {'title', 'artist', 'album', 'year'};
+  static const _editableFields = {'title', 'artist', 'album', 'year', 'lyrics'};
 
   String _validateField(String field) {
     if (!_editableFields.contains(field)) {

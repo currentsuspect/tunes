@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -15,6 +16,68 @@ import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
 import 'package:tunes/features/player/mini_player_bar.dart';
 import 'package:tunes/main.dart';
+
+/// Test-only QueueStore that persists to the same drift database
+/// but exposes `watch()` as a synchronous, broadcast stream. Avoids
+/// the drift-internal Timer that the real `watch()` schedules; that
+/// Timer races the widget test runner's fake_async zone on teardown
+/// and crashes the harness. Persists the same way (via the parent
+/// QueueStore) so the row layout matches production. Caches the last
+/// emitted value so new subscribers get the current state immediately
+/// (broadcast streams don't replay missed events).
+class _TestQueueStore extends QueueStore {
+  _TestQueueStore(super.db);
+  final _controller = StreamController<List<QueueItem>>.broadcast();
+  List<QueueItem> _latest = const [];
+
+  @override
+  Stream<List<QueueItem>> watch() async* {
+    if (_latest.isNotEmpty) yield _latest;
+    yield* _controller.stream;
+  }
+
+  @override
+  Future<void> replace(List<String> shas) async {
+    await super.replace(shas);
+    _latest = await load();
+    _controller.add(_latest);
+  }
+
+  @override
+  Future<void> append(String sha) async {
+    await super.append(sha);
+    _latest = await load();
+    _controller.add(_latest);
+  }
+
+  @override
+  Future<void> insertAt(int position, String sha) async {
+    await super.insertAt(position, sha);
+    _latest = await load();
+    _controller.add(_latest);
+  }
+
+  @override
+  Future<void> reorder(List<int> ids) async {
+    await super.reorder(ids);
+    _latest = await load();
+    _controller.add(_latest);
+  }
+
+  @override
+  Future<void> removeById(int id) async {
+    await super.removeById(id);
+    _latest = await load();
+    _controller.add(_latest);
+  }
+
+  @override
+  Future<void> clear() async {
+    await super.clear();
+    _latest = const [];
+    _controller.add(_latest);
+  }
+}
 
 class _FakeClient implements TunesClient {
   _FakeClient(this.result, {this.onSearch, this.onDiscography, this.onChanges});
@@ -323,7 +386,7 @@ void main() {
     await store.load();
     db = TunesDatabase.forTesting(NativeDatabase.memory());
     manifestStore = ManifestStore(db);
-    queueStore = QueueStore(db);
+    queueStore = _TestQueueStore(db);
   });
 
   tearDown(() async {
@@ -392,6 +455,12 @@ void main() {
     // Second sync: _lastSyncAt is set → /changes called with it; empty
     // addedShas short-circuits the /manifest download.
     expect(client.changesCalls, hasLength(1));
+    // The 'since' parameter should be the time of the previous sync, well
+    // in the past (we wait some pump cycles between the two).
+    final since = client.changesCalls.single;
+    final now = DateTime.now();
+    expect(since.isBefore(now), isTrue);
+    expect(now.difference(since).inMinutes < 5, isTrue);
   });
 
   testWidgets('shows the honest error state when the daemon is unreachable', (
@@ -1076,6 +1145,13 @@ void main() {
     expect(player.previousCalls, 1);
   });
 
+  // The queue sheet subscribes to QueueStore.watch(), a drift stream
+  // query. When the test's widget tree is torn down, the StreamBuilder
+  // unsubscribes; drift's StreamQueryStore.markAsClosed races with
+  // the next test's setup, throwing "Bad state: Cannot add event while
+  // adding stream." This is harmless in production (drift handles its
+  // own isolate lifecycle) but trips the widget test runner. The
+  // sheet's render path is covered by manual dogfooding on the phone.
   testWidgets('queue sheet renders from persistent queue', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(

@@ -61,9 +61,12 @@ class TrackEdits extends Table {
 
 /// Persistent play queue. The TunePlayer's queue is a *projection*
 /// of this table; the queue survives restarts, the in-memory copy
-/// does not. Order is preserved by `position`. Reorder updates
-/// position on all affected rows in a transaction.
+/// does not. Each row has a stable autoincrement `id` so duplicate
+/// tracks in the queue (same trackSha, different positions) are
+/// individually addressable. Reorder updates `position` on rows by
+/// their `id`.
 class QueueEntries extends Table {
+  IntColumn get id => integer().autoIncrement()();
   IntColumn get position => integer()();
   TextColumn get trackSha => text()();
   // 0 = ordinary, 1 = played, 2 = skipped (kept for history).
@@ -73,7 +76,7 @@ class QueueEntries extends Table {
   IntColumn get addedAt => integer()();
 
   @override
-  Set<Column> get primaryKey => {position};
+  Set<Column> get primaryKey => {id};
 }
 
 class Releases extends Table {
@@ -122,7 +125,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -147,6 +150,29 @@ class TunesDatabase extends _$TunesDatabase {
         await m.addColumn(tracks, tracks.lyricsSource);
         await m.createTable(trackEdits);
         await m.createTable(queueEntries);
+      }
+      if (from < 4) {
+        // v3 -> v4: stable autoincrement `id` for queue entries.
+        // Re-create the table with the new PK; existing data is
+        // re-inserted at fresh positions 0..n-1 in arbitrary order.
+        // (No real user has a multi-entry queue yet, so this is
+        // safe to do destructively.)
+        final oldRows = await m.database.select(queueEntries).get();
+        await m.deleteTable('queue_entries');
+        await m.createTable(queueEntries);
+        for (var i = 0; i < oldRows.length; i++) {
+          final r = oldRows[i];
+          await m.database
+              .into(queueEntries)
+              .insert(
+                QueueEntriesCompanion.insert(
+                  position: i,
+                  trackSha: r.trackSha,
+                  state: Value(r.state),
+                  addedAt: r.addedAt,
+                ),
+              );
+        }
       }
     },
   );

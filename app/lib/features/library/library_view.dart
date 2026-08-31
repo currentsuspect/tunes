@@ -137,7 +137,7 @@ class _LibraryViewState extends State<LibraryView> {
                     final q = await widget.queueStore!.load();
                     await widget.queueStore!.replace([
                       t.sha,
-                      ...q.map((e) => e.sha),
+                      ...q.map((e) => e.track.sha),
                     ]);
                     if (!mounted) return;
                     messenger.showSnackBar(

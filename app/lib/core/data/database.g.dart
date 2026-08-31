@@ -2768,6 +2768,19 @@ class $QueueEntriesTable extends QueueEntries
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $QueueEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
   static const VerificationMeta _positionMeta = const VerificationMeta(
     'position',
   );
@@ -2777,7 +2790,7 @@ class $QueueEntriesTable extends QueueEntries
     aliasedName,
     false,
     type: DriftSqlType.int,
-    requiredDuringInsert: false,
+    requiredDuringInsert: true,
   );
   static const VerificationMeta _trackShaMeta = const VerificationMeta(
     'trackSha',
@@ -2812,7 +2825,13 @@ class $QueueEntriesTable extends QueueEntries
     requiredDuringInsert: true,
   );
   @override
-  List<GeneratedColumn> get $columns => [position, trackSha, state, addedAt];
+  List<GeneratedColumn> get $columns => [
+    id,
+    position,
+    trackSha,
+    state,
+    addedAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2825,11 +2844,16 @@ class $QueueEntriesTable extends QueueEntries
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
     if (data.containsKey('position')) {
       context.handle(
         _positionMeta,
         position.isAcceptableOrUnknown(data['position']!, _positionMeta),
       );
+    } else if (isInserting) {
+      context.missing(_positionMeta);
     }
     if (data.containsKey('track_sha')) {
       context.handle(
@@ -2857,11 +2881,15 @@ class $QueueEntriesTable extends QueueEntries
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {position};
+  Set<GeneratedColumn> get $primaryKey => {id};
   @override
   QueueEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return QueueEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
       position: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}position'],
@@ -2888,11 +2916,13 @@ class $QueueEntriesTable extends QueueEntries
 }
 
 class QueueEntry extends DataClass implements Insertable<QueueEntry> {
+  final int id;
   final int position;
   final String trackSha;
   final int state;
   final int addedAt;
   const QueueEntry({
+    required this.id,
     required this.position,
     required this.trackSha,
     required this.state,
@@ -2901,6 +2931,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
     map['position'] = Variable<int>(position);
     map['track_sha'] = Variable<String>(trackSha);
     map['state'] = Variable<int>(state);
@@ -2910,6 +2941,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
 
   QueueEntriesCompanion toCompanion(bool nullToAbsent) {
     return QueueEntriesCompanion(
+      id: Value(id),
       position: Value(position),
       trackSha: Value(trackSha),
       state: Value(state),
@@ -2923,6 +2955,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return QueueEntry(
+      id: serializer.fromJson<int>(json['id']),
       position: serializer.fromJson<int>(json['position']),
       trackSha: serializer.fromJson<String>(json['trackSha']),
       state: serializer.fromJson<int>(json['state']),
@@ -2933,6 +2966,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
       'position': serializer.toJson<int>(position),
       'trackSha': serializer.toJson<String>(trackSha),
       'state': serializer.toJson<int>(state),
@@ -2941,11 +2975,13 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   }
 
   QueueEntry copyWith({
+    int? id,
     int? position,
     String? trackSha,
     int? state,
     int? addedAt,
   }) => QueueEntry(
+    id: id ?? this.id,
     position: position ?? this.position,
     trackSha: trackSha ?? this.trackSha,
     state: state ?? this.state,
@@ -2953,6 +2989,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   );
   QueueEntry copyWithCompanion(QueueEntriesCompanion data) {
     return QueueEntry(
+      id: data.id.present ? data.id.value : this.id,
       position: data.position.present ? data.position.value : this.position,
       trackSha: data.trackSha.present ? data.trackSha.value : this.trackSha,
       state: data.state.present ? data.state.value : this.state,
@@ -2963,6 +3000,7 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   @override
   String toString() {
     return (StringBuffer('QueueEntry(')
+          ..write('id: $id, ')
           ..write('position: $position, ')
           ..write('trackSha: $trackSha, ')
           ..write('state: $state, ')
@@ -2972,11 +3010,12 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
   }
 
   @override
-  int get hashCode => Object.hash(position, trackSha, state, addedAt);
+  int get hashCode => Object.hash(id, position, trackSha, state, addedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is QueueEntry &&
+          other.id == this.id &&
           other.position == this.position &&
           other.trackSha == this.trackSha &&
           other.state == this.state &&
@@ -2984,30 +3023,36 @@ class QueueEntry extends DataClass implements Insertable<QueueEntry> {
 }
 
 class QueueEntriesCompanion extends UpdateCompanion<QueueEntry> {
+  final Value<int> id;
   final Value<int> position;
   final Value<String> trackSha;
   final Value<int> state;
   final Value<int> addedAt;
   const QueueEntriesCompanion({
+    this.id = const Value.absent(),
     this.position = const Value.absent(),
     this.trackSha = const Value.absent(),
     this.state = const Value.absent(),
     this.addedAt = const Value.absent(),
   });
   QueueEntriesCompanion.insert({
-    this.position = const Value.absent(),
+    this.id = const Value.absent(),
+    required int position,
     required String trackSha,
     this.state = const Value.absent(),
     required int addedAt,
-  }) : trackSha = Value(trackSha),
+  }) : position = Value(position),
+       trackSha = Value(trackSha),
        addedAt = Value(addedAt);
   static Insertable<QueueEntry> custom({
+    Expression<int>? id,
     Expression<int>? position,
     Expression<String>? trackSha,
     Expression<int>? state,
     Expression<int>? addedAt,
   }) {
     return RawValuesInsertable({
+      if (id != null) 'id': id,
       if (position != null) 'position': position,
       if (trackSha != null) 'track_sha': trackSha,
       if (state != null) 'state': state,
@@ -3016,12 +3061,14 @@ class QueueEntriesCompanion extends UpdateCompanion<QueueEntry> {
   }
 
   QueueEntriesCompanion copyWith({
+    Value<int>? id,
     Value<int>? position,
     Value<String>? trackSha,
     Value<int>? state,
     Value<int>? addedAt,
   }) {
     return QueueEntriesCompanion(
+      id: id ?? this.id,
       position: position ?? this.position,
       trackSha: trackSha ?? this.trackSha,
       state: state ?? this.state,
@@ -3032,6 +3079,9 @@ class QueueEntriesCompanion extends UpdateCompanion<QueueEntry> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
@@ -3050,6 +3100,7 @@ class QueueEntriesCompanion extends UpdateCompanion<QueueEntry> {
   @override
   String toString() {
     return (StringBuffer('QueueEntriesCompanion(')
+          ..write('id: $id, ')
           ..write('position: $position, ')
           ..write('trackSha: $trackSha, ')
           ..write('state: $state, ')
@@ -4438,13 +4489,15 @@ typedef $$TrackEditsTableProcessedTableManager =
     >;
 typedef $$QueueEntriesTableCreateCompanionBuilder =
     QueueEntriesCompanion Function({
-      Value<int> position,
+      Value<int> id,
+      required int position,
       required String trackSha,
       Value<int> state,
       required int addedAt,
     });
 typedef $$QueueEntriesTableUpdateCompanionBuilder =
     QueueEntriesCompanion Function({
+      Value<int> id,
       Value<int> position,
       Value<String> trackSha,
       Value<int> state,
@@ -4460,6 +4513,11 @@ class $$QueueEntriesTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
     builder: (column) => ColumnFilters(column),
@@ -4490,6 +4548,11 @@ class $$QueueEntriesTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get position => $composableBuilder(
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
@@ -4520,6 +4583,9 @@ class $$QueueEntriesTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
 
@@ -4564,11 +4630,13 @@ class $$QueueEntriesTableTableManager
               $$QueueEntriesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<int> id = const Value.absent(),
                 Value<int> position = const Value.absent(),
                 Value<String> trackSha = const Value.absent(),
                 Value<int> state = const Value.absent(),
                 Value<int> addedAt = const Value.absent(),
               }) => QueueEntriesCompanion(
+                id: id,
                 position: position,
                 trackSha: trackSha,
                 state: state,
@@ -4576,11 +4644,13 @@ class $$QueueEntriesTableTableManager
               ),
           createCompanionCallback:
               ({
-                Value<int> position = const Value.absent(),
+                Value<int> id = const Value.absent(),
+                required int position,
                 required String trackSha,
                 Value<int> state = const Value.absent(),
                 required int addedAt,
               }) => QueueEntriesCompanion.insert(
+                id: id,
                 position: position,
                 trackSha: trackSha,
                 state: state,

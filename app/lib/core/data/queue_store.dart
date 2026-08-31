@@ -4,6 +4,21 @@ import '../../domain/manifest.dart';
 import 'database.dart';
 import 'manifest_store.dart' show ManifestStore;
 
+/// A queue entry: a single track in the persistent queue, with a
+/// stable row id (used by the UI as a list key and for targeted
+/// reorder/remove). The same trackSha can appear multiple times
+/// because the row id, not the sha, identifies the position.
+class QueueItem {
+  const QueueItem({
+    required this.id,
+    required this.position,
+    required this.track,
+  });
+  final int id;
+  final int position;
+  final ManifestTrack track;
+}
+
 /// Persistent play queue.
 ///
 /// The [TunePlayer]'s queue is a *projection* of this table — when a
@@ -17,10 +32,10 @@ class QueueStore {
 
   final TunesDatabase _db;
 
-  /// Load the current queue as a list of [ManifestTrack]s in order.
+  /// Load the current queue as a list of [QueueItem] in order.
   /// Missing tracks (e.g. deleted from the library since they were
   /// queued) are silently skipped.
-  Future<List<ManifestTrack>> load() async {
+  Future<List<QueueItem>> load() async {
     final rows = await (_db.select(
       _db.queueEntries,
     )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
@@ -30,7 +45,7 @@ class QueueStore {
       _db.tracks,
     )..where((t) => t.sha.isIn(shas))).get();
     final trackBySha = {for (final t in trackRows) t.sha: t};
-    final result = <ManifestTrack>[];
+    final result = <QueueItem>[];
     final editsBySha = <String, Map<String, String>>{};
     final editRows = await (_db.select(
       _db.trackEdits,
@@ -42,9 +57,13 @@ class QueueStore {
       final t = trackBySha[r.trackSha];
       if (t == null) continue;
       result.add(
-        ManifestStore.applyEditsStatic(
-          ManifestStore.rowToTrackStatic(t),
-          editsBySha[t.sha] ?? const {},
+        QueueItem(
+          id: r.id,
+          position: r.position,
+          track: ManifestStore.applyEditsStatic(
+            ManifestStore.rowToTrackStatic(t),
+            editsBySha[t.sha] ?? const {},
+          ),
         ),
       );
     }
@@ -62,7 +81,7 @@ class QueueStore {
             .into(_db.queueEntries)
             .insert(
               QueueEntriesCompanion.insert(
-                position: Value(i),
+                position: i,
                 trackSha: shas[i],
                 addedAt: now,
               ),
@@ -90,7 +109,7 @@ class QueueStore {
           .into(_db.queueEntries)
           .insert(
             QueueEntriesCompanion.insert(
-              position: Value(nextPos),
+              position: nextPos,
               trackSha: sha,
               addedAt: DateTime.now().millisecondsSinceEpoch,
             ),
@@ -110,7 +129,7 @@ class QueueStore {
           .into(_db.queueEntries)
           .insert(
             QueueEntriesCompanion.insert(
-              position: Value(position),
+              position: position,
               trackSha: sha,
               addedAt: DateTime.now().millisecondsSinceEpoch,
             ),
@@ -118,28 +137,28 @@ class QueueStore {
     });
   }
 
-  /// Reorder by writing positions in one transaction. The list is the
-  /// new ordered shas; positions are recomputed from index.
-  Future<void> reorder(List<String> shas) async {
+  /// Reorder by writing positions in one transaction. The list is
+  /// the new ordered entry ids; positions are recomputed from index.
+  /// Takes ids (not shas) so duplicate entries of the same track are
+  /// reordered correctly.
+  Future<void> reorder(List<int> ids) async {
     await _db.transaction(() async {
-      for (var i = 0; i < shas.length; i++) {
-        await (_db.update(_db.queueEntries)
-              ..where((q) => q.trackSha.equals(shas[i])))
+      for (var i = 0; i < ids.length; i++) {
+        await (_db.update(_db.queueEntries)..where((q) => q.id.equals(ids[i])))
             .write(QueueEntriesCompanion(position: Value(i)));
       }
     });
   }
 
-  /// Remove a track from the queue, shifting later entries up.
-  Future<void> remove(String sha) async {
+  /// Remove a single queue entry by its stable id, shifting later
+  /// entries up.
+  Future<void> removeById(int id) async {
     await _db.transaction(() async {
       final target = await (_db.select(
         _db.queueEntries,
-      )..where((q) => q.trackSha.equals(sha))).getSingleOrNull();
+      )..where((q) => q.id.equals(id))).getSingleOrNull();
       if (target == null) return;
-      await (_db.delete(
-        _db.queueEntries,
-      )..where((q) => q.trackSha.equals(sha))).go();
+      await (_db.delete(_db.queueEntries)..where((q) => q.id.equals(id))).go();
       // Close the gap.
       await _db.customStatement(
         'UPDATE queue_entries SET position = position - 1 WHERE position > ?',
@@ -155,7 +174,7 @@ class QueueStore {
 
   /// Reactive watch: a Stream that emits the current queue every time
   /// it changes. Used by UI to reflect drag-reorder / remove actions.
-  Stream<List<ManifestTrack>> watch() {
+  Stream<List<QueueItem>> watch() {
     return _db.select(_db.queueEntries).watch().asyncMap((_) => load());
   }
 }
