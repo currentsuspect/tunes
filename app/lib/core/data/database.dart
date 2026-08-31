@@ -162,16 +162,14 @@ class TunesDatabase extends _$TunesDatabase {
         await m.createTable(queueEntries);
         for (var i = 0; i < oldRows.length; i++) {
           final r = oldRows[i];
-          await m.database
-              .into(queueEntries)
-              .insert(
-                QueueEntriesCompanion.insert(
-                  position: i,
-                  trackSha: r.trackSha,
-                  state: Value(r.state),
-                  addedAt: r.addedAt,
-                ),
-              );
+          await m.database.into(queueEntries).insert(
+            QueueEntriesCompanion.insert(
+              position: i,
+              trackSha: r.trackSha,
+              state: r.state,
+              addedAt: r.addedAt,
+            ),
+          );
         }
       }
     },
