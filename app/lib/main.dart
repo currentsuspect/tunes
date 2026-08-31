@@ -425,6 +425,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               textAlign: TextAlign.center,
               style: TypeScale.body,
             ),
+            const SizedBox(height: Space.sm),
+            Text(
+              'debug: ${_lastSyncError.runtimeType}\n$_lastSyncError',
+              textAlign: TextAlign.center,
+              style: TypeScale.caption,
+            ),
             const SizedBox(height: Space.lg),
             FilledButton(onPressed: _reload, child: const Text('Retry')),
           ],
