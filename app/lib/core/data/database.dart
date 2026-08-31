@@ -153,24 +153,12 @@ class TunesDatabase extends _$TunesDatabase {
       }
       if (from < 4) {
         // v3 -> v4: stable autoincrement `id` for queue entries.
-        // Re-create the table with the new PK; existing data is
-        // re-inserted at fresh positions 0..n-1 in arbitrary order.
-        // (No real user has a multi-entry queue yet, so this is
-        // safe to do destructively.)
-        final oldRows = await m.database.select(queueEntries).get();
+        // The v3 row class doesn't have an `id` column, so reading
+        // existing rows into the v4 row class NPEs. Drop the table
+        // and recreate; no real user has a persistent multi-entry
+        // queue yet, so this is safe.
         await m.deleteTable('queue_entries');
         await m.createTable(queueEntries);
-        for (var i = 0; i < oldRows.length; i++) {
-          final r = oldRows[i];
-          await m.database.into(queueEntries).insert(
-            QueueEntriesCompanion.insert(
-              position: i,
-              trackSha: r.trackSha,
-              state: r.state,
-              addedAt: r.addedAt,
-            ),
-          );
-        }
       }
     },
   );
