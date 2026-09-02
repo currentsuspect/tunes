@@ -270,6 +270,7 @@ class ManifestStore {
     final releaseIds = (jsonDecode(row.releaseIdsJson) as List)
         .cast<String>()
         .toList();
+    final addedAtMs = row.addedAt;
     return ManifestTrack(
       sha: row.sha,
       size: row.size,
@@ -288,9 +289,9 @@ class ManifestStore {
       trackNumber: row.trackNumber,
       discNumber: row.discNumber,
       totalTracks: row.totalTracks,
-      addedAt: row.addedAt == null
+      addedAt: addedAtMs == null
           ? null
-          : DateTime.fromMillisecondsSinceEpoch(row.addedAt!),
+          : DateTime.fromMillisecondsSinceEpoch(addedAtMs),
       embeddedTitle: row.embeddedTitle,
       embeddedArtist: row.embeddedArtist,
       embeddedAlbum: row.embeddedAlbum,
@@ -430,6 +431,7 @@ class ManifestStore {
     final releaseIds = (jsonDecode(row.releaseIdsJson) as List)
         .cast<String>()
         .toList();
+    final addedAtMs = row.addedAt;
     return ManifestTrack(
       sha: row.sha,
       size: row.size,
@@ -448,9 +450,9 @@ class ManifestStore {
       trackNumber: row.trackNumber,
       discNumber: row.discNumber,
       totalTracks: row.totalTracks,
-      addedAt: row.addedAt == null
+      addedAt: addedAtMs == null
           ? null
-          : DateTime.fromMillisecondsSinceEpoch(row.addedAt!),
+          : DateTime.fromMillisecondsSinceEpoch(addedAtMs),
       embeddedTitle: row.embeddedTitle,
       embeddedArtist: row.embeddedArtist,
       embeddedAlbum: row.embeddedAlbum,

@@ -164,6 +164,29 @@ void main() {
         expect(artists.map((a) => a.name), ['Artist A']);
       },
     );
+
+    test(
+      'tracks inserted with null addedAt survive a read-back without throwing',
+      () async {
+        // 132 of the 161 tracks on the live daemon arrive with no
+        // addedAt timestamp. The store must round-trip them as null
+        // instead of crashing in _trackFromRow's addedAt! assert.
+        final manifest = _manifest(
+          tracks: [_track('a' * 64), _track('b' * 64, addedAt: null)],
+        );
+        await store.apply(manifest);
+
+        final rows = await db.select(db.tracks).get();
+        expect(rows, hasLength(2));
+        expect(rows.firstWhere((r) => r.sha == 'a' * 64).addedAt, isNull);
+        expect(rows.firstWhere((r) => r.sha == 'b' * 64).addedAt, isNull);
+
+        // The post-apply in-memory read path is what used to crash.
+        final fresh = await store.allTracksNewestFirst();
+        expect(fresh.map((t) => t.sha).toSet(), {'a' * 64, 'b' * 64});
+        expect(fresh.firstWhere((t) => t.sha == 'a' * 64).addedAt, isNull);
+      },
+    );
   });
 
   group('ManifestStore.tracksAddedSince', () {
