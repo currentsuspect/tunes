@@ -403,6 +403,7 @@ class ManifestStore {
     Map<String, String> edits,
   ) {
     if (edits.isEmpty) return t;
+    final hasLyricsEdit = edits.containsKey('lyrics');
     return ManifestTrack(
       sha: t.sha,
       size: t.size,
@@ -426,8 +427,13 @@ class ManifestStore {
       embeddedArtist: t.embeddedArtist,
       embeddedAlbum: t.embeddedAlbum,
       embeddedYear: t.embeddedYear,
-      lyrics: t.lyrics,
-      lyricsSource: t.lyricsSource,
+      // Lyrics follow the same user-edit-wins-over-supplied policy as
+      // the identity fields. Without this branch, LyricsSheet's Save
+      // would persist the edit in TrackEdits but the read-back path
+      // would still return the daemon-supplied lyrics — paste looked
+      // like a no-op even though it actually wrote.
+      lyrics: hasLyricsEdit ? edits['lyrics'] : t.lyrics,
+      lyricsSource: hasLyricsEdit ? 'user' : t.lyricsSource,
       // A user who renames the artist has renamed the act too, so the edit
       // wins for grouping as well as display; otherwise the track would keep
       // grouping under the name they just corrected.

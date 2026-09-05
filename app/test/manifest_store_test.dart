@@ -34,6 +34,62 @@ ManifestTrack _track(String sha, {DateTime? addedAt}) => ManifestTrack(
 );
 
 void main() {
+  group('ManifestStore.applyEditsStatic', () {
+    ManifestTrack base({
+      String title = 'T',
+      String artist = 'A',
+      String? lyrics,
+      String? lyricsSource,
+    }) => ManifestTrack(
+      sha: 'a' * 64,
+      size: 1,
+      codec: 'flac',
+      sampleRate: 44100,
+      channels: 2,
+      bitrate: 950000,
+      durationMs: 1000,
+      title: title,
+      artist: artist,
+      album: 'AL',
+      year: '2024',
+      artSha: null,
+      releaseId: null,
+      trackNumber: 1,
+      discNumber: null,
+      lyrics: lyrics,
+      lyricsSource: lyricsSource,
+    );
+
+    test('user-edited lyrics win over daemon-supplied lyrics', () {
+      // The "I can't paste LRCs" bug: setEdit wrote TrackEdits but
+      // applyEditsStatic never read them. Saving looked like a no-op.
+      final t = base(lyrics: 'daemon-supplied text', lyricsSource: 'lrc');
+      final edited = ManifestStore.applyEditsStatic(t, {
+        'lyrics': '[00:00.00]user line',
+      });
+      expect(edited.lyrics, '[00:00.00]user line');
+      expect(edited.lyricsSource, 'user');
+    });
+
+    test('without a lyrics edit the daemon-supplied lyrics survive', () {
+      final t = base(lyrics: 'kept', lyricsSource: 'lrc');
+      final edited = ManifestStore.applyEditsStatic(t, {'title': 'New'});
+      expect(edited.title, 'New');
+      expect(edited.lyrics, 'kept');
+      expect(edited.lyricsSource, 'lrc');
+    });
+
+    test('clearing a lyrics edit reverts to the supplied value', () {
+      // setEdit removes the row when value is null/empty; editsFor
+      // then returns no 'lyrics' key. applyEditsStatic must drop back
+      // to t.lyrics rather than treating absence as empty.
+      final t = base(lyrics: 'supplied', lyricsSource: 'lrc');
+      final cleared = ManifestStore.applyEditsStatic(t, {'title': 'New'});
+      expect(cleared.lyrics, 'supplied');
+      expect(cleared.lyricsSource, 'lrc');
+    });
+  });
+
   group('ManifestStore.apply', () {
     late TunesDatabase db;
     late ManifestStore store;
