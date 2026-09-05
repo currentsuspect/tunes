@@ -1,10 +1,66 @@
 import { describe, expect, it } from "vitest";
 import {
+  ENRICH_RETRY_BASE_MS,
+  ENRICH_RETRY_MAX_MS,
+  enrichBackoffMs,
+  enrichRetryDue,
   flattenReleaseTracks,
   MusicBrainzClient,
   parseArtistTitle,
   splitArtistNames,
 } from "../src/enrich.js";
+
+describe("enrichBackoffMs", () => {
+  it("does not delay a track nobody has tried yet", () => {
+    expect(enrichBackoffMs(0)).toBe(0);
+  });
+
+  it("doubles per failed attempt", () => {
+    expect(enrichBackoffMs(1)).toBe(ENRICH_RETRY_BASE_MS);
+    expect(enrichBackoffMs(2)).toBe(ENRICH_RETRY_BASE_MS * 2);
+    expect(enrichBackoffMs(3)).toBe(ENRICH_RETRY_BASE_MS * 4);
+  });
+
+  it("caps at a week no matter how many attempts pile up", () => {
+    expect(enrichBackoffMs(50)).toBe(ENRICH_RETRY_MAX_MS);
+    expect(enrichBackoffMs(5000)).toBe(ENRICH_RETRY_MAX_MS);
+  });
+});
+
+describe("enrichRetryDue", () => {
+  const now = Date.parse("2026-09-05T20:00:00.000Z");
+
+  it("lets an untried track through immediately", () => {
+    expect(enrichRetryDue(undefined, now)).toBe(true);
+  });
+
+  it("suppresses a track that just failed", () => {
+    // The regression: a permanent miss used to re-run the whole provider
+    // cascade on every 90s pass because the failure was never recorded.
+    const justFailed = { attempts: 1, lastAttemptAt: new Date(now - 90_000).toISOString() };
+    expect(enrichRetryDue(justFailed, now)).toBe(false);
+  });
+
+  it("releases the track once its backoff has elapsed", () => {
+    const attempt = {
+      attempts: 1,
+      lastAttemptAt: new Date(now - ENRICH_RETRY_BASE_MS).toISOString(),
+    };
+    expect(enrichRetryDue(attempt, now)).toBe(true);
+  });
+
+  it("keeps suppressing while a longer backoff is still running", () => {
+    const attempt = {
+      attempts: 3,
+      lastAttemptAt: new Date(now - ENRICH_RETRY_BASE_MS * 2).toISOString(),
+    };
+    expect(enrichRetryDue(attempt, now)).toBe(false);
+  });
+
+  it("fails open on an unparseable timestamp rather than stranding the track", () => {
+    expect(enrichRetryDue({ attempts: 4, lastAttemptAt: "not a date" }, now)).toBe(true);
+  });
+});
 
 describe("splitArtistNames", () => {
   it("splits the Vorbis multi-artist separators", () => {

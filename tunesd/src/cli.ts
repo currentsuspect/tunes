@@ -6,7 +6,8 @@ import type { ArtistDiscography } from "./discography.js";
 import { loadDiscographies, persistDiscographies } from "./discography.js";
 import { parseCredits, releaseArtistOf, sameArtistName } from "./credits.js";
 import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
-import type { EnrichmentEntry } from "./enrich.js";
+import { enrichBackoffMs, enrichRetryDue } from "./enrich.js";
+import type { EnrichAttempt, EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
@@ -141,6 +142,35 @@ async function main(): Promise<void> {
       const tmp = join(env.dataDir, `.embedded-art-${process.pid}.tmp`);
       await writeFile(tmp, JSON.stringify({ art: Object.fromEntries(embeddedArt) }, null, 1));
       await rename(tmp, embeddedArtFile);
+    };
+    const enrichAttemptsFile = join(env.dataDir, "enrich-attempts.json");
+    const enrichAttempts = new Map<string, EnrichAttempt>();
+    try {
+      const raw = JSON.parse(await readFile(enrichAttemptsFile, "utf8")) as {
+        entries: Record<string, EnrichAttempt>;
+      };
+      for (const [sha, a] of Object.entries(raw.entries ?? {})) enrichAttempts.set(sha, a);
+    } catch {
+      // fresh start
+    }
+    const persistEnrichAttempts = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.enrich-attempts-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrichAttempts) }, null, 1));
+      await rename(tmp, enrichAttemptsFile);
+    };
+    // A pass that leaves a track unresolved must say so, or the next pass cannot
+    // tell it apart from a track nobody has looked at yet (SPEC §4: never retry hot).
+    const noteEnrichAttempt = async (sha: string) => {
+      const prev = enrichAttempts.get(sha);
+      enrichAttempts.set(sha, {
+        attempts: (prev?.attempts ?? 0) + 1,
+        lastAttemptAt: new Date().toISOString(),
+      });
+      await persistEnrichAttempts();
+    };
+    const clearEnrichAttempt = async (sha: string) => {
+      if (enrichAttempts.delete(sha)) await persistEnrichAttempts();
     };
     // "<act>|<album>" -> cover sha, for releases whose files carry no picture at
     // all. CHROMAKOPIA's 13 tracks each hold one audio stream and nothing else.
@@ -605,6 +635,8 @@ async function main(): Promise<void> {
         const needsReleaseId = existing && !existing.releaseId;
         const categoryStuck = existing && isCategoryRelease(existing.album ?? "");
         if (existing && !stale && !needsReleaseId && !categoryStuck) continue;
+        // Unresolved tracks back off instead of re-running the cascade every pass.
+        if (!enrichRetryDue(enrichAttempts.get(obj.sha), Date.now())) continue;
         if (categoryStuck) {
           const stuckMeta = metaBySha.get(obj.sha);
           const stuckSeed = stuckMeta?.fileName ?? stuckMeta?.caption ?? "";
@@ -635,6 +667,7 @@ async function main(): Promise<void> {
                 track: member.position,
               });
               await persistEnrich();
+              await clearEnrichAttempt(obj.sha);
               continue;
             }
           }
@@ -658,6 +691,7 @@ async function main(): Promise<void> {
                         source: null,
             enrichedAt: new Date().toISOString(),
           });
+          await noteEnrichAttempt(obj.sha);
           continue;
         }
         const meta = metaBySha.get(obj.sha);
@@ -679,6 +713,7 @@ async function main(): Promise<void> {
                         source: null,
             enrichedAt: new Date().toISOString(),
           });
+          await noteEnrichAttempt(obj.sha);
           continue;
         }
         const hit = await mb.searchRecording(parsed);
@@ -709,6 +744,7 @@ async function main(): Promise<void> {
             album: hit.album.title,
           });
           await persistEnrich();
+          await clearEnrichAttempt(obj.sha);
           continue;
         }
         if (spotify) {
@@ -754,6 +790,7 @@ async function main(): Promise<void> {
             });
             if (sp.artistId) await artistImageFor(sp.artistId, sp.artist);
             await persistEnrich();
+            await clearEnrichAttempt(obj.sha);
             continue;
           }
         }
@@ -782,6 +819,7 @@ async function main(): Promise<void> {
             track: member.position,
           });
           await persistEnrich();
+          await clearEnrichAttempt(obj.sha);
           continue;
         }
         if (discogs) {
@@ -825,10 +863,19 @@ async function main(): Promise<void> {
               year: dg.year,
             });
             await persistEnrich();
+            await clearEnrichAttempt(obj.sha);
             continue;
           }
         }
-        log.info({ event: "ENRICH_MISS", sha: obj.sha.slice(0, 8), parsed });
+        await noteEnrichAttempt(obj.sha);
+        const attempt = enrichAttempts.get(obj.sha)!;
+        log.info({
+          event: "ENRICH_MISS",
+          sha: obj.sha.slice(0, 8),
+          parsed,
+          attempts: attempt.attempts,
+          retryInMs: enrichBackoffMs(attempt.attempts),
+        });
       }
 
       const releaseGroups = releaseGroupShas();

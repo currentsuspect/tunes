@@ -22,6 +22,34 @@ export interface EnrichmentEntry {
   enrichedAt: string;
 }
 
+/**
+ * A record of the enrichment pass having tried a track and failed to resolve it.
+ * Absent means "never tried"; present means "tried, still unresolved" — the two
+ * states the pass gate could not previously tell apart.
+ */
+export interface EnrichAttempt {
+  attempts: number;
+  lastAttemptAt: string;
+}
+
+export const ENRICH_RETRY_BASE_MS = 30 * 60 * 1000;
+export const ENRICH_RETRY_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Exponential backoff: 30m, 1h, 2h, 4h … capped at a week. */
+export function enrichBackoffMs(attempts: number): number {
+  if (attempts <= 0) return 0;
+  const steps = Math.min(attempts - 1, 20);
+  return Math.min(ENRICH_RETRY_BASE_MS * 2 ** steps, ENRICH_RETRY_MAX_MS);
+}
+
+/** Whether an unresolved track is due for another cascade run. */
+export function enrichRetryDue(attempt: EnrichAttempt | undefined, now: number): boolean {
+  if (!attempt) return true;
+  const last = Date.parse(attempt.lastAttemptAt);
+  if (!Number.isFinite(last)) return true;
+  return now - last >= enrichBackoffMs(attempt.attempts);
+}
+
 export interface ParsedName {
   artist: string;
   title: string;
