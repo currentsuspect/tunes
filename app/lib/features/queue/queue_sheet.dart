@@ -231,7 +231,7 @@ class _QueueRow extends StatelessWidget {
                   children: [
                     GeneratedArtwork(
                       title: entry.track.title,
-                      artist: entry.track.artist,
+                      artist: entry.track.artistDisplay,
                       size: 44,
                     ),
                     const SizedBox(width: Space.md),
@@ -251,7 +251,7 @@ class _QueueRow extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            entry.track.artist,
+                            entry.track.artistDisplay,
                             style: TypeScale.caption,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

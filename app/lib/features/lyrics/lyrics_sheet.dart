@@ -168,7 +168,7 @@ class _Header extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  '${track.artist} — ${track.album}',
+                  '${track.artistDisplay} — ${track.album}',
                   style: TypeScale.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

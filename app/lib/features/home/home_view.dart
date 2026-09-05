@@ -47,9 +47,15 @@ class HomeView extends StatelessWidget {
       );
     }
 
+    // Group by the act, not the raw credit line. A guest also gets their own
+    // entry so tapping them finds the tracks they appear on -- the "Featured
+    // on" section will hang off this later.
     final artists = <String, List<ManifestTrack>>{};
     for (final t in tracks) {
-      artists.putIfAbsent(t.artist, () => []).add(t);
+      artists.putIfAbsent(t.artistKey, () => []).add(t);
+      for (final guest in t.featured) {
+        if (guest != t.artistKey) artists.putIfAbsent(guest, () => []).add(t);
+      }
     }
     final artistList = artists.entries.toList()
       ..sort((a, b) => b.value.length.compareTo(a.value.length));
@@ -220,14 +226,14 @@ class _JustAddedCarousel extends StatelessWidget {
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => GeneratedArtwork(
                                     title: t.title,
-                                    artist: t.artist,
+                                    artist: t.artistDisplay,
                                     size: 100,
                                     borderRadius: RadiusTokens.card,
                                   ),
                                 )
                               : GeneratedArtwork(
                                   title: t.title,
-                                  artist: t.artist,
+                                  artist: t.artistDisplay,
                                   size: 100,
                                   borderRadius: RadiusTokens.card,
                                 ),
@@ -650,7 +656,7 @@ class _RecentlyPlayed extends StatelessWidget {
                       sha: t.artSha,
                       artUrlFor: artUrlFor,
                       title: t.title,
-                      artist: t.artist,
+                      artist: t.artistDisplay,
                     ),
                     const SizedBox(width: Space.md),
                     Expanded(
@@ -664,7 +670,7 @@ class _RecentlyPlayed extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            t.artist,
+                            t.artistDisplay,
                             style: TypeScale.body,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

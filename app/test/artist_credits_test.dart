@@ -125,4 +125,52 @@ void main() {
       expect(t.artistKey, 'Yeat');
     });
   });
+
+  group('artistDisplay', () {
+    test('shows the act alone, never the raw tag separators', () {
+      // ";" and "/" are Vorbis multi-value syntax. A listener should never
+      // see "Yeat;Don Toliver" or "Don Toliver/ HVN/" in a list row.
+      expect(
+        _track(
+          sha: 'a',
+          artist: 'Yeat;Don Toliver',
+          primaryArtist: 'Yeat',
+          featured: const ['Don Toliver'],
+        ).artistDisplay,
+        'Yeat',
+      );
+      expect(
+        _track(
+          sha: 'b',
+          artist: 'Don Toliver/ HVN/',
+          primaryArtist: 'Don Toliver',
+          featured: const ['HVN'],
+        ).artistDisplay,
+        'Don Toliver',
+      );
+    });
+
+    test('is unchanged for a solo credit', () {
+      expect(
+        _track(sha: 'a', artist: 'Yeat', primaryArtist: 'Yeat').artistDisplay,
+        'Yeat',
+      );
+    });
+
+    test('falls back to the raw credit when no act was sent', () {
+      expect(_track(sha: 'a', artist: 'Yeat').artistDisplay, 'Yeat');
+    });
+
+    test('leaves the raw credit intact for search to match on', () {
+      // Typing a guest's name must still find the track.
+      final t = _track(
+        sha: 'a',
+        artist: 'Ken Carson, Young Thug',
+        primaryArtist: 'Ken Carson',
+        featured: const ['Young Thug'],
+      );
+      expect(t.artist, 'Ken Carson, Young Thug');
+      expect(t.artist.toLowerCase().contains('young thug'), isTrue);
+    });
+  });
 }

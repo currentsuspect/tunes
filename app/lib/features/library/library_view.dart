@@ -241,9 +241,15 @@ class _LibraryViewState extends State<LibraryView> {
     }
     // Group by the act, not the raw credit line: one album otherwise lands
     // under nine "artists" ("Yeat", "Yeat;Don Toliver", "Yeat, Kodak Black").
+    // Group by the act, not the raw credit line. A guest also gets their own
+    // entry so tapping them finds the tracks they appear on -- the "Featured
+    // on" section will hang off this later.
     final artists = <String, List<ManifestTrack>>{};
     for (final t in filtered) {
       artists.putIfAbsent(t.artistKey, () => []).add(t);
+      for (final guest in t.featured) {
+        if (guest != t.artistKey) artists.putIfAbsent(guest, () => []).add(t);
+      }
     }
     final entries = artists.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));

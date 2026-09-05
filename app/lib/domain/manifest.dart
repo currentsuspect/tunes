@@ -67,6 +67,13 @@ class ManifestTrack {
   final String? primaryArtist;
   final List<String> featured;
 
+  /// What a list row should show for this track's artist: the act alone.
+  /// The raw `artist` tag is a storage string — it separates collaborators
+  /// with ";" or "/", which is Vorbis multi-value syntax and not something a
+  /// listener should ever be shown. Guests are reachable as their own entries
+  /// in the artist list instead.
+  String get artistDisplay => artistKey;
+
   /// Grouping key for the artist list. Falls back to the raw credit for
   /// tracks synced before the daemon started sending primaryArtist.
   String get artistKey {

@@ -221,7 +221,7 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    track.artist,
+                    track.artistDisplay,
                     style: TypeScale.caption,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

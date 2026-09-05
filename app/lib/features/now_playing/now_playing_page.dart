@@ -60,7 +60,7 @@ class NowPlayingPage extends StatelessWidget {
     }
     if (release == null) {
       for (final r in manifest.releases) {
-        if (r.artist == track.artist && r.title == track.album) {
+        if (r.artist == track.artistDisplay && r.title == track.album) {
           release = r;
           break;
         }
@@ -105,7 +105,9 @@ class NowPlayingPage extends StatelessWidget {
               children: [
                 Text(track.title, style: TypeScale.title),
                 const SizedBox(height: Space.md),
-                _InfoRow(label: 'Artist', value: track.artist),
+                _InfoRow(label: 'Artist', value: track.artistDisplay),
+                if (track.featured.isNotEmpty)
+                  _InfoRow(label: 'Featured', value: track.featured.join(', ')),
                 _InfoRow(label: 'Album', value: track.album),
                 _InfoRow(label: 'Quality', value: track.qualityLabel),
                 _InfoRow(
@@ -215,7 +217,7 @@ class NowPlayingPage extends StatelessWidget {
                                 Navigator.of(context).push(
                                   MaterialPageRoute<void>(
                                     builder: (_) => ArtistPage(
-                                      artist: current.artist,
+                                      artist: current.artistDisplay,
                                       manifest: manifest,
                                       player: player,
                                       store: store,
@@ -329,7 +331,7 @@ class NowPlayingPage extends StatelessWidget {
                         ),
                         const SizedBox(height: Space.sm),
                         Text(
-                          current.artist,
+                          current.artistDisplay,
                           style: TypeScale.title,
                           textAlign: TextAlign.center,
                           maxLines: 1,
@@ -514,13 +516,13 @@ class _Artwork extends StatelessWidget {
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => GeneratedArtwork(
                       title: track.title,
-                      artist: track.artist,
+                      artist: track.artistDisplay,
                       size: side,
                     ),
                   )
                 : GeneratedArtwork(
                     title: track.title,
-                    artist: track.artist,
+                    artist: track.artistDisplay,
                     size: side,
                   ),
           ),

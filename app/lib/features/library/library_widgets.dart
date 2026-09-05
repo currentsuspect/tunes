@@ -82,7 +82,7 @@ class TrackRow extends StatelessWidget {
                       sha: track.artSha,
                       artUrlFor: artUrlFor,
                       title: track.title,
-                      artist: track.artist,
+                      artist: track.artistDisplay,
                     ),
                     if (active && player.playing) ...[
                       const SizedBox(width: Space.sm),
@@ -105,7 +105,7 @@ class TrackRow extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${track.artist} — ${track.album}',
+                            '${track.artistDisplay} — ${track.album}',
                             style: TypeScale.body,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
