@@ -11,6 +11,7 @@ import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest, isCategoryRelease } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
+import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -228,8 +229,13 @@ async function main(): Promise<void> {
     const discogs = discogsToken
       ? new DiscogsClient(discogsToken, "tunes/0.1 ( https://github.com/currentsuspect/tunes )")
       : null;
+    const lastfmKey = process.env["TUNESD_LASTFM_KEY"];
+    const lastfm = lastfmKey
+      ? new LastfmClient(lastfmKey, "tunes/0.1 ( https://github.com/currentsuspect/tunes )")
+      : null;
     if (!spotify) log.warn({ event: "ENRICH_SPOTIFY_DISABLED" });
     if (!discogs) log.warn({ event: "ENRICH_DISCOGS_DISABLED" });
+    if (!lastfm) log.warn({ event: "ENRICH_LASTFM_DISABLED" });
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
     const artistsFile = join(env.dataDir, "artists.json");
     const artists = new Map<string, string>();
@@ -283,8 +289,23 @@ async function main(): Promise<void> {
       await writeFile(tmp, JSON.stringify({ misses: Object.fromEntries(artistMisses) }, null, 1));
       await rename(tmp, artistMissFile);
     };
+    /** Stores an artist photo from a URL. Shared by the Spotify and Last.fm paths. */
+    const storeArtistImage = async (url: string, artistName: string): Promise<boolean> => {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) return false;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.length < 1000) return false;
+        const { sha } = await storeCoverBytes(env.dataDir, bytes);
+        artists.set(artistName, sha);
+        await persistArtists();
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const backfillArtistPhotos = async () => {
-      if (!spotify) return;
+      if (!spotify && !lastfm) return;
       const names = new Set<string>();
       for (const t of probeCache.values()) {
         for (const name of splitArtistNames(t.tags.artist)) names.add(name);
@@ -294,28 +315,57 @@ async function main(): Promise<void> {
         for (const name of splitArtistNames(e.artist)) names.add(name);
       }
       let missed = false;
+      let spotifyReported = false;
+      let lastfmReported = false;
       for (const name of names) {
         if (artists.has(name)) continue;
         if (name === "unknown artist") continue;
         const missedAt = artistMisses.get(name);
         if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) continue;
-        let id: string | null;
-        try {
-          id = (await spotify.searchArtistId(name)) ?? (await spotify.artistIdFromTrack(name));
-        } catch (e) {
-          // Could not consult Spotify at all. Recording this as "no such
-          // artist" would bake a transport failure into a week-long lie, so
-          // stop the sweep and report instead.
-          log.warn({ event: "SPOTIFY_UNAVAILABLE", err: String(e) });
-          break;
+        let resolved = false;
+        let couldNotLook = false;
+        if (spotify) {
+          try {
+            const id =
+              (await spotify.searchArtistId(name)) ?? (await spotify.artistIdFromTrack(name));
+            if (id) {
+              await artistImageFor(id, name);
+              resolved = artists.has(name);
+            }
+          } catch (e) {
+            // Could not consult Spotify at all. Recording this as "no such
+            // artist" would bake a transport failure into a week-long lie.
+            if (!spotifyReported) {
+              log.warn({ event: "SPOTIFY_UNAVAILABLE", err: String(e) });
+              spotifyReported = true;
+            }
+            couldNotLook = true;
+          }
         }
-        if (!id) {
-          artistMisses.set(name, new Date().toISOString());
-          missed = true;
+        if (!resolved && lastfm) {
+          try {
+            const info = await lastfm.artistInfo(name);
+            // Last.fm serves one grey star for every artist since 2019; the
+            // client reports null rather than handing us that placeholder.
+            if (info?.imageUrl) resolved = await storeArtistImage(info.imageUrl, name);
+            if (info != null) couldNotLook = false;
+          } catch (e) {
+            if (!(e instanceof LastfmUnavailable)) throw e;
+            if (!lastfmReported) {
+              log.warn({ event: "LASTFM_UNAVAILABLE", err: String(e) });
+              lastfmReported = true;
+            }
+            couldNotLook = true;
+          }
+        }
+        if (resolved) {
+          if (artistMisses.delete(name)) missed = true;
           continue;
         }
-        if (artistMisses.delete(name)) missed = true;
-        await artistImageFor(id, name);
+        // Only a real "nobody has a picture of this artist" is worth caching.
+        if (couldNotLook) continue;
+        artistMisses.set(name, new Date().toISOString());
+        missed = true;
       }
       if (missed) await persistArtistMisses();
     };
@@ -344,6 +394,7 @@ async function main(): Promise<void> {
             durationMs: null,
             tags: {},
             hasEmbeddedArt: false,
+            audioSha: null,
             probedAt: new Date().toISOString(),
           });
         }

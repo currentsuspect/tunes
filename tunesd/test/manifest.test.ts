@@ -14,6 +14,7 @@ function probe(over: Partial<ProbeResult> = {}): ProbeResult {
     durationMs: 125000,
     tags: {},
     hasEmbeddedArt: false,
+    audioSha: null,
     probedAt: "2026-08-27T00:00:00Z",
     ...over,
   };
@@ -914,5 +915,70 @@ describe("release ids survive merging", () => {
       for (const id of t.releaseIds) expect(ids.has(id) || id.startsWith("mb:") || id.startsWith("sp:")).toBe(true);
     }
     expect(new Set(m.tracks.map((t) => t.releaseId)).size).toBe(1);
+  });
+});
+
+describe("exact-audio dedupe", () => {
+  const sha = (n: string) => n.repeat(64).slice(0, 64);
+
+  it("collapses re-tagged copies of one master into a single track", () => {
+    // The live case: three copies of NEW HIGH, identical audio, different
+    // object shas because their tag/artwork blocks differ.
+    const m = buildManifest([
+      probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "NEW HIGH", artist: "Yeat", album: "LYFESTYLE" } }),
+      probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "NEW HIGH", artist: "Yeat", album: "LYFESTYLE" } }),
+      probe({ sha: sha("b"), audioSha: "aaaa", tags: { title: "NEW HIGH", artist: "Yeat", album: "LYFESTYLE" } }),
+    ]);
+    expect(m.tracks).toHaveLength(1);
+  });
+
+  it("keeps the lowest sha256 as canonical, per SPEC §5's tiebreak", () => {
+    const m = buildManifest([
+      probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "T" } }),
+      probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "T" } }),
+    ]);
+    expect(m.tracks[0]?.sha).toBe(sha("a"));
+  });
+
+  it("records the copies rather than losing them", () => {
+    const m = buildManifest([
+      probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "T" } }),
+      probe({ sha: sha("b"), audioSha: "aaaa", tags: { title: "T" } }),
+      probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "T" } }),
+    ]);
+    expect(m.tracks[0]?.dupeShas).toEqual([sha("b"), sha("c")]);
+  });
+
+  it("does not merge different recordings that share a title", () => {
+    const m = buildManifest([
+      probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Intro", artist: "A" } }),
+      probe({ sha: sha("b"), audioSha: "bbbb", tags: { title: "Intro", artist: "A" } }),
+    ]);
+    expect(m.tracks).toHaveLength(2);
+  });
+
+  it("leaves tracks alone when the audio hash is unavailable", () => {
+    const m = buildManifest([
+      probe({ sha: sha("a"), audioSha: null, tags: { title: "T" } }),
+      probe({ sha: sha("b"), audioSha: null, tags: { title: "T" } }),
+    ]);
+    expect(m.tracks).toHaveLength(2);
+  });
+
+  it("keeps a deduped release's track count honest", () => {
+    const m = buildManifest([
+      probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "One", artist: "Yeat", album: "LYFESTYLE" } }),
+      probe({ sha: sha("b"), audioSha: "aaaa", tags: { title: "One", artist: "Yeat", album: "LYFESTYLE" } }),
+      probe({ sha: sha("d"), audioSha: "bbbb", tags: { title: "Two", artist: "Yeat", album: "LYFESTYLE" } }),
+    ]);
+    expect(m.tracks).toHaveLength(2);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.trackShas).toHaveLength(2);
+  });
+
+  it("is deterministic regardless of input order", () => {
+    const a = probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "T" } });
+    const b = probe({ sha: sha("b"), audioSha: "aaaa", tags: { title: "T" } });
+    expect(buildManifest([a, b]).integrity).toBe(buildManifest([b, a]).integrity);
   });
 });

@@ -7,8 +7,9 @@ const execFileP = promisify(execFile);
  * Bump whenever probing extracts something new or differently, so persisted
  * results from an older reader are discarded instead of masking the change.
  * v2: case-insensitive tags, aliases, track/disc numbering, embedded art.
+ * v3: audioSha, the hash of the audio stream alone.
  */
-export const PROBE_VERSION = 2;
+export const PROBE_VERSION = 3;
 
 export interface ProbeTags {
   title?: string;
@@ -33,6 +34,12 @@ export interface ProbeResult {
   tags: ProbeTags;
   /** The file carries its own cover art (FLAC PICTURE / ID3 APIC). */
   hasEmbeddedArt: boolean;
+  /**
+   * Hash of the audio stream on its own, with the container and every tag
+   * excluded. Two files that share this are the same recording — proven, not
+   * inferred from titles. Null when it could not be computed.
+   */
+  audioSha: string | null;
   probedAt: string;
 }
 
@@ -167,6 +174,7 @@ export async function probeFile(sha: string, size: number, path: string): Promis
     durationMs,
     tags: tagsFromFfprobe(raw),
     hasEmbeddedArt: hasAttachedPicture(raw),
+    audioSha: await audioStreamSha(path),
     probedAt: new Date().toISOString(),
   };
 }
@@ -185,6 +193,29 @@ export async function extractEmbeddedArt(path: string): Promise<Uint8Array | nul
     );
     const bytes = new Uint8Array(stdout);
     return bytes.length > 1000 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hashes the audio stream and nothing else.
+ *
+ * Re-tagged copies of one master are byte-identical past their metadata block
+ * but hash differently as files, so the object sha cannot recognise them. This
+ * stream-copies the audio packets (never decodes, never re-encodes — AGENTS.md:
+ * files stay sacred) and hashes those, which is stable across re-tagging,
+ * different cover art, and padding changes.
+ */
+export async function audioStreamSha(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP(
+      "ffmpeg",
+      ["-v", "error", "-i", path, "-map", "0:a:0", "-c:a", "copy", "-f", "md5", "-"],
+      { timeout: 120_000, maxBuffer: 1024 * 1024 }
+    );
+    const match = /MD5=([0-9a-f]{32})/.exec(String(stdout));
+    return match?.[1] ?? null;
   } catch {
     return null;
   }

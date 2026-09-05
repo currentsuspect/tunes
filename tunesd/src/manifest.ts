@@ -27,6 +27,11 @@ export interface ManifestTrack {
   // stays exactly as the tagger wrote it for display.
   primaryArtist: string;
   featured: string[];
+  /**
+   * Other objects holding this exact same recording. They stay on disk and
+   * stay downloadable by sha — dedupe marks, it never deletes (AGENTS.md).
+   */
+  dupeShas: string[];
   addedAt: string | null;
   // v4: embedded tag values from ffprobe, exposed so the app can
   // implement a local-wins policy for identity fields.
@@ -180,6 +185,7 @@ export function buildManifest(
         durationMs: null,
         tags: {},
         hasEmbeddedArt: false,
+        audioSha: null,
         probedAt: "",
       });
     }
@@ -278,6 +284,7 @@ export function buildManifest(
         totalTracks: p.tags.totalTracks ?? enrich?.totalTracks ?? null,
         primaryArtist: releaseArtist,
         featured,
+        dupeShas: [],
         addedAt: addedAtBySha.get(p.sha) ?? null,
         // v4: embedded tag values as discovered by ffprobe. The app's
         // query layer applies a local-wins policy over these.
@@ -291,10 +298,36 @@ export function buildManifest(
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
 
+  // One row per recording. Files that share an audio hash are the same
+  // recording in different wrappers — re-tagged copies of one master, which
+  // the object sha cannot see because their metadata blocks differ. Quality is
+  // identical by construction here (the audio bytes are the same), so SPEC §5's
+  // deterministic tiebreak decides the canonical copy: keep the lower sha256.
+  const byAudio = new Map<string, ManifestTrack[]>();
+  for (const t of tracks) {
+    const probe = probeFor.get(t.sha);
+    const audio = probe?.audioSha;
+    if (audio == null || audio === "") continue;
+    const list = byAudio.get(audio) ?? [];
+    list.push(t);
+    byAudio.set(audio, list);
+  }
+  const supersededBy = new Map<string, string>();
+  for (const copies of byAudio.values()) {
+    if (copies.length < 2) continue;
+    const ordered = [...copies].sort((a, b) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
+    const canonical = ordered[0]!;
+    canonical.dupeShas = ordered.slice(1).map((c) => c.sha);
+    for (const other of ordered.slice(1)) supersededBy.set(other.sha, canonical.sha);
+  }
+  const canonicalTracks =
+    supersededBy.size === 0 ? tracks : tracks.filter((t) => !supersededBy.has(t.sha));
+
   // Tracks whose album came from the file itself, not from a provider.
   const fileStatedAlbum = new Set(
     allProbes.filter((p) => Boolean(p.tags.album?.trim())).map((p) => p.sha)
   );
+  const tracksForReleases = canonicalTracks;
   const releaseMap = new Map<string, ManifestRelease>();
   // Everyone credited on each release, so a joint album can be recognised even
   // when the tagger rotates the running order of the names track by track.
@@ -343,7 +376,7 @@ export function buildManifest(
       release.tracks.push({ sha, trackNumber: num, discNumber: disc });
     }
   };
-  for (const t of tracks) {
+  for (const t of tracksForReleases) {
     const enrich = enrichBySha.get(t.sha);
     const key =
       t.releaseId ?? releaseKeyFor(t, fileStatedAlbum.has(t.sha), enrich?.releaseId);
@@ -498,14 +531,14 @@ export function buildManifest(
       return { ...r, groupId, trackShas: sorted.map((x) => x.sha), tracks: sorted };
     });
 
-  const integrityBody = JSON.stringify({ schema: 4, tracks, releases });
+  const integrityBody = JSON.stringify({ schema: 4, tracks: canonicalTracks, releases });
   const integrity = createHash("sha256").update(integrityBody).digest("hex").slice(0, 16);
 
   return {
     schema: 4,
     generatedAt: new Date().toISOString(),
     integrity,
-    tracks,
+    tracks: canonicalTracks,
     releases,
     artists: [...artists].sort((a, b) => a.name.localeCompare(b.name)),
   };
