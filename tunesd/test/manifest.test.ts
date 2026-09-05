@@ -1025,3 +1025,41 @@ describe("release cover fallback", () => {
     expect(m.tracks[0]?.artSha).toBeNull();
   });
 });
+
+describe("release running order", () => {
+  const sha = (n: string) => n.repeat(64).slice(0, 64);
+
+  it("orders a release by the tagger's track numbers", () => {
+    // The regression: release rows took the provider's numbering, which is null
+    // for a tagged file, so ordering fell through to sha order and looked random.
+    const m = buildManifest([
+      probe({ sha: sha("c"), tags: { album: "A", artist: "X", title: "third", trackNumber: 3 } }),
+      probe({ sha: sha("a"), tags: { album: "A", artist: "X", title: "first", trackNumber: 1 } }),
+      probe({ sha: sha("b"), tags: { album: "A", artist: "X", title: "second", trackNumber: 2 } }),
+    ]);
+    expect(m.releases[0]?.tracks.map((t) => t.trackNumber)).toEqual([1, 2, 3]);
+    const order = m.releases[0]!.trackShas.map(
+      (s) => m.tracks.find((t) => t.sha === s)!.title
+    );
+    expect(order).toEqual(["first", "second", "third"]);
+  });
+
+  it("orders across discs before track numbers", () => {
+    const m = buildManifest([
+      probe({ sha: sha("a"), tags: { album: "A", artist: "X", trackNumber: 1, discNumber: 2 } }),
+      probe({ sha: sha("b"), tags: { album: "A", artist: "X", trackNumber: 9, discNumber: 1 } }),
+    ]);
+    expect(m.releases[0]?.tracks.map((t) => [t.discNumber, t.trackNumber])).toEqual([
+      [1, 9],
+      [2, 1],
+    ]);
+  });
+
+  it("still falls back to sha order when nothing is numbered", () => {
+    const m = buildManifest([
+      probe({ sha: sha("b"), tags: { album: "A", artist: "X" } }),
+      probe({ sha: sha("a"), tags: { album: "A", artist: "X" } }),
+    ]);
+    expect(m.releases[0]?.trackShas).toEqual([sha("a"), sha("b")]);
+  });
+});

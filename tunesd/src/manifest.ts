@@ -423,7 +423,11 @@ export function buildManifest(
       const clean = norm(name);
       if (clean !== "" && clean !== "unknown artist") credited.add(clean);
     }
-    addTrackToRelease(primary, t.sha, enrich?.trackNumber ?? null, enrich?.discNumber ?? null);
+    // The track's own numbering, which already prefers the tagger's TRACK/DISC
+    // over anything a provider inferred. Passing the provider value here meant
+    // a tagged file -- which short-circuits enrichment and so has no provider
+    // row -- contributed null, and the running order fell through to sha order.
+    addTrackToRelease(primary, t.sha, t.trackNumber, t.discNumber);
     if (primary.artSha == null) primary.artSha = t.artSha;
     if (primary.totalTracks == null) {
       const meta = linkMeta.get(key);
@@ -438,7 +442,8 @@ export function buildManifest(
         const meta = linkMeta.get(m.id);
         member = ensureRelease(t, undefined, m.id, meta);
       }
-      addTrackToRelease(member, t.sha, m.position, m.disc);
+      // Position within *that* provider release, falling back to the file's own.
+      addTrackToRelease(member, t.sha, m.position ?? t.trackNumber, m.disc ?? t.discNumber);
       if (member.artSha == null) member.artSha = t.artSha;
       if (member.totalTracks == null) {
         const meta = linkMeta.get(m.id);
