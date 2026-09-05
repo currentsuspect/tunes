@@ -26,6 +26,8 @@ class ManifestTrack {
     this.embeddedYear,
     this.lyrics,
     this.lyricsSource,
+    this.primaryArtist,
+    this.featured = const [],
   });
 
   final String sha;
@@ -58,6 +60,20 @@ class ManifestTrack {
   // source identifier.
   final String? lyrics;
   final String? lyricsSource;
+  // The act this track belongs to, with guest credits separated out by the
+  // daemon. `artist` stays exactly as the tagger wrote it, so it is what we
+  // display; `primaryArtist` is what we group by, otherwise one album lands
+  // under nine artists ("Yeat", "Yeat;Don Toliver", "Yeat, Kodak Black"...).
+  final String? primaryArtist;
+  final List<String> featured;
+
+  /// Grouping key for the artist list. Falls back to the raw credit for
+  /// tracks synced before the daemon started sending primaryArtist.
+  String get artistKey {
+    final act = primaryArtist;
+    if (act != null && act.isNotEmpty) return act;
+    return artist;
+  }
 
   factory ManifestTrack.fromJson(Map<String, dynamic> json) {
     return ManifestTrack(
@@ -87,6 +103,10 @@ class ManifestTrack {
       embeddedYear: json['embeddedYear'] as String?,
       lyrics: json['lyrics'] as String?,
       lyricsSource: json['lyricsSource'] as String?,
+      primaryArtist: json['primaryArtist'] as String?,
+      featured: (json['featured'] as List<dynamic>? ?? const [])
+          .map((s) => s as String)
+          .toList(),
     );
   }
 
@@ -278,14 +298,28 @@ class TunesManifest {
     return tracks.where((t) => t.releaseId == releaseId).toList();
   }
 
+  /// Releases belonging to an act. A joint album is credited to its whole
+  /// cast ("Fimiguerrero, Lancey Foux, Len"), so a member matches it too.
+  static bool _creditsInclude(String credited, String artist) {
+    if (credited == artist) return true;
+    for (final part in credited.split(',')) {
+      if (part.trim() == artist) return true;
+    }
+    return false;
+  }
+
   List<ManifestRelease> releasesFor(String artist) {
-    return releases.where((r) => r.artist == artist).toList()..sort((a, b) {
+    final matched = releases
+        .where((r) => _creditsInclude(r.artist, artist))
+        .toList();
+    matched.sort((a, b) {
       final ta = a.year ?? '9999';
       final tb = b.year ?? '9999';
       final byYear = tb.compareTo(ta);
       if (byYear != 0) return byYear;
       return a.title.compareTo(b.title);
     });
+    return matched;
   }
 }
 

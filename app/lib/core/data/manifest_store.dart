@@ -56,6 +56,10 @@ class ManifestStore {
                 embeddedArtist: Value(t.embeddedArtist),
                 embeddedAlbum: Value(t.embeddedAlbum),
                 embeddedYear: Value(t.embeddedYear),
+                // v5: the act, with guests split out, so the artist list can
+                // group by it instead of the raw credit string.
+                primaryArtist: Value(t.primaryArtist),
+                featuredJson: Value(jsonEncode(t.featured)),
               ),
             );
         if (priorAdded == null && effectiveAddedAt != null) {
@@ -298,6 +302,8 @@ class ManifestStore {
       embeddedYear: row.embeddedYear,
       lyrics: row.lyrics,
       lyricsSource: row.lyricsSource,
+      primaryArtist: row.primaryArtist,
+      featured: (jsonDecode(row.featuredJson) as List).cast<String>(),
     );
   }
 
@@ -422,6 +428,11 @@ class ManifestStore {
       embeddedYear: t.embeddedYear,
       lyrics: t.lyrics,
       lyricsSource: t.lyricsSource,
+      // A user who renames the artist has renamed the act too, so the edit
+      // wins for grouping as well as display; otherwise the track would keep
+      // grouping under the name they just corrected.
+      primaryArtist: edits['artist'] ?? t.primaryArtist,
+      featured: t.featured,
     );
   }
 
@@ -459,6 +470,8 @@ class ManifestStore {
       embeddedYear: row.embeddedYear,
       lyrics: row.lyrics,
       lyricsSource: row.lyricsSource,
+      primaryArtist: row.primaryArtist,
+      featured: (jsonDecode(row.featuredJson) as List).cast<String>(),
     );
   }
 }

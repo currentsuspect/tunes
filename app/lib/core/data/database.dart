@@ -32,6 +32,10 @@ class Tracks extends Table {
   // user edits > embedded > daemon-supplied identity. When the user
   // edits a field, an entry appears in TrackEdits; the query layer
   // COALESCEs the values.
+  // The act this track belongs to, separated from its guest credits by the
+  // daemon. Grouping by the raw `artist` put one album under nine artists.
+  TextColumn get primaryArtist => text().nullable()();
+  TextColumn get featuredJson => text().withDefault(const Constant('[]'))();
   TextColumn get embeddedTitle => text().nullable()();
   TextColumn get embeddedArtist => text().nullable()();
   TextColumn get embeddedAlbum => text().nullable()();
@@ -125,7 +129,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -159,6 +163,13 @@ class TunesDatabase extends _$TunesDatabase {
         // queue yet, so this is safe.
         await m.deleteTable('queue_entries');
         await m.createTable(queueEntries);
+      }
+      if (from < 5) {
+        // v4 -> v5: primaryArtist + featured credits, so the artist list can
+        // group by the act instead of the raw credit string. Additive; existing
+        // rows get null / '[]' and are corrected on the next manifest sync.
+        await m.addColumn(tracks, tracks.primaryArtist);
+        await m.addColumn(tracks, tracks.featuredJson);
       }
     },
   );

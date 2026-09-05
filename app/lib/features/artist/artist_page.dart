@@ -75,8 +75,10 @@ class _ArtistPageState extends State<ArtistPage> {
   @override
   Widget build(BuildContext context) {
     final artist = widget.artist;
+    // Match the act, not the raw credit line, so a collaboration still shows
+    // under its lead. A track where this artist is a guest counts too.
     final tracks = widget.manifest.tracks
-        .where((t) => t.artist == artist)
+        .where((t) => t.artistKey == artist || t.featured.contains(artist))
         .toList();
     final releases = widget.manifest.releasesFor(artist);
     final d = _discography;

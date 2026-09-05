@@ -239,9 +239,11 @@ class _LibraryViewState extends State<LibraryView> {
         },
       );
     }
+    // Group by the act, not the raw credit line: one album otherwise lands
+    // under nine "artists" ("Yeat", "Yeat;Don Toliver", "Yeat, Kodak Black").
     final artists = <String, List<ManifestTrack>>{};
     for (final t in filtered) {
-      artists.putIfAbsent(t.artist, () => []).add(t);
+      artists.putIfAbsent(t.artistKey, () => []).add(t);
     }
     final entries = artists.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
