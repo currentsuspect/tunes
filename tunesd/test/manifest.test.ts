@@ -473,7 +473,11 @@ describe("buildManifest", () => {
     expect(m.releases[0]?.title).toBe("unknown album");
     expect(m.releases[0]?.artist).toBe("Don Toliver");
     expect(m.tracks[0]?.album).toBe("unknown album");
-    expect(m.tracks[0]?.releaseId).toBeNull();
+    // The genre-compilation id is dropped, but the track is still grouped into
+    // a release, so it must name the release that holds it. Reporting null here
+    // left a track sitting inside a release it claimed not to belong to.
+    expect(m.tracks[0]?.releaseId).toBe(m.releases[0]?.id);
+    expect(m.tracks[0]?.releaseIds).not.toContain("mb:x");
     expect(m.tracks[0]?.artSha).toBeNull();
   });
 
@@ -722,3 +726,193 @@ describe("buildManifest", () => {
     const m = buildManifest([probe()], new Map(), enrich);
     expect(m.tracks[0]?.trackNumber).toBe(3);
   });
+
+describe("release grouping", () => {
+  const sha = (n: number) => String(n).repeat(64).slice(0, 64);
+
+  it("keeps one album together when each track credits different guests", () => {
+    // The live regression: LYFESTYLE had 48 tracks across 9 credit strings and
+    // shattered into 6 releases.
+    const probes = [
+      probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+      probe({ sha: sha(2), tags: { album: "LYFESTYLE", artist: "Yeat, Don Toliver" } }),
+      probe({ sha: sha(3), tags: { album: "LYFESTYLE", artist: "Yeat;Summrs" } }),
+      probe({ sha: sha(4), tags: { album: "LYFESTYLE", artist: "Yeat;Kodak Black" } }),
+    ];
+    const m = buildManifest(probes);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.title).toBe("LYFESTYLE");
+    expect(m.releases[0]?.artist).toBe("Yeat");
+    expect(m.releases[0]?.trackShas).toHaveLength(4);
+  });
+
+  it("uses the album-artist tag when the tagger supplied one", () => {
+    const probes = [
+      probe({ sha: sha(1), tags: { album: "X", artist: "A, B", albumArtist: "A" } }),
+      probe({ sha: sha(2), tags: { album: "X", artist: "C", albumArtist: "A" } }),
+    ];
+    const m = buildManifest(probes);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.artist).toBe("A");
+  });
+
+  it("does not let a stale provider id split an album the file named", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha(1), enrichment({ artist: "Yeat", album: "Trap Hits", releaseId: "mb:bogus" })],
+    ]);
+    const probes = [
+      probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+      probe({ sha: sha(2), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+    ];
+    const m = buildManifest(probes, new Map(), enrich);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.trackShas).toHaveLength(2);
+  });
+
+  it("still uses the provider id when the file named no album", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha(1), enrichment({ artist: "A", album: "Real Album", releaseId: "mb:real" })],
+      [sha(2), enrichment({ artist: "A", album: "Real Album", releaseId: "mb:real" })],
+    ]);
+    const m = buildManifest([probe({ sha: sha(1) }), probe({ sha: sha(2) })], new Map(), enrich);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.id).toBe("mb:real");
+  });
+
+  it("keeps genuinely different albums apart", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+      probe({ sha: sha(2), tags: { album: "2093", artist: "Yeat" } }),
+    ]);
+    expect(m.releases.map((r) => r.title).sort()).toEqual(["2093", "LYFESTYLE"]);
+  });
+
+  it("keeps same-titled albums by different acts apart", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "Untitled", artist: "A" } }),
+      probe({ sha: sha(2), tags: { album: "Untitled", artist: "B" } }),
+    ]);
+    expect(m.releases).toHaveLength(2);
+  });
+
+  it("exposes the guests it separated out", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "X", artist: "Yeat;Don Toliver", title: "T (feat. Summrs)" } }),
+    ]);
+    expect(m.tracks[0]?.primaryArtist).toBe("Yeat");
+    expect(m.tracks[0]?.featured).toEqual(["Don Toliver", "Summrs"]);
+    // display artist is untouched
+    expect(m.tracks[0]?.artist).toBe("Yeat;Don Toliver");
+  });
+});
+
+describe("track/release linkage", () => {
+  const sha = (n: number) => String(n).repeat(64).slice(0, 64);
+
+  it("every track names a release that actually contains it", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha(1), enrichment({ artist: "Yeat", album: "Trap Hits", releaseId: "mb:stale" })],
+    ]);
+    const m = buildManifest(
+      [
+        probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+        probe({ sha: sha(2), tags: { album: "LYFESTYLE", artist: "Yeat;Summrs" } }),
+      ],
+      new Map(),
+      enrich
+    );
+    const byId = new Map(m.releases.map((r) => [r.id, r]));
+    for (const t of m.tracks) {
+      expect(t.releaseId).not.toBeNull();
+      const rel = byId.get(t.releaseId!);
+      expect(rel, `release ${t.releaseId} missing`).toBeDefined();
+      expect(rel!.trackShas).toContain(t.sha);
+    }
+  });
+
+  it("keeps the provider id as a cross-reference", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha(1), enrichment({ artist: "Yeat", album: "Something", releaseId: "mb:stale" })],
+    ]);
+    const m = buildManifest(
+      [probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } })],
+      new Map(),
+      enrich
+    );
+    expect(m.tracks[0]?.releaseId).toBe("name:yeat|lyfestyle");
+    expect(m.tracks[0]?.releaseIds).toContain("mb:stale");
+  });
+
+  it("does not mint a phantom extra release from provider membership when the file named the album", () => {
+    const enrich = new Map<string, TrackEnrichment>([
+      [
+        sha(1),
+        enrichment({
+          artist: "Yeat",
+          album: "Whatever",
+          releaseId: "mb:a",
+          membership: [{ id: "mb:b", position: 3, disc: 1 }],
+        }),
+      ],
+    ]);
+    const m = buildManifest(
+      [probe({ sha: sha(1), tags: { album: "LYFESTYLE", artist: "Yeat" } })],
+      new Map(),
+      enrich
+    );
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.id).toBe("name:yeat|lyfestyle");
+  });
+});
+
+describe("joint albums", () => {
+  const sha = (n: number) => String(n).repeat(64).slice(0, 64);
+
+  it("treats a rotating-credit joint album as one release", () => {
+    // CONGLOMERATE from the real library: no album-artist tag and the running
+    // order of the three names changes track by track.
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "CONGLOMERATE", artist: "Fimiguerrero, Len" } }),
+      probe({ sha: sha(2), tags: { album: "CONGLOMERATE", artist: "Len, Fimiguerrero" } }),
+      probe({ sha: sha(3), tags: { album: "CONGLOMERATE", artist: "Lancey Foux, Fimiguerrero, Len" } }),
+      probe({ sha: sha(4), tags: { album: "CONGLOMERATE", artist: "Lancey Foux, Len" } }),
+    ]);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.trackShas).toHaveLength(4);
+    expect(m.releases[0]?.artist).toBe("Fimiguerrero, Lancey Foux, Len");
+  });
+
+  it("still keeps same-titled albums by unrelated acts apart", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "Untitled", artist: "Alpha" } }),
+      probe({ sha: sha(2), tags: { album: "Untitled", artist: "Beta" } }),
+    ]);
+    expect(m.releases).toHaveLength(2);
+  });
+
+  it("does not merge different albums that share one cast member", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "One", artist: "A, B" } }),
+      probe({ sha: sha(2), tags: { album: "Two", artist: "A, C" } }),
+    ]);
+    expect(m.releases).toHaveLength(2);
+  });
+});
+
+describe("release ids survive merging", () => {
+  const sha = (n: number) => String(n).repeat(64).slice(0, 64);
+
+  it("repoints tracks at the surviving release when two releases merge", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "CONGLOMERATE", artist: "Fimiguerrero, Len" } }),
+      probe({ sha: sha(2), tags: { album: "CONGLOMERATE", artist: "Len, Fimiguerrero" } }),
+      probe({ sha: sha(3), tags: { album: "CONGLOMERATE", artist: "Lancey Foux, Len" } }),
+    ]);
+    const ids = new Set(m.releases.map((r) => r.id));
+    for (const t of m.tracks) {
+      expect(ids.has(t.releaseId!), `${t.releaseId} was deleted by the merge`).toBe(true);
+      for (const id of t.releaseIds) expect(ids.has(id) || id.startsWith("mb:") || id.startsWith("sp:")).toBe(true);
+    }
+    expect(new Set(m.tracks.map((t) => t.releaseId)).size).toBe(1);
+  });
+});

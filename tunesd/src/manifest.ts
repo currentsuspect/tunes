@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { parseCredits, releaseArtistOf, stripFeatured } from "./credits.js";
 import { parseArtistTitle } from "./enrich.js";
 import type { ProbeResult } from "./probe.js";
 
@@ -22,6 +23,10 @@ export interface ManifestTrack {
   discNumber: number | null;
   // Emitted since v4 but previously undeclared here.
   totalTracks: number | null;
+  // The act this track belongs to, with guest credits separated out. `artist`
+  // stays exactly as the tagger wrote it for display.
+  primaryArtist: string;
+  featured: string[];
   addedAt: string | null;
   // v4: embedded tag values from ffprobe, exposed so the app can
   // implement a local-wins policy for identity fields.
@@ -130,6 +135,28 @@ function fallbackReleaseKey(track: {
   return `name:${artist}|${album}`;
 }
 
+/**
+ * Which release a track belongs to.
+ *
+ * SPEC §1.2 puts release metadata at the bottom of the identity hierarchy:
+ * MusicBrainz "tells us what something probably is", it never decides what a
+ * thing *is*. So when the file states its own album, that answer wins and the
+ * track is grouped by (act, album) — keyed on the act rather than the raw
+ * credit line, so guests do not split an album apart. A provider release id is
+ * only the key when the file said nothing.
+ */
+function releaseKeyFor(
+  track: { primaryArtist: string; album: string; sha: string; artist: string },
+  fileStatedAlbum: boolean,
+  providerReleaseId: string | null | undefined
+): string {
+  if (fileStatedAlbum) {
+    const act = norm(track.primaryArtist) || norm(track.artist);
+    return `name:${act}|${norm(track.album)}`;
+  }
+  return providerReleaseId ?? fallbackReleaseKey(track);
+}
+
 export function buildManifest(
   probes: ProbeResult[],
   metaBySha: Map<string, TrackMeta> = new Map(),
@@ -192,6 +219,16 @@ export function buildManifest(
         ?? enrich?.album
         ?? "unknown album";
       const year = p.tags.year ?? enrich?.year ?? null;
+      // One album routinely carries a different artist string per track
+      // ("Yeat", "Yeat, Don Toliver", "Yeat;Summrs"), which used to shatter it
+      // into a release per credit line. Recover the act and the guests.
+      const credits = parseCredits(artist);
+      const titleCredits = stripFeatured(title);
+      const featured = [...credits.featured];
+      for (const name of titleCredits.featured) {
+        if (!featured.some((f) => f.toLowerCase() === name.toLowerCase())) featured.push(name);
+      }
+      const releaseArtist = releaseArtistOf(p.tags.albumArtist ?? null, artist);
       // A genre-compilation match ("Trap", "Phonk") is not a real album, so we
       // drop it — but only when it is the *only* thing we have. The file's own
       // ALBUM tag is ground truth and outranks any network guess about it.
@@ -199,6 +236,12 @@ export function buildManifest(
         enrich?.releaseId != null &&
         isCategoryRelease(enrich?.album ?? "") &&
         !p.tags.album;
+      const fileNamedAlbum = Boolean(p.tags.album?.trim());
+      const releaseKey = releaseKeyFor(
+        { primaryArtist: releaseArtist, album: categoryRelease ? "unknown album" : album, sha: p.sha, artist },
+        fileNamedAlbum,
+        categoryRelease ? null : enrich?.releaseId
+      );
       // Cover art the tagger embedded is always about this exact recording;
       // a release-level cover fetched from a provider is an approximation.
       const embeddedArtSha = embeddedArtBySha.get(p.sha) ?? null;
@@ -215,11 +258,16 @@ export function buildManifest(
         album: categoryRelease ? "unknown album" : album,
         year,
         artSha: (categoryRelease ? null : enrich?.artSha ?? null) ?? embeddedArtSha,
-        releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
+        // The id of the release this track is actually grouped into. Keeping a
+        // provider id here while grouping by the file's album would leave a
+        // track pointing at a release that does not contain it.
+        releaseId: releaseKey.startsWith("sha:") ? null : releaseKey,
+        // Provider ids stay as cross-references for anything that wants them.
         releaseIds: [
           ...new Set([
+            ...(releaseKey.startsWith("sha:") ? [] : [releaseKey]),
             ...(categoryRelease ? [] : enrich?.releaseId != null ? [enrich.releaseId] : []),
-            ...(enrich?.membership ?? []).map((m) => m.id),
+            ...(fileNamedAlbum ? [] : (enrich?.membership ?? []).map((m) => m.id)),
           ]),
         ],
         // Track/disc position decides running order inside a release, so the
@@ -228,6 +276,8 @@ export function buildManifest(
         trackNumber: p.tags.trackNumber ?? enrich?.trackNumber ?? null,
         discNumber: p.tags.discNumber ?? enrich?.discNumber ?? null,
         totalTracks: p.tags.totalTracks ?? enrich?.totalTracks ?? null,
+        primaryArtist: releaseArtist,
+        featured,
         addedAt: addedAtBySha.get(p.sha) ?? null,
         // v4: embedded tag values as discovered by ffprobe. The app's
         // query layer applies a local-wins policy over these.
@@ -241,7 +291,22 @@ export function buildManifest(
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
 
+  // Tracks whose album came from the file itself, not from a provider.
+  const fileStatedAlbum = new Set(
+    allProbes.filter((p) => Boolean(p.tags.album?.trim())).map((p) => p.sha)
+  );
   const releaseMap = new Map<string, ManifestRelease>();
+  // Everyone credited on each release, so a joint album can be recognised even
+  // when the tagger rotates the running order of the names track by track.
+  const releaseCredits = new Map<string, Set<string>>();
+  const creditsOf = (id: string): Set<string> => {
+    let set = releaseCredits.get(id);
+    if (!set) {
+      set = new Set<string>();
+      releaseCredits.set(id, set);
+    }
+    return set;
+  };
   const ensureRelease = (
     t: ManifestTrack,
     enrich: TrackEnrichment | undefined,
@@ -253,7 +318,9 @@ export function buildManifest(
     release = {
       id,
       title: meta?.title ?? t.album,
-      artist: t.artist,
+      // The act, not the per-track credit line — the merge pass below compares
+      // release artists for equality and "Yeat" never equalled "Yeat;Summrs".
+      artist: t.primaryArtist || t.artist,
       year: enrich?.year ?? t.year,
       artSha: t.artSha,
       type: meta?.type ?? enrich?.releaseType ?? null,
@@ -279,12 +346,16 @@ export function buildManifest(
   for (const t of tracks) {
     const enrich = enrichBySha.get(t.sha);
     const key =
-      enrich?.releaseId ??
-      fallbackReleaseKey({ artist: t.artist, album: t.album, sha: t.sha });
+      t.releaseId ?? releaseKeyFor(t, fileStatedAlbum.has(t.sha), enrich?.releaseId);
     const primary = ensureRelease(t, enrich, key);
     if (primary.groupId == null) {
       const meta = linkMeta.get(key);
       if (meta?.groupId != null) primary.groupId = meta.groupId;
+    }
+    const credited = creditsOf(key);
+    for (const name of [t.primaryArtist, ...t.featured]) {
+      const clean = norm(name);
+      if (clean !== "" && clean !== "unknown artist") credited.add(clean);
     }
     addTrackToRelease(primary, t.sha, enrich?.trackNumber ?? null, enrich?.discNumber ?? null);
     if (primary.artSha == null) primary.artSha = t.artSha;
@@ -292,7 +363,10 @@ export function buildManifest(
       const meta = linkMeta.get(key);
       if (meta?.totalTracks != null) primary.totalTracks = meta.totalTracks;
     }
-    for (const m of enrich?.membership ?? []) {
+    // Membership crosslinks place a track inside a provider's release. When the
+    // file already names its album that is just a second, competing home for
+    // the same track, so it would show up as a phantom extra album.
+    for (const m of fileStatedAlbum.has(t.sha) ? [] : enrich?.membership ?? []) {
       let member = releaseMap.get(m.id);
       if (!member) {
         const meta = linkMeta.get(m.id);
@@ -310,6 +384,9 @@ export function buildManifest(
   for (const r of releaseMap.values()) {
     merged.set(r.id, { ...r, trackShas: [...r.trackShas] });
   }
+  // Absorbed release id -> surviving release id. Merging without this leaves
+  // the absorbed release's tracks naming an id that no longer exists.
+  const redirected = new Map<string, string>();
   let mergedAnything = true;
   while (mergedAnything) {
     mergedAnything = false;
@@ -319,7 +396,15 @@ export function buildManifest(
       if (!r) continue;
       for (const [oid, other] of merged) {
         if (oid === id) continue;
-        if (other.artist !== r.artist) continue;
+        // Same act, or the same album credited to an overlapping cast. The
+        // second case is a joint album: CONGLOMERATE lists "Fimiguerrero, Len",
+        // "Len, Fimiguerrero" and "Lancey Foux, Fimiguerrero, Len" across its
+        // tracks, which is one record, not three. Disjoint casts stay apart, so
+        // two different albums that happen to share a title are unaffected.
+        const sameAct = other.artist === r.artist;
+        const sharedCast = [...creditsOf(r.id)].some((n) => creditsOf(other.id).has(n));
+        const jointAlbum = norm(other.title) === norm(r.title) && sharedCast;
+        if (!sameAct && !jointAlbum) continue;
         if (other.year !== r.year && other.year != null && r.year != null) continue;
         const rSmaller = r.trackShas.length <= other.trackShas.length;
         const small = rSmaller ? r : other;
@@ -341,10 +426,38 @@ export function buildManifest(
           small.totalTracks ?? 0,
           big.trackShas.length
         );
+        const bigCast = creditsOf(big.id);
+        for (const n of creditsOf(small.id)) bigCast.add(n);
+        if (jointAlbum && !sameAct) {
+          // Credit the whole cast, deterministically, so the card does not
+          // claim a joint record belongs to whichever name sorted first.
+          const names = new Set<string>();
+          for (const part of [...big.artist.split(", "), ...small.artist.split(", ")]) {
+            const name = part.trim();
+            if (name !== "") names.add(name);
+          }
+          big.artist = [...names].sort((x, y) => x.localeCompare(y)).join(", ");
+        }
+        redirected.set(small.id, big.id);
         merged.delete(small.id);
         mergedAnything = true;
         break;
       }
+    }
+  }
+  if (redirected.size > 0) {
+    const resolve = (id: string): string => {
+      let current = id;
+      for (let hops = 0; hops < redirected.size + 1; hops++) {
+        const next = redirected.get(current);
+        if (next == null) break;
+        current = next;
+      }
+      return current;
+    };
+    for (const t of tracks) {
+      if (t.releaseId != null) t.releaseId = resolve(t.releaseId);
+      t.releaseIds = [...new Set(t.releaseIds.map(resolve))];
     }
   }
   for (const r of merged.values()) {
