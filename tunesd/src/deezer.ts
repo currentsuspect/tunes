@@ -110,6 +110,52 @@ export class DeezerClient {
     return null;
   }
 
+  /**
+   * Album candidates for an (artist, album) pair. Some releases carry no
+   * embedded picture at all — CHROMAKOPIA's 13 files each hold a single audio
+   * stream and no attached picture — so the cover has to come from somewhere.
+   *
+   * As with artists this returns candidates, not a verdict: the caller confirms
+   * that both the artist and the album name really match before using one.
+   */
+  async searchAlbumCandidates(artist: string, album: string): Promise<DeezerAlbum[]> {
+    await this.rateLimit();
+    const q = `artist:"${artist.replace(/"/g, "")}" album:"${album.replace(/"/g, "")}"`;
+    const url = `https://api.deezer.com/search/album?q=${encodeURIComponent(q)}&limit=5`;
+    let res: Response;
+    try {
+      res = await this.fetcher(url, {
+        headers: { "User-Agent": this.userAgent, Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (e) {
+      throw new DeezerUnavailable(`album search failed: ${String(e)}`);
+    }
+    if (!res.ok) throw new DeezerUnavailable(`album search returned HTTP ${res.status}`);
+    let body: { data?: DeezerAlbumRow[]; error?: { message?: string; code?: number } };
+    try {
+      body = (await res.json()) as typeof body;
+    } catch (e) {
+      throw new DeezerUnavailable(`album search body unreadable: ${String(e)}`);
+    }
+    if (body.error != null) {
+      throw new DeezerUnavailable(
+        `album search error ${body.error.code ?? "?"}: ${body.error.message ?? "unknown"}`
+      );
+    }
+    const out: DeezerAlbum[] = [];
+    for (const row of Array.isArray(body.data) ? body.data : []) {
+      if (row.id == null || row.title == null || row.title.trim() === "") continue;
+      out.push({
+        id: row.id,
+        title: row.title.trim(),
+        artist: row.artist?.name?.trim() ?? "",
+        coverUrl: pickCover(row),
+      });
+    }
+    return out;
+  }
+
   /** Every candidate, so a caller can pick the one whose name actually matches. */
   async searchArtistCandidates(name: string): Promise<DeezerArtist[]> {
     await this.rateLimit();
@@ -148,3 +194,28 @@ export class DeezerClient {
     return out;
   }
 }
+
+export interface DeezerAlbum {
+  id: number;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+}
+
+interface DeezerAlbumRow {
+  id?: number;
+  title?: string;
+  cover_xl?: string;
+  cover_big?: string;
+  cover_medium?: string;
+  artist?: { name?: string };
+}
+
+function pickCover(row: DeezerAlbumRow): string | null {
+  for (const url of [row.cover_xl, row.cover_big, row.cover_medium]) {
+    if (url != null && url !== "" && !url.includes("/album//")) return url;
+  }
+  return null;
+}
+
+

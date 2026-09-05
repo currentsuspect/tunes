@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { parseCredits, releaseArtistOf, stripFeatured } from "./credits.js";
+import { normalizeArtistName, parseCredits, releaseArtistOf, stripFeatured } from "./credits.js";
 import { parseArtistTitle } from "./enrich.js";
 import type { ProbeResult } from "./probe.js";
 
@@ -171,6 +171,24 @@ function releaseKeyFor(
   return providerReleaseId ?? fallbackReleaseKey(track);
 }
 
+/**
+ * The one key for release-level cover art. Exported so the daemon that writes
+ * the cache and the manifest that reads it cannot normalise differently — they
+ * did at first, and the covers silently never resolved.
+ */
+export function releaseArtKey(act: string, album: string): string {
+  return `${normalizeArtistName(act)}|${normalizeArtistName(album)}`;
+}
+
+function releaseArtSha_(
+  byKey: Map<string, string>,
+  act: string,
+  album: string | null
+): string | null {
+  if (album == null || album === "") return null;
+  return byKey.get(releaseArtKey(act, album)) ?? null;
+}
+
 export function buildManifest(
   probes: ProbeResult[],
   metaBySha: Map<string, TrackMeta> = new Map(),
@@ -179,7 +197,8 @@ export function buildManifest(
   artists: ManifestArtist[] = [],
   linkMeta: Map<string, ReleaseLinkMeta> = new Map(),
   addedAtBySha: Map<string, string> = new Map(),
-  embeddedArtBySha: Map<string, string> = new Map()
+  embeddedArtBySha: Map<string, string> = new Map(),
+  releaseArtByKey: Map<string, string> = new Map()
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -260,6 +279,10 @@ export function buildManifest(
       // Cover art the tagger embedded is always about this exact recording;
       // a release-level cover fetched from a provider is an approximation.
       const embeddedArtSha = embeddedArtBySha.get(p.sha) ?? null;
+      // Last resort: a cover fetched for the release as a whole, for files that
+      // carry no picture of their own.
+      const releaseArtSha =
+        releaseArtSha_(releaseArtByKey, releaseArtist, fileNamedAlbum ? album : null);
       return {
         sha: p.sha,
         size: p.size,
@@ -272,7 +295,8 @@ export function buildManifest(
         artist,
         album: categoryRelease ? "unknown album" : album,
         year,
-        artSha: (categoryRelease ? null : enrich?.artSha ?? null) ?? embeddedArtSha,
+        artSha:
+          (categoryRelease ? null : enrich?.artSha ?? null) ?? embeddedArtSha ?? releaseArtSha,
         // The id of the release this track is actually grouped into. Keeping a
         // provider id here while grouping by the file's album would leave a
         // track pointing at a release that does not contain it.

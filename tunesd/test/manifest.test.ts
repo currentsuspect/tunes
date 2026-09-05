@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildManifest } from "../src/manifest.js";
+import { buildManifest, releaseArtKey } from "../src/manifest.js";
 import type { TrackEnrichment } from "../src/manifest.js";
 import type { ProbeResult } from "../src/probe.js";
 
@@ -980,5 +980,48 @@ describe("exact-audio dedupe", () => {
     const a = probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "T" } });
     const b = probe({ sha: sha("b"), audioSha: "aaaa", tags: { title: "T" } });
     expect(buildManifest([a, b]).integrity).toBe(buildManifest([b, a]).integrity);
+  });
+});
+
+describe("release cover fallback", () => {
+  const sha = (n: string) => n.repeat(64).slice(0, 64);
+  const cover = "f".repeat(64);
+
+  it("uses a release cover when the file carries no picture", () => {
+    // CHROMAKOPIA: 13 files, one audio stream each, no attached picture.
+    const art = new Map([[releaseArtKey("Tyler, The Creator", "CHROMAKOPIA"), cover]]);
+    const m = buildManifest(
+      [probe({ sha: sha("a"), tags: { album: "CHROMAKOPIA", artist: "Tyler, The Creator" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), art
+    );
+    expect(m.tracks[0]?.artSha).toBe(cover);
+    expect(m.releases[0]?.artSha).toBe(cover);
+  });
+
+  it("prefers the file's own embedded art over the release cover", () => {
+    const embedded = new Map([[sha("a"), "e".repeat(64)]]);
+    const art = new Map([[releaseArtKey("Yeat", "LYFESTYLE"), cover]]);
+    const m = buildManifest(
+      [probe({ sha: sha("a"), tags: { album: "LYFESTYLE", artist: "Yeat" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), embedded, art
+    );
+    expect(m.tracks[0]?.artSha).toBe("e".repeat(64));
+  });
+
+  it("does not apply a release cover when the file named no album", () => {
+    const art = new Map([[releaseArtKey("Yeat", "LYFESTYLE"), cover]]);
+    const m = buildManifest(
+      [probe({ sha: sha("a"), tags: { artist: "Yeat" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), art
+    );
+    expect(m.tracks[0]?.artSha).toBeNull();
+  });
+
+  it("leaves art null when no cover was found for the release", () => {
+    const m = buildManifest(
+      [probe({ sha: sha("a"), tags: { album: "Obscure", artist: "Nobody" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map()
+    );
+    expect(m.tracks[0]?.artSha).toBeNull();
   });
 });

@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
 import { loadDiscographies, persistDiscographies } from "./discography.js";
-import { parseCredits, sameArtistName } from "./credits.js";
+import { parseCredits, releaseArtistOf, sameArtistName } from "./credits.js";
 import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
-import { buildManifest, isCategoryRelease } from "./manifest.js";
+import { buildManifest, isCategoryRelease, releaseArtKey } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
@@ -141,6 +141,34 @@ async function main(): Promise<void> {
       const tmp = join(env.dataDir, `.embedded-art-${process.pid}.tmp`);
       await writeFile(tmp, JSON.stringify({ art: Object.fromEntries(embeddedArt) }, null, 1));
       await rename(tmp, embeddedArtFile);
+    };
+    // "<act>|<album>" -> cover sha, for releases whose files carry no picture at
+    // all. CHROMAKOPIA's 13 tracks each hold one audio stream and nothing else.
+    const releaseArtFile = join(env.dataDir, "release-art.json");
+    const releaseArt = new Map<string, string>();
+    const releaseArtMisses = new Map<string, string>();
+    try {
+      const raw = JSON.parse(await readFile(releaseArtFile, "utf8")) as {
+        art: Record<string, string>;
+        misses?: Record<string, string>;
+      };
+      for (const [k, v] of Object.entries(raw.art ?? {})) releaseArt.set(k, v);
+      for (const [k, v] of Object.entries(raw.misses ?? {})) releaseArtMisses.set(k, v);
+    } catch {
+      // fresh start
+    }
+    const persistReleaseArt = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.release-art-${process.pid}.tmp`);
+      await writeFile(
+        tmp,
+        JSON.stringify(
+          { art: Object.fromEntries(releaseArt), misses: Object.fromEntries(releaseArtMisses) },
+          null,
+          1
+        )
+      );
+      await rename(tmp, releaseArtFile);
     };
     const linkMetaFile = join(env.dataDir, "linkmeta.json");
     const linkMeta = new Map<string, ReleaseLinkMeta>();
@@ -500,6 +528,72 @@ async function main(): Promise<void> {
           bytes: bytes.length,
         });
       }
+      // Releases whose files carry no picture at all need one from somewhere.
+      // One lookup per release, not per track, and only when every track in it
+      // is bare.
+      const bareReleases = new Map<string, { artist: string; album: string }>();
+      for (const obj of objects) {
+        const probe = probeCache.get(obj.sha);
+        if (probe == null) continue;
+        if (embeddedArt.has(obj.sha)) continue;
+        const album = probe.tags.album?.trim();
+        const artist = probe.tags.artist?.trim();
+        if (!album || !artist) continue;
+        const act = releaseArtistOf(probe.tags.albumArtist ?? null, artist);
+        if (act === "") continue;
+        const key = releaseArtKey(act, album);
+        if (releaseArt.has(key)) continue;
+        const missedAt = releaseArtMisses.get(key);
+        if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) continue;
+        if (!bareReleases.has(key)) bareReleases.set(key, { artist: act, album });
+      }
+      let releaseArtChanged = false;
+      let releaseArtReported = false;
+      for (const [key, { artist, album }] of bareReleases) {
+        try {
+          const candidates = await deezer.searchAlbumCandidates(artist, album);
+          // Both names must match: a cover is a claim about which record this
+          // is, and the wrong one is worse than none.
+          const match = candidates.find(
+            (c) => sameArtistName(c.artist, artist) && normName(c.title) === normName(album)
+          );
+          if (match?.coverUrl == null) {
+            releaseArtMisses.set(key, new Date().toISOString());
+            releaseArtChanged = true;
+            if (candidates.length > 0) {
+              log.info({
+                event: "RELEASE_ART_MISMATCH",
+                asked: `${artist} — ${album}`,
+                got: `${candidates[0]?.artist ?? "?"} — ${candidates[0]?.title ?? "?"}`,
+              });
+            }
+            continue;
+          }
+          const res = await fetch(match.coverUrl, { signal: AbortSignal.timeout(20_000) });
+          if (!res.ok) continue;
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          if (bytes.length < 1000) continue;
+          const { sha } = await storeCoverBytes(env.dataDir, bytes);
+          releaseArt.set(key, sha);
+          releaseArtMisses.delete(key);
+          releaseArtChanged = true;
+          log.info({
+            event: "RELEASE_ART",
+            source: "deezer",
+            release: `${artist} — ${album}`,
+            artSha: sha.slice(0, 8),
+          });
+        } catch (e) {
+          if (!(e instanceof DeezerUnavailable)) throw e;
+          if (!releaseArtReported) {
+            log.warn({ event: "DEEZER_UNAVAILABLE", err: String(e) });
+            releaseArtReported = true;
+          }
+          break;
+        }
+      }
+      if (releaseArtChanged) await persistReleaseArt();
+
       // Artist photos are network work: they belong on the pass timer, never
       // in the /manifest request path where the app waits on them. Run them
       // before the release-ordering loop so its long rate-limit sleeps cannot
@@ -945,7 +1039,8 @@ async function main(): Promise<void> {
         artistList,
         linkMeta,
         state.allAddedAt(),
-        embeddedArt
+        embeddedArt,
+        releaseArt
       );
     };
 
