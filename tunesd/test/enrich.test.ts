@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { flattenReleaseTracks, MusicBrainzClient, parseArtistTitle } from "../src/enrich.js";
+import {
+  flattenReleaseTracks,
+  MusicBrainzClient,
+  parseArtistTitle,
+  splitArtistNames,
+} from "../src/enrich.js";
+
+describe("splitArtistNames", () => {
+  it("splits the Vorbis multi-artist separators", () => {
+    expect(splitArtistNames("Yeat;Don Toliver")).toEqual(["Yeat", "Don Toliver"]);
+    expect(splitArtistNames("Don Toliver/ HVN/")).toEqual(["Don Toliver", "HVN"]);
+  });
+
+  it("leaves commas alone — they occur inside real names", () => {
+    expect(splitArtistNames("Tyler, The Creator")).toEqual(["Tyler, The Creator"]);
+  });
+
+  it("returns a single name unchanged", () => {
+    expect(splitArtistNames("Yeat")).toEqual(["Yeat"]);
+  });
+
+  it("drops empties and duplicates", () => {
+    expect(splitArtistNames("Yeat;;Yeat")).toEqual(["Yeat"]);
+    expect(splitArtistNames("   ")).toEqual([]);
+    expect(splitArtistNames(null)).toEqual([]);
+    expect(splitArtistNames(undefined)).toEqual([]);
+  });
+});
 
 describe("parseArtistTitle", () => {
   it("parses 'Artist - Title.ext'", () => {

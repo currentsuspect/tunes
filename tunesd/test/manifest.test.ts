@@ -13,7 +13,24 @@ function probe(over: Partial<ProbeResult> = {}): ProbeResult {
     bitrate: 950000,
     durationMs: 125000,
     tags: {},
+    hasEmbeddedArt: false,
     probedAt: "2026-08-27T00:00:00Z",
+    ...over,
+  };
+}
+
+function enrichment(over: Partial<TrackEnrichment> = {}): TrackEnrichment {
+  return {
+    artist: null,
+    album: null,
+    year: null,
+    artSha: null,
+    releaseId: null,
+    releaseType: null,
+    trackNumber: null,
+    discNumber: null,
+    totalTracks: null,
+    membership: [],
     ...over,
   };
 }
@@ -633,4 +650,75 @@ describe("buildManifest", () => {
     expect(t.embeddedArtist).toBeNull();
     expect(t.embeddedAlbum).toBeNull();
     expect(t.embeddedYear).toBeNull();
+  });
+
+  it("uses cover art lifted out of the file when no provider supplied one", () => {
+    const sha = "a".repeat(64);
+    const art = new Map([[sha, "c".repeat(64)]]);
+    const m = buildManifest([probe()], new Map(), new Map(), [], [], new Map(), new Map(), art);
+    expect(m.tracks[0]?.artSha).toBe("c".repeat(64));
+  });
+
+  it("prefers the provider cover over the embedded one when both exist", () => {
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "B", artSha: "d".repeat(64), releaseId: "mb:x" })],
+    ]);
+    const art = new Map([[sha, "c".repeat(64)]]);
+    const m = buildManifest([probe()], new Map(), enrich, [], [], new Map(), new Map(), art);
+    expect(m.tracks[0]?.artSha).toBe("d".repeat(64));
+  });
+
+  it("keeps the embedded cover even when a genre-compilation match is dropped", () => {
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "Trap", releaseId: "mb:x" })],
+    ]);
+    const art = new Map([[sha, "c".repeat(64)]]);
+    const m = buildManifest([probe()], new Map(), enrich, [], [], new Map(), new Map(), art);
+    expect(m.tracks[0]?.artSha).toBe("c".repeat(64));
+  });
+
+  it("keeps the file's own album when a genre compilation would have blanked it", () => {
+    // The regression: a MusicBrainz match onto a "Trap" compilation forced the
+    // album to "unknown album" even when the file said LYFESTYLE.
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "Trap", releaseId: "mb:x" })],
+    ]);
+    const m = buildManifest([probe({ tags: { album: "LYFESTYLE" } })], new Map(), enrich);
+    expect(m.tracks[0]?.album).toBe("LYFESTYLE");
+  });
+
+  it("still drops a genre compilation when the file has no album of its own", () => {
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "Trap", releaseId: "mb:x" })],
+    ]);
+    const m = buildManifest([probe()], new Map(), enrich);
+    expect(m.tracks[0]?.album).toBe("unknown album");
+  });
+
+  it("uses the tagger's own track and disc numbers over inferred positions", () => {
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "B", releaseId: "mb:x", trackNumber: 3, discNumber: 2, totalTracks: 9 })],
+    ]);
+    const m = buildManifest(
+      [probe({ tags: { trackNumber: 7, discNumber: 1, totalTracks: 18 } })],
+      new Map(),
+      enrich
+    );
+    expect(m.tracks[0]?.trackNumber).toBe(7);
+    expect(m.tracks[0]?.discNumber).toBe(1);
+    expect(m.tracks[0]?.totalTracks).toBe(18);
+  });
+
+  it("falls back to inferred positions when the file is not numbered", () => {
+    const sha = "a".repeat(64);
+    const enrich = new Map<string, TrackEnrichment>([
+      [sha, enrichment({ artist: "A", album: "B", releaseId: "mb:x", trackNumber: 3 })],
+    ]);
+    const m = buildManifest([probe()], new Map(), enrich);
+    expect(m.tracks[0]?.trackNumber).toBe(3);
   });

@@ -27,6 +27,30 @@ export interface ParsedName {
   title: string;
 }
 
+/**
+ * Splits a multi-artist tag into its individual names. Vorbis comments join
+ * collaborators with ";" or "/", so "Yeat;Don Toliver" is two artists, not one
+ * artist nobody can look up. Commas are left alone — they appear inside real
+ * names far too often to treat as a separator.
+ */
+/** Spotify could not be consulted — distinct from "Spotify had no match". */
+export class SpotifyUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SpotifyUnavailable";
+  }
+}
+
+export function splitArtistNames(raw: string | null | undefined): string[] {
+  if (raw == null) return [];
+  const names: string[] = [];
+  for (const part of raw.split(/[;/]/)) {
+    const name = part.trim();
+    if (name !== "" && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
 export function parseArtistTitle(fileName: string): ParsedName | null {
   const name = fileName.trim().replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim();
   if (name === "") return null;
@@ -540,15 +564,20 @@ export class SpotifyClient {
 
   async searchArtistId(name: string): Promise<string | null> {
     const token = await this.tokenFor();
-    if (!token) return null;
+    if (!token) throw new SpotifyUnavailable("no access token");
+    let res: Response;
     try {
       const q = `artist:${name}`;
       const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=artist&limit=1`;
-      const res = await this.fetcher(url, {
+      res = await this.fetcher(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) return null;
+    } catch (e) {
+      throw new SpotifyUnavailable(`search request failed: ${String(e)}`);
+    }
+    if (!res.ok) throw new SpotifyUnavailable(`search returned HTTP ${res.status}`);
+    try {
       const body = (await res.json()) as {
         artists?: { items?: Array<{ id?: string; name?: string }> };
       };
@@ -556,22 +585,27 @@ export class SpotifyClient {
       if (!hit?.id) return null;
       if (norm(hit.name ?? "") !== norm(name)) return null;
       return hit.id;
-    } catch {
-      return null;
+    } catch (e) {
+      throw new SpotifyUnavailable(`search body unreadable: ${String(e)}`);
     }
   }
 
   async artistIdFromTrack(name: string): Promise<string | null> {
     const token = await this.tokenFor();
-    if (!token) return null;
+    if (!token) throw new SpotifyUnavailable("no access token");
+    let res: Response;
     try {
       const q = `artist:${name}`;
       const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`;
-      const res = await this.fetcher(url, {
+      res = await this.fetcher(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) return null;
+    } catch (e) {
+      throw new SpotifyUnavailable(`track search request failed: ${String(e)}`);
+    }
+    if (!res.ok) throw new SpotifyUnavailable(`track search returned HTTP ${res.status}`);
+    try {
       const body = (await res.json()) as {
         tracks?: { items?: Array<{ artists?: Array<{ id?: string; name?: string }> }> };
       };
@@ -579,8 +613,8 @@ export class SpotifyClient {
       if (!hit?.id) return null;
       if (norm(hit.name ?? "") !== norm(name)) return null;
       return hit.id;
-    } catch {
-      return null;
+    } catch (e) {
+      throw new SpotifyUnavailable(`track search body unreadable: ${String(e)}`);
     }
   }
 

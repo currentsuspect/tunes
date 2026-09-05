@@ -18,6 +18,9 @@ import {
   normName,
 } from "./discography.js";
 
+/** How long /search will wait on external discovery before answering local-only. */
+const EXTERNAL_SEARCH_BUDGET_MS = 1500;
+
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
   ".flac": "audio/flac",
@@ -160,22 +163,35 @@ export class ManifestServer {
               artists = cached.artists;
               rg = cached.releases;
             } else {
-              try {
-                [artists, rg] = await Promise.all([
-                  artistSearcher(q),
-                  releaseSearcher(q),
-                ]);
-                if (artists.length > 0 || rg.length > 0) {
-                  this.externalCache.set(qn, { at: Date.now(), artists, releases: rg });
-                }
-                if (this.externalCache.size > 64) {
-                  const oldest = [...this.externalCache.entries()].sort(
-                    (a, b) => a[1].at - b[1].at
-                  )[0]?.[0];
-                  if (oldest) this.externalCache.delete(oldest);
-                }
-              } catch {
-                // both stay empty; search still answers with local results
+              // Discovery is a bonus on top of the library the user already
+              // has. The local answer is ready in microseconds, so it must
+              // never wait on Spotify and MusicBrainz round trips — a cold
+              // query used to hold the whole response for tens of seconds.
+              // Give them a short budget; whatever misses it still lands in
+              // the cache and shows up on the next keystroke.
+              const pending = Promise.all([artistSearcher(q), releaseSearcher(q)])
+                .then(([a, r]) => {
+                  if (a.length > 0 || r.length > 0) {
+                    this.externalCache.set(qn, { at: Date.now(), artists: a, releases: r });
+                  }
+                  if (this.externalCache.size > 64) {
+                    const oldest = [...this.externalCache.entries()].sort(
+                      (x, y) => x[1].at - y[1].at
+                    )[0]?.[0];
+                    if (oldest) this.externalCache.delete(oldest);
+                  }
+                  return { artists: a, releases: r };
+                })
+                .catch(() => null);
+              const settled = await Promise.race([
+                pending,
+                new Promise<null>((resolve) => {
+                  setTimeout(() => resolve(null), EXTERNAL_SEARCH_BUDGET_MS).unref();
+                }),
+              ]);
+              if (settled) {
+                artists = settled.artists;
+                rg = settled.releases;
               }
             }
             const localNames = [

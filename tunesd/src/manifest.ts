@@ -20,6 +20,8 @@ export interface ManifestTrack {
   releaseIds: string[];
   trackNumber: number | null;
   discNumber: number | null;
+  // Emitted since v4 but previously undeclared here.
+  totalTracks: number | null;
   addedAt: string | null;
   // v4: embedded tag values from ffprobe, exposed so the app can
   // implement a local-wins policy for identity fields.
@@ -135,7 +137,8 @@ export function buildManifest(
   objects: Array<{ sha: string; size: number }> = [],
   artists: Array<{ name: string; artSha: string | null }> = [],
   linkMeta: Map<string, ReleaseLinkMeta> = new Map(),
-  addedAtBySha: Map<string, string> = new Map()
+  addedAtBySha: Map<string, string> = new Map(),
+  embeddedArtBySha: Map<string, string> = new Map()
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -149,6 +152,7 @@ export function buildManifest(
         bitrate: null,
         durationMs: null,
         tags: {},
+        hasEmbeddedArt: false,
         probedAt: "",
       });
     }
@@ -188,9 +192,16 @@ export function buildManifest(
         ?? enrich?.album
         ?? "unknown album";
       const year = p.tags.year ?? enrich?.year ?? null;
+      // A genre-compilation match ("Trap", "Phonk") is not a real album, so we
+      // drop it — but only when it is the *only* thing we have. The file's own
+      // ALBUM tag is ground truth and outranks any network guess about it.
       const categoryRelease =
         enrich?.releaseId != null &&
-        isCategoryRelease(enrich?.album ?? "");
+        isCategoryRelease(enrich?.album ?? "") &&
+        !p.tags.album;
+      // Cover art the tagger embedded is always about this exact recording;
+      // a release-level cover fetched from a provider is an approximation.
+      const embeddedArtSha = embeddedArtBySha.get(p.sha) ?? null;
       return {
         sha: p.sha,
         size: p.size,
@@ -203,7 +214,7 @@ export function buildManifest(
         artist,
         album: categoryRelease ? "unknown album" : album,
         year,
-        artSha: categoryRelease ? null : enrich?.artSha ?? null,
+        artSha: (categoryRelease ? null : enrich?.artSha ?? null) ?? embeddedArtSha,
         releaseId: categoryRelease ? null : enrich?.releaseId ?? null,
         releaseIds: [
           ...new Set([
@@ -211,9 +222,12 @@ export function buildManifest(
             ...(enrich?.membership ?? []).map((m) => m.id),
           ]),
         ],
-        trackNumber: enrich?.trackNumber ?? null,
-        discNumber: enrich?.discNumber ?? null,
-        totalTracks: enrich?.totalTracks ?? null,
+        // Track/disc position decides running order inside a release, so the
+        // tagger's own numbering wins over a position we inferred from a
+        // provider's tracklist.
+        trackNumber: p.tags.trackNumber ?? enrich?.trackNumber ?? null,
+        discNumber: p.tags.discNumber ?? enrich?.discNumber ?? null,
+        totalTracks: p.tags.totalTracks ?? enrich?.totalTracks ?? null,
         addedAt: addedAtBySha.get(p.sha) ?? null,
         // v4: embedded tag values as discovered by ffprobe. The app's
         // query layer applies a local-wins policy over these.

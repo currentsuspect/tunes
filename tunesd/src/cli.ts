@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
 import { loadDiscographies, persistDiscographies } from "./discography.js";
-import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
+import { DiscogsClient, MusicBrainzClient, parseArtistTitle, splitArtistNames, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest, isCategoryRelease } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
-import { probeFile } from "./probe.js";
+import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
 import { State } from "./state.js";
@@ -78,6 +78,31 @@ async function main(): Promise<void> {
     const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log);
 
     const probeCache = new Map<string, ProbeResult>();
+    // Probe results are keyed by content hash, so they never go stale for a
+    // given object. Without persisting them a restart blanked every track to
+    // "unknown artist"/"unknown album" until the whole library was re-read,
+    // and re-ran ffprobe over every file to learn what it already knew.
+    const probeFile_ = join(env.dataDir, "probe.json");
+    try {
+      const raw = JSON.parse(await readFile(probeFile_, "utf8")) as {
+        version?: number;
+        entries: Record<string, ProbeResult>;
+      };
+      if (raw.version === PROBE_VERSION) {
+        for (const [sha, p] of Object.entries(raw.entries ?? {})) probeCache.set(sha, p);
+      }
+    } catch {
+      // fresh start
+    }
+    const persistProbes = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.probe-${process.pid}.tmp`);
+      await writeFile(
+        tmp,
+        JSON.stringify({ version: PROBE_VERSION, entries: Object.fromEntries(probeCache) }, null, 1)
+      );
+      await rename(tmp, probeFile_);
+    };
     const enrichFile = join(env.dataDir, "enrich.json");
     const enrich = new Map<string, EnrichmentEntry>();
     try {
@@ -95,6 +120,24 @@ async function main(): Promise<void> {
       const tmp = join(env.dataDir, `.enrich-${process.pid}.tmp`);
       await writeFile(tmp, JSON.stringify({ entries: Object.fromEntries(enrich) }, null, 1));
       await rename(tmp, enrichFile);
+    };
+    // sha -> cover sha, for art lifted out of the file itself. Persisted so a
+    // restart does not re-run ffmpeg over the whole library.
+    const embeddedArtFile = join(env.dataDir, "embedded-art.json");
+    const embeddedArt = new Map<string, string>();
+    try {
+      const raw = JSON.parse(await readFile(embeddedArtFile, "utf8")) as {
+        art: Record<string, string>;
+      };
+      for (const [sha, artSha] of Object.entries(raw.art ?? {})) embeddedArt.set(sha, artSha);
+    } catch {
+      // fresh start
+    }
+    const persistEmbeddedArt = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.embedded-art-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ art: Object.fromEntries(embeddedArt) }, null, 1));
+      await rename(tmp, embeddedArtFile);
     };
     const linkMetaFile = join(env.dataDir, "linkmeta.json");
     const linkMeta = new Map<string, ReleaseLinkMeta>();
@@ -221,24 +264,60 @@ async function main(): Promise<void> {
         // never fail enrichment over an artist image
       }
     };
+    // Names Spotify could not resolve. Without this only *successes* were
+    // remembered, so an unmatchable name was looked up again on every single
+    // call — two API round trips each, forever.
+    const artistMissFile = join(env.dataDir, "artist-misses.json");
+    const artistMisses = new Map<string, string>();
+    try {
+      const raw = JSON.parse(await readFile(artistMissFile, "utf8")) as {
+        misses: Record<string, string>;
+      };
+      for (const [name, at] of Object.entries(raw.misses ?? {})) artistMisses.set(name, at);
+    } catch {
+      // fresh start
+    }
+    const persistArtistMisses = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.artist-misses-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ misses: Object.fromEntries(artistMisses) }, null, 1));
+      await rename(tmp, artistMissFile);
+    };
     const backfillArtistPhotos = async () => {
       if (!spotify) return;
       const names = new Set<string>();
       for (const t of probeCache.values()) {
-        if (t.tags.artist) names.add(t.tags.artist);
+        for (const name of splitArtistNames(t.tags.artist)) names.add(name);
+        for (const name of splitArtistNames(t.tags.albumArtist)) names.add(name);
       }
       for (const e of enrich.values()) {
-        if (e.artist) names.add(e.artist);
+        for (const name of splitArtistNames(e.artist)) names.add(name);
       }
+      let missed = false;
       for (const name of names) {
         if (artists.has(name)) continue;
         if (name === "unknown artist") continue;
-        const id =
-          (await spotify.searchArtistId(name)) ??
-          (await spotify.artistIdFromTrack(name));
-        if (!id) continue;
+        const missedAt = artistMisses.get(name);
+        if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) continue;
+        let id: string | null;
+        try {
+          id = (await spotify.searchArtistId(name)) ?? (await spotify.artistIdFromTrack(name));
+        } catch (e) {
+          // Could not consult Spotify at all. Recording this as "no such
+          // artist" would bake a transport failure into a week-long lie, so
+          // stop the sweep and report instead.
+          log.warn({ event: "SPOTIFY_UNAVAILABLE", err: String(e) });
+          break;
+        }
+        if (!id) {
+          artistMisses.set(name, new Date().toISOString());
+          missed = true;
+          continue;
+        }
+        if (artistMisses.delete(name)) missed = true;
         await artistImageFor(id, name);
       }
+      if (missed) await persistArtistMisses();
     };
 
     let enrichPassRunning = false;
@@ -248,6 +327,7 @@ async function main(): Promise<void> {
       try {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
+      const probedBefore = probeCache.size;
       for (const obj of objects) {
         if (probeCache.has(obj.sha)) continue;
         try {
@@ -263,10 +343,35 @@ async function main(): Promise<void> {
             bitrate: null,
             durationMs: null,
             tags: {},
+            hasEmbeddedArt: false,
             probedAt: new Date().toISOString(),
           });
         }
       }
+      if (probeCache.size !== probedBefore) await persistProbes();
+      // Lift cover art out of the files that carry it. Costs one ffmpeg
+      // stream-copy per object, once ever — the result is content-addressed
+      // into the same cover store the providers write to.
+      for (const obj of objects) {
+        if (embeddedArt.has(obj.sha)) continue;
+        if (!probeCache.get(obj.sha)?.hasEmbeddedArt) continue;
+        const bytes = await extractEmbeddedArt(store.pathOf(obj.sha));
+        if (!bytes) continue;
+        const { sha: artSha } = await storeCoverBytes(env.dataDir, bytes);
+        embeddedArt.set(obj.sha, artSha);
+        await persistEmbeddedArt();
+        log.info({
+          event: "ART_EMBEDDED",
+          sha: obj.sha.slice(0, 8),
+          artSha: artSha.slice(0, 8),
+          bytes: bytes.length,
+        });
+      }
+      // Artist photos are network work: they belong on the pass timer, never
+      // in the /manifest request path where the app waits on them. Run them
+      // before the release-ordering loop so its long rate-limit sleeps cannot
+      // starve the artist list.
+      await backfillArtistPhotos();
       for (const obj of objects) {
         const existing = enrich.get(obj.sha);
         const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
@@ -674,7 +779,6 @@ async function main(): Promise<void> {
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
-      await backfillArtistPhotos();
       const artistList = [...artists.entries()].map(([name, artSha]) => ({ name, artSha }));
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
@@ -698,7 +802,8 @@ async function main(): Promise<void> {
         objects,
         artistList,
         linkMeta,
-        state.allAddedAt()
+        state.allAddedAt(),
+        embeddedArt
       );
     };
 
