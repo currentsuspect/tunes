@@ -56,13 +56,22 @@ export interface ManifestRelease {
   tracks: Array<{ sha: string; trackNumber: number | null; discNumber: number | null }>;
 }
 
+export interface ManifestArtist {
+  name: string;
+  artSha: string | null;
+  /** Crowd tags, only ever from a provider row whose name matched exactly. */
+  tags?: string[];
+  /** Provider listener count, as a rough popularity signal. */
+  listeners?: number | null;
+}
+
 export interface ManifestV4 {
   schema: 4;
   generatedAt: string;
   integrity: string;
   tracks: ManifestTrack[];
   releases: ManifestRelease[];
-  artists: Array<{ name: string; artSha: string | null }>;
+  artists: ManifestArtist[];
 }
 
 // Schema 3 was the v3 wire format. Keep the type so callers that import
@@ -167,7 +176,7 @@ export function buildManifest(
   metaBySha: Map<string, TrackMeta> = new Map(),
   enrichBySha: Map<string, TrackEnrichment> = new Map(),
   objects: Array<{ sha: string; size: number }> = [],
-  artists: Array<{ name: string; artSha: string | null }> = [],
+  artists: ManifestArtist[] = [],
   linkMeta: Map<string, ReleaseLinkMeta> = new Map(),
   addedAtBySha: Map<string, string> = new Map(),
   embeddedArtBySha: Map<string, string> = new Map()

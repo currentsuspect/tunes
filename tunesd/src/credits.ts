@@ -127,3 +127,29 @@ export function releaseArtistOf(
   const primary = parseCredits(trackArtist).primary;
   return primary !== "" ? primary : (trackArtist ?? "").trim();
 }
+
+/**
+ * Whether a provider's answer is actually the artist we asked about.
+ *
+ * Providers answer name queries loosely and confidently: Last.fm returns the
+ * 90s Canadian band Len for "Len", Deezer offers "Le N'" for the same query and
+ * "HVN & ERTH" for "HVN". Accepting those attaches the wrong genres, the wrong
+ * face and the wrong popularity to a track. Normalise punctuation, case and
+ * accents, then demand an exact match — a lookup that cannot be confirmed is
+ * worth less than no lookup at all.
+ */
+export function normalizeArtistName(name: string | null | undefined): string {
+  if (name == null) return "";
+  return name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function sameArtistName(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = normalizeArtistName(a);
+  const right = normalizeArtistName(b);
+  return left !== "" && left === right;
+}

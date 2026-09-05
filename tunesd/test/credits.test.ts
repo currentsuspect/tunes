@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCredits, releaseArtistOf, stripFeatured } from "../src/credits.js";
+import { parseCredits, releaseArtistOf, sameArtistName, stripFeatured } from "../src/credits.js";
 
 describe("parseCredits", () => {
   it("recovers the primary artist from the real library's credit strings", () => {
@@ -130,5 +130,27 @@ describe("releaseArtistOf", () => {
     expect(releaseArtistOf("Tyler, The Creator", "Tyler, The Creator")).toBe(
       "Tyler, The Creator"
     );
+  });
+});
+
+describe("sameArtistName", () => {
+  it("accepts the same name written differently", () => {
+    expect(sameArtistName("A$AP Rocky", "A$AP Rocky")).toBe(true);
+    expect(sameArtistName("Tyler, The Creator", "Tyler The Creator")).toBe(true);
+    expect(sameArtistName("Beyoncé", "Beyonce")).toBe(true);
+    expect(sameArtistName("yeat", "Yeat")).toBe(true);
+  });
+
+  it("rejects the near-misses providers actually returned", () => {
+    // Deezer answered these for the real queries; accepting them would put the
+    // wrong picture and genres on the artist.
+    expect(sameArtistName("Len", "Le N'")).toBe(false);
+    expect(sameArtistName("HVN", "HVN & ERTH")).toBe(false);
+  });
+
+  it("rejects empty or missing names rather than matching them together", () => {
+    expect(sameArtistName("", "")).toBe(false);
+    expect(sameArtistName(null, null)).toBe(false);
+    expect(sameArtistName("Yeat", null)).toBe(false);
   });
 });

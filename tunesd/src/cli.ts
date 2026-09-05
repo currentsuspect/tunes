@@ -4,13 +4,15 @@ import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
 import { loadDiscographies, persistDiscographies } from "./discography.js";
-import { DiscogsClient, MusicBrainzClient, parseArtistTitle, splitArtistNames, SpotifyClient, storeCoverBytes } from "./enrich.js";
+import { parseCredits, sameArtistName } from "./credits.js";
+import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import type { EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest, isCategoryRelease } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
+import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
@@ -236,6 +238,28 @@ async function main(): Promise<void> {
     if (!spotify) log.warn({ event: "ENRICH_SPOTIFY_DISABLED" });
     if (!discogs) log.warn({ event: "ENRICH_DISCOGS_DISABLED" });
     if (!lastfm) log.warn({ event: "ENRICH_LASTFM_DISABLED" });
+    // No key, no account, no auth. tunesd-side only: the app still talks to
+    // nothing but the user-configured tunesd (SPEC §1.5, §2.4).
+    const deezer = new DeezerClient("tunes/0.1 ( https://github.com/currentsuspect/tunes )");
+
+    // name -> crowd tags + popularity, kept out of enrich.json because it is
+    // about the artist, not the file.
+    const artistMetaFile = join(env.dataDir, "artist-meta.json");
+    const artistMeta = new Map<string, { tags: string[]; listeners: number | null; fetchedAt: string }>();
+    try {
+      const raw = JSON.parse(await readFile(artistMetaFile, "utf8")) as {
+        artists: Record<string, { tags: string[]; listeners: number | null; fetchedAt: string }>;
+      };
+      for (const [name, m] of Object.entries(raw.artists ?? {})) artistMeta.set(name, m);
+    } catch {
+      // fresh start
+    }
+    const persistArtistMeta = async () => {
+      await mkdir(env.dataDir, { recursive: true });
+      const tmp = join(env.dataDir, `.artist-meta-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ artists: Object.fromEntries(artistMeta) }, null, 1));
+      await rename(tmp, artistMetaFile);
+    };
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
     const artistsFile = join(env.dataDir, "artists.json");
     const artists = new Map<string, string>();
@@ -305,26 +329,69 @@ async function main(): Promise<void> {
       }
     };
     const backfillArtistPhotos = async () => {
-      if (!spotify && !lastfm) return;
+      // Deezer needs no credentials, so the sweep always has at least one
+      // provider to try.
       const names = new Set<string>();
+      // parseCredits, not splitArtistNames: a credit line separates its names
+      // with commas as often as semicolons, and querying a provider for the
+      // whole of "Fimiguerrero, Lancey Foux, Len" can only ever miss.
+      const addCredit = (raw: string | null | undefined) => {
+        if (raw == null || raw.trim() === "") return;
+        const { primary, featured } = parseCredits(raw);
+        for (const name of [primary, ...featured]) {
+          if (name !== "") names.add(name);
+        }
+      };
       for (const t of probeCache.values()) {
-        for (const name of splitArtistNames(t.tags.artist)) names.add(name);
-        for (const name of splitArtistNames(t.tags.albumArtist)) names.add(name);
+        addCredit(t.tags.artist);
+        addCredit(t.tags.albumArtist);
       }
-      for (const e of enrich.values()) {
-        for (const name of splitArtistNames(e.artist)) names.add(name);
-      }
+      for (const e of enrich.values()) addCredit(e.artist);
       let missed = false;
+      let metaChanged = false;
       let spotifyReported = false;
       let lastfmReported = false;
+      let deezerReported = false;
       for (const name of names) {
-        if (artists.has(name)) continue;
         if (name === "unknown artist") continue;
+        const havePicture = artists.has(name);
+        const haveMeta = artistMeta.has(name);
+        if (havePicture && haveMeta) continue;
         const missedAt = artistMisses.get(name);
         if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) continue;
-        let resolved = false;
+
+        let resolved = havePicture;
         let couldNotLook = false;
-        if (spotify) {
+
+        // Tags and popularity from Last.fm. Only accepted when the row it
+        // answered with is actually this artist: asked for "Len" it returns the
+        // 90s Canadian band, and asked for "Travis Scott" a near-namesake.
+        if (!haveMeta && lastfm) {
+          try {
+            const info = await lastfm.artistInfo(name);
+            if (info != null) {
+              if (sameArtistName(info.name, name)) {
+                artistMeta.set(name, {
+                  tags: info.tags.slice(0, 6),
+                  listeners: info.listeners,
+                  fetchedAt: new Date().toISOString(),
+                });
+                metaChanged = true;
+              } else {
+                log.info({ event: "ARTIST_NAME_MISMATCH", source: "lastfm", asked: name, got: info.name });
+              }
+            }
+          } catch (e) {
+            if (!(e instanceof LastfmUnavailable)) throw e;
+            if (!lastfmReported) {
+              log.warn({ event: "LASTFM_UNAVAILABLE", err: String(e) });
+              lastfmReported = true;
+            }
+            couldNotLook = true;
+          }
+        }
+
+        if (!resolved && spotify) {
           try {
             const id =
               (await spotify.searchArtistId(name)) ?? (await spotify.artistIdFromTrack(name));
@@ -342,22 +409,36 @@ async function main(): Promise<void> {
             couldNotLook = true;
           }
         }
-        if (!resolved && lastfm) {
+
+        // Deezer is the working picture source. Last.fm has served one grey
+        // star for every artist since 2019, so it is not tried for images.
+        if (!resolved) {
           try {
-            const info = await lastfm.artistInfo(name);
-            // Last.fm serves one grey star for every artist since 2019; the
-            // client reports null rather than handing us that placeholder.
-            if (info?.imageUrl) resolved = await storeArtistImage(info.imageUrl, name);
-            if (info != null) couldNotLook = false;
+            const candidates = await deezer.searchArtistCandidates(name);
+            const match = candidates.find((c) => sameArtistName(c.name, name));
+            if (match?.pictureUrl) {
+              resolved = await storeArtistImage(match.pictureUrl, name);
+              if (resolved) {
+                log.info({ event: "ARTIST_IMAGE", source: "deezer", artist: name });
+              }
+            } else if (candidates.length > 0 && match == null) {
+              log.info({
+                event: "ARTIST_NAME_MISMATCH",
+                source: "deezer",
+                asked: name,
+                got: candidates[0]?.name ?? null,
+              });
+            }
           } catch (e) {
-            if (!(e instanceof LastfmUnavailable)) throw e;
-            if (!lastfmReported) {
-              log.warn({ event: "LASTFM_UNAVAILABLE", err: String(e) });
-              lastfmReported = true;
+            if (!(e instanceof DeezerUnavailable)) throw e;
+            if (!deezerReported) {
+              log.warn({ event: "DEEZER_UNAVAILABLE", err: String(e) });
+              deezerReported = true;
             }
             couldNotLook = true;
           }
         }
+
         if (resolved) {
           if (artistMisses.delete(name)) missed = true;
           continue;
@@ -367,6 +448,7 @@ async function main(): Promise<void> {
         artistMisses.set(name, new Date().toISOString());
         missed = true;
       }
+      if (metaChanged) await persistArtistMeta();
       if (missed) await persistArtistMisses();
     };
 
@@ -830,7 +912,16 @@ async function main(): Promise<void> {
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
-      const artistList = [...artists.entries()].map(([name, artSha]) => ({ name, artSha }));
+      const artistNames = new Set([...artists.keys(), ...artistMeta.keys()]);
+      const artistList = [...artistNames].map((name) => {
+        const meta = artistMeta.get(name);
+        return {
+          name,
+          artSha: artists.get(name) ?? null,
+          ...(meta && meta.tags.length > 0 ? { tags: meta.tags } : {}),
+          ...(meta && meta.listeners != null ? { listeners: meta.listeners } : {}),
+        };
+      });
       const enrichForManifest = new Map<string, TrackEnrichment>();
       for (const [sha, e] of enrich) {
         enrichForManifest.set(sha, {
