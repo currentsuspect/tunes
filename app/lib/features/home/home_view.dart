@@ -436,26 +436,41 @@ class _CompletionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = release.totalTracks;
-    // Unknown total (null) → don't show a misleading empty bar. Show a
-    // neutral rail at full width with the secondary tone, signalling
-    // 'we don't know the album length yet' without faking a 0%.
-    if (total == null || total <= 0) {
-      return SizedBox(height: 3, child: Container(color: Tones.surfaceRaised));
-    }
     final have = release.trackShas.length;
+
+    // A full-width unlabelled bar under every row reads as a rendering
+    // artifact, and on a complete album it says nothing: a bar at 100% and a
+    // bar at "we don't know the length" look identical. Say something only
+    // when there is something to say — an album you are missing tracks from.
+    if (total == null || total <= 0 || have >= total) {
+      return const SizedBox.shrink();
+    }
+
     final ratio = ((have / total).clamp(0.0, 1.0)).toDouble();
-    return SizedBox(
-      height: 3,
-      child: LayoutBuilder(
-        builder: (context, c) => Stack(
-          children: [
-            Container(color: Tones.surfaceRaised),
-            FractionallySizedBox(
-              widthFactor: ratio,
-              child: Container(color: Tones.primary),
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.xs),
+      child: Row(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: SizedBox(
+                height: 3,
+                child: Stack(
+                  children: [
+                    Container(color: Tones.surfaceRaised),
+                    FractionallySizedBox(
+                      widthFactor: ratio,
+                      child: Container(color: Tones.primary),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: Space.sm),
+          Text('$have/$total', style: TypeScale.caption),
+        ],
       ),
     );
   }

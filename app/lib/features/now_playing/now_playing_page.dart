@@ -359,14 +359,44 @@ class NowPlayingPage extends StatelessWidget {
                           ),
                         ),
                         Expanded(
-                          child: Slider(
-                            value: value,
-                            max: duration.inMilliseconds.toDouble().clamp(
-                              1,
-                              double.infinity,
-                            ),
-                            onChanged: (v) =>
-                                player.seek(Duration(milliseconds: v.round())),
+                          child: Builder(
+                            builder: (context) {
+                              // A bare Slider inherits a rail colour that is
+                              // invisible on this background, so at 0:00 the
+                              // thumb looked like a dot floating between two
+                              // timestamps with no track at all.
+                              // `clamp` is declared on num and returns num, so
+                              // the toDouble() has to come after it.
+                              final maxMs = duration.inMilliseconds
+                                  .clamp(1, double.infinity)
+                                  .toDouble();
+                              return SliderTheme(
+                                data: SliderThemeData(
+                                  trackHeight: 3,
+                                  activeTrackColor: Tones.primary,
+                                  inactiveTrackColor: Tones.surfaceRaised,
+                                  thumbColor: Tones.primary,
+                                  overlayColor: Tones.primary.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 6,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 14,
+                                  ),
+                                ),
+                                child: Slider(
+                                  // Position can briefly exceed duration on a
+                                  // stream; Slider asserts if it does.
+                                  value: value.clamp(0, maxMs).toDouble(),
+                                  max: maxMs,
+                                  onChanged: (v) => player.seek(
+                                    Duration(milliseconds: v.round()),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
                         Text(
