@@ -668,9 +668,11 @@ class _Artwork extends StatelessWidget {
         // Subtle "alive" motion: slow rotation while playing, snap-back on
         // pause. It is the only thing in the app that moves continuously, so
         // it is also the only animation with a switch of its own.
-        if (!(SettingsScope.maybeOf(context)?.animatedArtwork ?? true)) {
-          return art;
-        }
+        // Off by choice, or off because the system asked for less motion.
+        // A sleeve that turns for thirty seconds at a time is exactly what
+        // that setting exists to stop.
+        final wanted = SettingsScope.maybeOf(context)?.animatedArtwork ?? true;
+        if (!wanted || MediaQuery.disableAnimationsOf(context)) return art;
         return AnimatedRotation(
           turns: playing ? 1 : 0,
           duration: const Duration(seconds: 30),

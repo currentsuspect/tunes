@@ -48,7 +48,11 @@ class _PressableState extends State<Pressable> {
       onTapCancel: () => _set(false),
       child: AnimatedScale(
         scale: _down ? widget.scale : 1,
-        duration: const Duration(milliseconds: 90),
+        // Someone who has asked the system for less motion has asked for
+        // this too. The press still registers -- it just does not move.
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 90),
         curve: Curves.easeOut,
         child: widget.child,
       ),

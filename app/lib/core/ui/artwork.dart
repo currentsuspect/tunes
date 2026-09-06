@@ -97,7 +97,9 @@ class Artwork extends StatelessWidget {
             fallback,
             AnimatedOpacity(
               opacity: frame == null ? 0 : 1,
-              duration: const Duration(milliseconds: 220),
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 220),
               curve: Curves.easeOut,
               child: child,
             ),

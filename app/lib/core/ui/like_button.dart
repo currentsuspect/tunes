@@ -32,9 +32,11 @@ class LikeButton extends StatelessWidget {
     return IconButton(
       onPressed: () => likes.toggle(sha),
       padding: padding,
-      constraints: const BoxConstraints(),
+      // A 22-point heart with eight points of padding is a 38-point target,
+      // which is under the floor for something people tap while walking.
+      // The icon stays the size it was; only the reachable area grows.
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
       iconSize: size,
-      visualDensity: VisualDensity.compact,
       tooltip: liked ? 'Remove from liked' : 'Like',
       icon: Icon(
         liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,

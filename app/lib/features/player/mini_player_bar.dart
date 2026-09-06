@@ -341,21 +341,25 @@ class _TransportButtonState extends State<_TransportButton> {
       onTapCancel: () => setState(() => _down = false),
       onTap: widget.onPressed,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedScale(
-        scale: _down ? 0.86 : 1,
-        duration: const Duration(milliseconds: 90),
-        curve: Curves.easeOut,
-        child: Padding(
-          padding: const EdgeInsets.all(Space.sm),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 140),
-            transitionBuilder: (child, animation) =>
-                ScaleTransition(scale: animation, child: child),
-            child: Icon(
-              widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              key: ValueKey(widget.playing),
-              size: 30,
-              color: Tones.primary,
+      child: Semantics(
+        button: true,
+        label: widget.playing ? 'Pause' : 'Play',
+        child: AnimatedScale(
+          scale: _down ? 0.86 : 1,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOut,
+          child: Padding(
+            padding: const EdgeInsets.all(Space.sm),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 140),
+              transitionBuilder: (child, animation) =>
+                  ScaleTransition(scale: animation, child: child),
+              child: Icon(
+                widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                key: ValueKey(widget.playing),
+                size: 30,
+                color: Tones.primary,
+              ),
             ),
           ),
         ),
