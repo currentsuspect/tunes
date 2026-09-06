@@ -187,4 +187,42 @@ void main() {
       expect(d.lineStarts[1], isNull);
     });
   });
+
+  group('walking back for undo', () {
+    test('steps past a header instead of stopping on it', () {
+      // The regression: undo walked back one slot from the cursor, but the
+      // cursor skips headers -- so the slot behind it could be a header,
+      // which never carries a mark. Clearing it changed nothing and undo
+      // stopped dead after one step.
+      final d = SyncDraft(['first', '[Chorus]', 'second', 'third']);
+      d.lineStarts[0] = at(3);
+      d.lineStarts[2] = at(6);
+      d.lineStarts[3] = at(9);
+      expect(d.lastMarkedLine, 3);
+      d.lineStarts[3] = null;
+      expect(d.lastMarkedLine, 2);
+      d.lineStarts[2] = null;
+      expect(d.lastMarkedLine, 0, reason: 'must skip [Chorus]');
+      d.lineStarts[0] = null;
+      expect(d.lastMarkedLine, isNull);
+    });
+
+    test('never offers a header as the thing to undo', () {
+      final d = SyncDraft(['[Verse]', 'only line']);
+      d.lineStarts[1] = at(4);
+      expect(d.lastMarkedLine, 1);
+      d.lineStarts[1] = null;
+      expect(d.lastMarkedLine, isNull);
+    });
+
+    test('finds the last marked word even with a gap before it', () {
+      final d = SyncDraft(['one two three']);
+      expect(d.lastMarkedWord(0), isNull);
+      d.wordStarts[0][0] = at(1);
+      d.wordStarts[0][2] = at(3);
+      expect(d.lastMarkedWord(0), 2);
+      d.wordStarts[0][2] = null;
+      expect(d.lastMarkedWord(0), 0);
+    });
+  });
 }

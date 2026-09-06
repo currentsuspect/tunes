@@ -160,39 +160,67 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
     if (!widget.player.playing) widget.player.play();
   }
 
+  /// The line a correction applies to: whichever is selected if it carries a
+  /// mark, otherwise the last one placed.
+  ///
+  /// Walking back from the cursor was not enough. `nextUntimedLine` skips
+  /// section headers, so the slot behind the cursor could be a header --
+  /// clearing it did nothing, the cursor did not move, and undo stopped dead
+  /// after one step.
+  int? _targetLine() {
+    final sel = _selectedLine;
+    if (!_draft.isHeaderAt(sel) && _draft.lineStarts[sel] != null) return sel;
+    return _lastMarkedLine();
+  }
+
+  int? _lastMarkedLine() => _draft.lastMarkedLine;
+
+  /// The word a correction applies to. Picking a chip aims here, so undo and
+  /// the nudge act on the word being listened to rather than on whichever one
+  /// happened to be placed last.
+  int? _targetWord() {
+    final words = _draft.wordStarts[_selectedLine];
+    final sel = _selectedWord;
+    if (sel != null && sel < words.length && words[sel] != null) return sel;
+    return _draft.lastMarkedWord(_selectedLine);
+  }
+
   void _undo() {
-    _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
-        final next = _draft.nextUntimedLine ?? _draft.lines.length;
-        if (next == 0) return;
-        _draft.lineStarts[next - 1] = null;
-        _selectedLine = next - 1;
+        final i = _targetLine();
+        if (i == null) return;
+        _dirty = true;
+        _draft.lineStarts[i] = null;
+        _selectedLine = i;
       } else {
-        final w = _draft.nextUntimedWord(_selectedLine);
-        final last = (w ?? _draft.wordStarts[_selectedLine].length) - 1;
-        if (last < 0) return;
-        _draft.wordStarts[_selectedLine][last] = null;
+        final w = _targetWord();
+        if (w == null) return;
+        _dirty = true;
+        _draft.wordStarts[_selectedLine][w] = null;
+        // Leave the cursor on the word just cleared, so undo then re-tap
+        // fixes one word without disturbing the rest.
+        _selectedWord = w;
       }
     });
   }
 
-  /// Shifts the most recently placed mark. Getting a tap 100 ms late is the
-  /// normal failure, and re-timing the whole line to fix one word is not.
+  /// Shifts one mark. Being a beat late on a single word is the normal
+  /// failure; re-timing the line around it is not.
   void _nudge(Duration by) {
-    _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
-        final next = _draft.nextUntimedLine ?? _draft.lines.length;
-        if (next == 0) return;
-        final cur = _draft.lineStarts[next - 1]!;
-        _draft.lineStarts[next - 1] = _clampDuration(cur + by);
+        final i = _targetLine();
+        if (i == null) return;
+        _dirty = true;
+        _draft.lineStarts[i] = _clampDuration(_draft.lineStarts[i]! + by);
       } else {
-        final w = _draft.nextUntimedWord(_selectedLine);
-        final last = (w ?? _draft.wordStarts[_selectedLine].length) - 1;
-        if (last < 0) return;
-        final cur = _draft.wordStarts[_selectedLine][last]!;
-        _draft.wordStarts[_selectedLine][last] = _clampDuration(cur + by);
+        final w = _targetWord();
+        if (w == null) return;
+        _dirty = true;
+        final words = _draft.wordStarts[_selectedLine];
+        words[w] = _clampDuration(words[w]! + by);
+        _selectedWord = w;
       }
     });
   }
@@ -373,6 +401,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         body: Column(
           children: [
             _Transport(player: widget.player, playhead: _playhead),
+            _Scrubber(player: widget.player, playhead: _playhead),
             const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             _ModeBar(
               mode: _mode,
@@ -490,6 +519,55 @@ class _Transport extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A scrubber for the editor.
+///
+/// Auditioning a word drops the playhead wherever that word is, and without
+/// this the only ways back were five seconds at a time or another word to
+/// aim at. Timing by ear needs to be able to go anywhere in the track.
+class _Scrubber extends StatelessWidget {
+  const _Scrubber({required this.player, required this.playhead});
+
+  final TunePlayer player;
+  final ValueListenable<Duration> playhead;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final total = player.duration.inMilliseconds;
+        if (total <= 0) return const SizedBox(height: Space.sm);
+        return ValueListenableBuilder<Duration>(
+          valueListenable: playhead,
+          builder: (context, pos, _) {
+            final max = total.toDouble();
+            return SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 2,
+                activeTrackColor: Tones.primary,
+                inactiveTrackColor: Tones.surfaceRaised,
+                thumbColor: Tones.primary,
+                overlayColor: Tones.primary.withValues(alpha: 0.15),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              ),
+              child: Slider(
+                // The projected playhead can read a few ms past the end
+                // between position reports, and Slider asserts rather than
+                // clamping.
+                value: pos.inMilliseconds.clamp(0, total).toDouble(),
+                max: max,
+                onChanged: (v) =>
+                    player.seek(Duration(milliseconds: v.round())),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

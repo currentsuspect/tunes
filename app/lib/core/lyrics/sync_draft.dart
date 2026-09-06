@@ -87,6 +87,29 @@ class SyncDraft {
     return n;
   }
 
+  /// The last line carrying a mark, headers skipped.
+  ///
+  /// Undo used to walk back one slot from the cursor, but the cursor already
+  /// skips headers -- so the slot behind it could be a header, which never
+  /// has a mark. Clearing it changed nothing, the cursor stayed put, and undo
+  /// stopped dead after a single step.
+  int? get lastMarkedLine {
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (isHeaderAt(i)) continue;
+      if (lineStarts[i] != null) return i;
+    }
+    return null;
+  }
+
+  /// The last word of [lineIndex] carrying a mark.
+  int? lastMarkedWord(int lineIndex) {
+    final words = wordStarts[lineIndex];
+    for (var i = words.length - 1; i >= 0; i--) {
+      if (words[i] != null) return i;
+    }
+    return null;
+  }
+
   /// Moves every mark by [by], for when the whole take is consistently late.
   /// Nudging one mark at a time is fine for a slip; it is not a way to fix
   /// forty lines recorded a beat behind.
