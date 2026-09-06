@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../core/ui/missing_cover.dart';
+import '../../core/ui/pressable.dart';
 import '../../domain/collection_gaps.dart';
 
 /// Where the library stops and the world carries on.
@@ -181,9 +182,8 @@ class _ArtistSection extends StatelessWidget {
                 final album = gap.missing[i];
                 return SizedBox(
                   width: 140,
-                  child: InkWell(
+                  child: Pressable(
                     onTap: () => onArtistTap(album.artist),
-                    borderRadius: BorderRadius.circular(RadiusTokens.card),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

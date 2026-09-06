@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../core/ui/missing_cover.dart';
@@ -319,9 +320,8 @@ class _DynamicRail extends StatelessWidget {
               final t = tracks[i];
               return SizedBox(
                 width: 132,
-                child: InkWell(
+                child: Pressable(
                   onTap: () => onPlay(tracks, i),
-                  borderRadius: BorderRadius.circular(RadiusTokens.card),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -402,9 +402,8 @@ class _JustAddedCarousel extends StatelessWidget {
               final t = tracks[i];
               return SizedBox(
                 width: 132,
-                child: InkWell(
+                child: Pressable(
                   onTap: () => onPlay([t], 0),
-                  borderRadius: BorderRadius.circular(RadiusTokens.card),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -489,11 +488,10 @@ class _MissingAlbums extends StatelessWidget {
               final a = albums[i];
               return SizedBox(
                 width: 132,
-                child: InkWell(
+                child: Pressable(
                   // Tapping goes to the artist, which is the only place we can
                   // actually say anything more about a record we do not have.
                   onTap: () => onArtistTap(a.artist),
-                  borderRadius: BorderRadius.circular(RadiusTokens.card),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -830,9 +828,8 @@ class _AlbumsRail extends StatelessWidget {
               final r = releases[i];
               return SizedBox(
                 width: 130,
-                child: InkWell(
+                child: Pressable(
                   onTap: () => onAlbumTap(r),
-                  borderRadius: BorderRadius.circular(RadiusTokens.card),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

@@ -242,13 +242,19 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                 _resolved ? 0 : _dragDx.clamp(-24.0, 24.0) * 0.6,
                 0,
               ),
-              child: Artwork(
-                url: track.artSha != null && widget.artUrlFor != null
-                    ? widget.artUrlFor!(track.artSha!)
-                    : null,
-                size: 44,
-                borderRadius: 8,
-                fallback: const _MiniArtPlaceholder(),
+              // The same sleeve the player shows, so opening it is one
+              // object growing rather than two screens swapping. Tagged by
+              // the track, so a change mid-flight cannot pair the wrong two.
+              child: Hero(
+                tag: 'sleeve-${track.sha}',
+                child: Artwork(
+                  url: track.artSha != null && widget.artUrlFor != null
+                      ? widget.artUrlFor!(track.artSha!)
+                      : null,
+                  size: 44,
+                  borderRadius: 8,
+                  fallback: const _MiniArtPlaceholder(),
+                ),
               ),
             ),
             const SizedBox(width: Space.md),

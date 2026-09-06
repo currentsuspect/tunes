@@ -409,10 +409,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Flexible(
-                                      child: _Artwork(
-                                        track: current,
-                                        artUrlFor: widget.artUrlFor,
-                                        playing: widget.player.playing,
+                                      child: Hero(
+                                        tag: 'sleeve-${current.sha}',
+                                        child: _Artwork(
+                                          track: current,
+                                          artUrlFor: widget.artUrlFor,
+                                          playing: widget.player.playing,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: Space.lg),
