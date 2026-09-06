@@ -12,6 +12,7 @@ import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
 import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
+import 'core/data/likes_store.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/play_history.dart';
 import 'core/data/queue_store.dart';
@@ -63,6 +64,10 @@ Future<void> main() async {
   // build. A setting that has to be awaited mid-build is one that flickers.
   final settings = SettingsStore(db);
   await settings.load();
+  // Loaded before the first frame for the same reason as settings: a heart
+  // that has to await its own state flickers on every row of every list.
+  final likes = LikesStore(db);
+  await likes.load();
   final client = TunesClient(_tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
@@ -141,6 +146,7 @@ Future<void> main() async {
       queueStore: queueStore,
       settings: settings,
       history: history,
+      likes: likes,
     ),
   );
 }
@@ -156,6 +162,7 @@ class TunesApp extends StatefulWidget {
     required this.queueStore,
     required this.settings,
     required this.history,
+    required this.likes,
   });
 
   final TunesClient client;
@@ -166,6 +173,7 @@ class TunesApp extends StatefulWidget {
   final QueueStore queueStore;
   final SettingsStore settings;
   final PlayHistory history;
+  final LikesStore likes;
 
   @override
   State<TunesApp> createState() => _TunesAppState();
@@ -197,22 +205,25 @@ class _TunesAppState extends State<TunesApp> {
     final mq = MediaQuery.of(context);
     return SettingsScope(
       settings: widget.settings,
-      child: DownloadScope(
-        manager: _downloads,
-        child: MaterialApp(
-          title: 'tunes',
-          debugShowCheckedModeBanner: false,
-          theme: buildTunesTheme(mq),
-          home: AppShell(
-            client: widget.client,
-            player: widget.player,
-            store: widget.store,
-            reachability: widget.reachability,
-            manifestStore: widget.manifestStore,
-            queueStore: widget.queueStore,
-            settings: widget.settings,
-            history: widget.history,
-            downloads: _downloads,
+      child: LikesScope(
+        likes: widget.likes,
+        child: DownloadScope(
+          manager: _downloads,
+          child: MaterialApp(
+            title: 'tunes',
+            debugShowCheckedModeBanner: false,
+            theme: buildTunesTheme(mq),
+            home: AppShell(
+              client: widget.client,
+              player: widget.player,
+              store: widget.store,
+              reachability: widget.reachability,
+              manifestStore: widget.manifestStore,
+              queueStore: widget.queueStore,
+              settings: widget.settings,
+              history: widget.history,
+              downloads: _downloads,
+            ),
           ),
         ),
       ),

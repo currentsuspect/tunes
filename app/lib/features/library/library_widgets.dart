@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_manager.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/likes_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/theme/tokens.dart'
     show Tones, TypeScale, Space, RadiusTokens;
@@ -120,6 +121,19 @@ class TrackRow extends StatelessWidget {
                     // ("SMUC…", "2SEAT…"); the full quality breakdown already
                     // lives in Now Playing's info panel, where detail belongs.
                     const SizedBox(width: Space.sm),
+                    // A mark, not a control. Every row already carries a
+                    // download button; a second tap target on each one would
+                    // make the list harder to scroll than it is to read.
+                    // Liking happens in the player and the long-press menu.
+                    if (LikesScope.maybeOf(context)?.isLiked(track.sha) ??
+                        false) ...[
+                      const Icon(
+                        Icons.favorite_rounded,
+                        size: 14,
+                        color: Tones.primary,
+                      ),
+                      const SizedBox(width: Space.sm),
+                    ],
                     Text(
                       track.durationLabel,
                       style: TypeScale.caption.copyWith(

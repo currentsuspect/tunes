@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/likes_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
@@ -89,6 +90,7 @@ class _LibraryViewState extends State<LibraryView> {
               ButtonSegment(value: 0, label: Text('Tracks')),
               ButtonSegment(value: 1, label: Text('Albums')),
               ButtonSegment(value: 2, label: Text('Artists')),
+              ButtonSegment(value: 3, label: Text('Liked')),
             ],
             selected: {_segment},
             onSelectionChanged: (s) => setState(() => _segment = s.first),
@@ -104,7 +106,110 @@ class _LibraryViewState extends State<LibraryView> {
     );
   }
 
+  Widget _trackList(List<ManifestTrack> tracks) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.lg,
+        vertical: Space.md,
+      ),
+      itemCount: tracks.length,
+      separatorBuilder: (_, _) => const Divider(),
+      itemBuilder: (context, i) {
+        final t = tracks[i];
+        return TrackRow(
+          player: widget.player,
+          track: t,
+          onTap: () => _play(tracks, i),
+          store: widget.store,
+          downloading: widget.downloading.contains(t.sha),
+          onDownload: () => widget.onDownload(t),
+          offline: widget.offline,
+          artUrlFor: widget.artUrlFor,
+          onPlayNext: _hasActions
+              ? () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final q = await widget.queueStore!.load();
+                  await widget.queueStore!.replace([
+                    t.sha,
+                    ...q.map((e) => e.track.sha),
+                  ]);
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('"${t.title}" will play next')),
+                  );
+                }
+              : null,
+          onAddToQueue: _hasActions
+              ? () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  await widget.queueStore!.append(t.sha);
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('"${t.title}" added to queue')),
+                  );
+                }
+              : null,
+          onEdit: _hasActions
+              ? ({
+                  // Tri-state: a non-null value replaces the edit;
+                  // a null (including empty string) clears the edit so
+                  // the field falls back to embedded-tag or daemon.
+                  String? title,
+                  String? artist,
+                  String? album,
+                  String? year,
+                }) async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final ms = widget.manifestStore!;
+                  await ms.setEdit(t.sha, 'title', title);
+                  await ms.setEdit(t.sha, 'artist', artist);
+                  await ms.setEdit(t.sha, 'album', album);
+                  await ms.setEdit(t.sha, 'year', year);
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Edit saved')),
+                  );
+                }
+              : null,
+        );
+      },
+    );
+  }
+
+  /// The tracks the listener said yes to, most recently liked first.
+  ///
+  /// Deliberately not filtered by the search box: the filter narrows the
+  /// library, and this is a different list that happens to live behind the
+  /// same control. Resolved against the manifest so a like whose track has
+  /// left the library is simply not shown rather than rendered as a blank.
+  Widget _buildLiked() {
+    final likes = LikesScope.maybeOf(context);
+    if (likes == null || likes.count == 0) {
+      return const _Message(
+        icon: Icons.favorite_border_rounded,
+        title: 'Nothing liked yet',
+        body: 'Tap the heart on a track, in the player, or from its menu.',
+      );
+    }
+    final bySha = {for (final t in widget.tracks) t.sha: t};
+    final tracks = [
+      for (final sha in likes.shas)
+        if (bySha[sha] case final ManifestTrack t) t,
+    ];
+    if (tracks.isEmpty) {
+      return const _Message(
+        icon: Icons.favorite_border_rounded,
+        title: 'Liked tracks are not in the library',
+        body: 'Everything you liked has since left the library.',
+      );
+    }
+    return _trackList(tracks);
+  }
+
   Widget _buildBody(List<ManifestTrack> filtered) {
+    // Ahead of the empty check, because "nothing matched the filter" is the
+    // wrong thing to say about a list the filter does not apply to.
+    if (_segment == 3) return _buildLiked();
     if (filtered.isEmpty) {
       return const _Message(
         icon: Icons.music_note_outlined,
@@ -112,75 +217,7 @@ class _LibraryViewState extends State<LibraryView> {
         body: 'The library is empty or nothing matched the filter.',
       );
     }
-    if (_segment == 0) {
-      return ListView.separated(
-        padding: const EdgeInsets.symmetric(
-          horizontal: Space.lg,
-          vertical: Space.md,
-        ),
-        itemCount: filtered.length,
-        separatorBuilder: (_, _) => const Divider(),
-        itemBuilder: (context, i) {
-          final t = filtered[i];
-          return TrackRow(
-            player: widget.player,
-            track: t,
-            onTap: () => _play(filtered, i),
-            store: widget.store,
-            downloading: widget.downloading.contains(t.sha),
-            onDownload: () => widget.onDownload(t),
-            offline: widget.offline,
-            artUrlFor: widget.artUrlFor,
-            onPlayNext: _hasActions
-                ? () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    final q = await widget.queueStore!.load();
-                    await widget.queueStore!.replace([
-                      t.sha,
-                      ...q.map((e) => e.track.sha),
-                    ]);
-                    if (!mounted) return;
-                    messenger.showSnackBar(
-                      SnackBar(content: Text('"${t.title}" will play next')),
-                    );
-                  }
-                : null,
-            onAddToQueue: _hasActions
-                ? () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    await widget.queueStore!.append(t.sha);
-                    if (!mounted) return;
-                    messenger.showSnackBar(
-                      SnackBar(content: Text('"${t.title}" added to queue')),
-                    );
-                  }
-                : null,
-            onEdit: _hasActions
-                ? ({
-                    // Tri-state: a non-null value replaces the edit;
-                    // a null (including empty string) clears the edit so
-                    // the field falls back to embedded-tag or daemon.
-                    String? title,
-                    String? artist,
-                    String? album,
-                    String? year,
-                  }) async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    final ms = widget.manifestStore!;
-                    await ms.setEdit(t.sha, 'title', title);
-                    await ms.setEdit(t.sha, 'artist', artist);
-                    await ms.setEdit(t.sha, 'album', album);
-                    await ms.setEdit(t.sha, 'year', year);
-                    if (!mounted) return;
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Edit saved')),
-                    );
-                  }
-                : null,
-          );
-        },
-      );
-    }
+    if (_segment == 0) return _trackList(filtered);
     if (_segment == 1) {
       final available = filtered.map((t) => t.releaseId).toSet();
       final entries = widget.releases

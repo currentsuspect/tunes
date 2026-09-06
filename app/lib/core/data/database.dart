@@ -20,6 +20,26 @@ class Settings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
+/// Tracks the listener said yes to.
+///
+/// The first signal in the app that comes from a decision rather than from
+/// behaviour. Play history says what happened; this says what was meant, and
+/// the two disagree often enough that neither can stand in for the other --
+/// a track played forty times because it opens an album is not a favourite,
+/// and a favourite played twice is still a favourite.
+class LikedTracks extends Table {
+  TextColumn get sha => text()();
+
+  /// Epoch milliseconds, so the list can be newest first. Liking is the kind
+  /// of thing people do in bursts, and the order they did it in is the only
+  /// order that means anything without a manual sort.
+  IntColumn get likedAt => integer()();
+
+  /// The sha, so liking twice is the same as liking once.
+  @override
+  Set<Column> get primaryKey => {sha};
+}
+
 /// One row per listen, kept as events rather than counters.
 ///
 /// A counter can answer "how many times", and nothing else. The discovery
@@ -168,6 +188,7 @@ class SyncState extends Table {
     QueueEntries,
     Settings,
     PlayEvents,
+    LikedTracks,
   ],
 )
 class TunesDatabase extends _$TunesDatabase {
@@ -179,7 +200,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -233,6 +254,13 @@ class TunesDatabase extends _$TunesDatabase {
         // before, and inventing plays from the library would poison every
         // taste signal built on top of it.
         await m.createTable(playEvents);
+      }
+      if (from < 8) {
+        // v7 -> v8: liked tracks. New table only. An upgrading install starts
+        // with nothing liked, which is the truth: inferring likes from play
+        // counts would put words in the listener's mouth, and the whole point
+        // of this table is that it holds what was actually decided.
+        await m.createTable(likedTracks);
       }
     },
   );

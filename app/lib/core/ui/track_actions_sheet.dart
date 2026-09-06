@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/manifest.dart';
+import '../data/likes_store.dart';
 import '../theme/tokens.dart';
 import 'manual_find_sheet.dart';
 
@@ -66,6 +67,22 @@ class TrackActionsSheet extends StatelessWidget {
           children: [
             _Header(track: track),
             const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            // First, because it is the one action here that says something
+            // about the track rather than about the queue.
+            if (LikesScope.maybeOf(context) case final likes?)
+              _ActionRow(
+                icon: likes.isLiked(track.sha)
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                label: likes.isLiked(track.sha) ? 'Liked' : 'Like',
+                subtitle: likes.isLiked(track.sha)
+                    ? 'Tap to remove from your liked songs'
+                    : 'Keep it in your liked songs',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await likes.toggle(track.sha);
+                },
+              ),
             _ActionRow(
               icon: Icons.play_arrow_rounded,
               label: 'Play next',

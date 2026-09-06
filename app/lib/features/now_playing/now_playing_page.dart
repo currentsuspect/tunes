@@ -6,12 +6,13 @@ import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/like_button.dart';
 import '../../domain/manifest.dart';
-import '../artist/artist_page.dart';
 import '../album/album_page.dart';
+import '../artist/artist_page.dart';
 import '../lyrics/lyrics_sheet.dart';
-import 'now_playing_details.dart';
 import '../queue/queue_sheet.dart';
+import 'now_playing_details.dart';
 
 class NowPlayingPage extends StatelessWidget {
   const NowPlayingPage({
@@ -488,6 +489,12 @@ class NowPlayingPage extends StatelessWidget {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
+                                  // Sits with the transport rather than up by
+                                  // the title: liking is something you do
+                                  // while a track is playing, with the same
+                                  // thumb that just pressed play.
+                                  LikeButton(sha: current.sha, size: 26),
+                                  const SizedBox(width: Space.sm),
                                   IconButton(
                                     onPressed: player.previous,
                                     iconSize: 36,

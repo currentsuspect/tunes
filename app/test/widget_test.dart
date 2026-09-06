@@ -8,6 +8,7 @@ import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
+import 'package:tunes/core/data/likes_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/play_history.dart';
 import 'package:tunes/core/data/queue_store.dart';
@@ -397,6 +398,7 @@ void main() {
   late ManifestStore manifestStore;
   late QueueStore queueStore;
   late SettingsStore settings;
+  late LikesStore likes;
   late PlayHistory history;
 
   setUp(() async {
@@ -408,6 +410,8 @@ void main() {
     queueStore = _TestQueueStore(db);
     settings = SettingsStore(db);
     await settings.load();
+    likes = LikesStore(db);
+    await likes.load();
   });
 
   tearDown(() async {
@@ -434,6 +438,7 @@ void main() {
         queueStore: queueStore,
         settings: settings,
         history: history,
+        likes: likes,
       ),
     );
     await tester.pumpAndSettle();
