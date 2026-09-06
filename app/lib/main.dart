@@ -500,7 +500,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _loadMissing() async {
     try {
-      final albums = await widget.client.missing();
+      // The daemon caps at 200. The home rail only shows a handful, but the
+      // discover screen counts what it was given and says so out loud -- a
+      // default of forty made it report "40 releases by 4 artists" for a
+      // library with fifty-four by six.
+      final albums = await widget.client.missing(limit: 200);
       if (mounted) setState(() => _missingAlbums = albums);
     } catch (_) {
       // An older daemon answers 404 here, and offline answers nothing. Both
