@@ -214,4 +214,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved, ['words']);
   });
+
+  testWidgets('a part-synced lyric still shows the lines that are not timed', (
+    tester,
+  ) async {
+    // The regression: the view rendered lrc.lines only, so timing one line of
+    // a forty-line lyric hid the other thirty-nine. The words were still
+    // stored -- the screen just looked like the save had eaten them.
+    await _pump(
+      tester,
+      lyrics: '[00:12.34]first line\nsecond line\nthird line',
+      onSave: (_) async {},
+    );
+    expect(find.textContaining('first line'), findsOneWidget);
+    expect(find.textContaining('second line'), findsOneWidget);
+    expect(find.textContaining('third line'), findsOneWidget);
+  });
+
+  testWidgets('a part-synced lyric is still reported as synced', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      lyrics: '[00:12.34]first line\nsecond line',
+      onSave: (_) async {},
+    );
+    expect(find.text('Synced'), findsOneWidget);
+  });
 }

@@ -47,6 +47,11 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   SyncMode _mode = SyncMode.lines;
   int _selectedLine = 0;
   bool _saving = false;
+
+  /// Set by any action that places or moves a mark. Timing a line and then
+  /// walking back out used to discard the work with no warning, which reads
+  /// exactly like the save being broken.
+  bool _dirty = false;
   final _scroll = ScrollController();
 
   @override
@@ -86,6 +91,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   Duration get _now => _playhead.value;
 
   void _stamp() {
+    _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
         final i = _draft.nextUntimedLine;
@@ -102,6 +108,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   }
 
   void _undo() {
+    _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
         final next = _draft.nextUntimedLine ?? _draft.lines.length;
@@ -120,6 +127,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   /// Shifts the most recently placed mark. Getting a tap 100 ms late is the
   /// normal failure, and re-timing the whole line to fix one word is not.
   void _nudge(Duration by) {
+    _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
         final next = _draft.nextUntimedLine ?? _draft.lines.length;
@@ -174,7 +182,47 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       return;
     }
     if (!mounted) return;
+    _dirty = false;
     Navigator.of(context).pop();
+  }
+
+  /// Asked when leaving with marks that were never written. Three ways out,
+  /// because discarding by accident is the expensive one: keep editing, throw
+  /// the marks away deliberately, or save and go.
+  Future<bool> _confirmLeave() async {
+    if (!_dirty) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Tones.surfaceRaised,
+        title: const Text('Keep these timings?', style: TypeScale.title),
+        content: Text(
+          'You have timed ${_draft.timedLineCount} '
+          'line${_draft.timedLineCount == 1 ? '' : 's'} that have not been '
+          'saved yet.',
+          style: TypeScale.body,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('stay'),
+            child: const Text('Keep editing'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('discard'),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop('save'),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'save') {
+      await _save();
+      return false;
+    }
+    return choice == 'discard';
   }
 
   @override
@@ -202,86 +250,96 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       );
     }
     final untimed = _draft.lines.length - _draft.timedLineCount;
-    return Scaffold(
-      backgroundColor: Tones.surface,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        // Resolved before the await so no BuildContext is used across the
+        // gap; the dialog can outlive this frame.
+        final navigator = Navigator.of(context);
+        if (await _confirmLeave()) navigator.pop();
+      },
+      child: Scaffold(
         backgroundColor: Tones.surface,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        appBar: AppBar(
+          backgroundColor: Tones.surface,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Sync lyrics', style: TypeScale.title),
+              Text(
+                widget.track.title,
+                style: TypeScale.caption,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          actions: [
+            if (_saving)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: Space.lg),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
+            else
+              TextButton(
+                onPressed: _draft.anyTimed ? _save : null,
+                child: const Text('Save'),
+              ),
+          ],
+        ),
+        body: Column(
           children: [
-            const Text('Sync lyrics', style: TypeScale.title),
-            Text(
-              widget.track.title,
-              style: TypeScale.caption,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            _Transport(player: widget.player, playhead: _playhead),
+            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            _ModeBar(
+              mode: _mode,
+              canWordSync: _draft.lineStarts[_selectedLine] != null,
+              onChanged: (m) => setState(() => _mode = m),
+            ),
+            Expanded(
+              child: _mode == SyncMode.lines
+                  ? _LineList(
+                      draft: _draft,
+                      scroll: _scroll,
+                      cursor: _draft.nextUntimedLine,
+                      onPick: (i) => setState(() => _selectedLine = i),
+                      selected: _selectedLine,
+                    )
+                  : _WordList(
+                      draft: _draft,
+                      lineIndex: _selectedLine,
+                      cursor: _draft.nextUntimedWord(_selectedLine),
+                    ),
+            ),
+            if (untimed > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: Space.xs),
+                child: Text(
+                  '$untimed line${untimed == 1 ? '' : 's'} still untimed — '
+                  'they are kept, just not synced',
+                  style: TypeScale.caption,
+                ),
+              ),
+            _Controls(
+              mode: _mode,
+              done: _mode == SyncMode.lines
+                  ? _draft.nextUntimedLine == null
+                  : _draft.nextUntimedWord(_selectedLine) == null,
+              onStamp: _stamp,
+              onUndo: _undo,
+              onNudge: _nudge,
+              onReplay: _replayLine,
             ),
           ],
         ),
-        actions: [
-          if (_saving)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: Space.lg),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _draft.anyTimed ? _save : null,
-              child: const Text('Save'),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _Transport(player: widget.player, playhead: _playhead),
-          const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
-          _ModeBar(
-            mode: _mode,
-            canWordSync: _draft.lineStarts[_selectedLine] != null,
-            onChanged: (m) => setState(() => _mode = m),
-          ),
-          Expanded(
-            child: _mode == SyncMode.lines
-                ? _LineList(
-                    draft: _draft,
-                    scroll: _scroll,
-                    cursor: _draft.nextUntimedLine,
-                    onPick: (i) => setState(() => _selectedLine = i),
-                    selected: _selectedLine,
-                  )
-                : _WordList(
-                    draft: _draft,
-                    lineIndex: _selectedLine,
-                    cursor: _draft.nextUntimedWord(_selectedLine),
-                  ),
-          ),
-          if (untimed > 0)
-            Padding(
-              padding: const EdgeInsets.only(bottom: Space.xs),
-              child: Text(
-                '$untimed line${untimed == 1 ? '' : 's'} still untimed — '
-                'they are kept, just not synced',
-                style: TypeScale.caption,
-              ),
-            ),
-          _Controls(
-            mode: _mode,
-            done: _mode == SyncMode.lines
-                ? _draft.nextUntimedLine == null
-                : _draft.nextUntimedWord(_selectedLine) == null,
-            onStamp: _stamp,
-            onUndo: _undo,
-            onNudge: _nudge,
-            onReplay: _replayLine,
-          ),
-        ],
       ),
     );
   }

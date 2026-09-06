@@ -426,12 +426,29 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
       );
     }
     final activeIdx = _activeIndex ?? -1;
+    // Timed lines first, then anything still untimed. Rendering only the timed
+    // ones meant that syncing a single line of a forty-line lyric hid the
+    // other thirty-nine: the words were still stored, but the screen looked
+    // like the save had eaten them.
+    final untimedOffset = lrc.lines.length;
     return ListView.separated(
       controller: widget.scrollController,
       padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 64),
-      itemCount: lrc.lines.length,
+      itemCount: untimedOffset + lrc.untimed.length,
       separatorBuilder: (_, _) => const SizedBox(height: Space.md),
       itemBuilder: (context, i) {
+        if (i >= untimedOffset) {
+          // Not timed yet, so there is nothing to seek to and nothing to
+          // highlight. Shown at the same size, dimmed, so it reads as "this
+          // part is not synced" rather than as a different kind of content.
+          return Text(
+            lrc.untimed[i - untimedOffset],
+            style: TypeScale.title.copyWith(
+              color: Tones.text.withValues(alpha: 0.55),
+              height: 1.3,
+            ),
+          );
+        }
         final line = lrc.lines[i];
         final isActive = i == activeIdx;
         final isPast = i < activeIdx;
