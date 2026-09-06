@@ -21,6 +21,7 @@ class SettingsStore extends ChangeNotifier {
   static const _gapless = 'playback.gapless';
   static const _stopOnClose = 'playback.stopOnClose';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
+  static const _animatedArtwork = 'nowPlaying.animatedArtwork';
 
   Future<void> load() async {
     final rows = await _db.select(_db.settings).get();
@@ -83,6 +84,14 @@ class SettingsStore extends ChangeNotifier {
   /// with two tracks playing at once.
   bool get stopOnClose => _bool(_stopOnClose, fallback: true);
   Future<void> setStopOnClose(bool v) => _put(_stopOnClose, '$v');
+
+  /// Whether the sleeve turns slowly while a track plays.
+  ///
+  /// On by default because it is what the player already did, and the whole
+  /// point of putting it here is that it can now be turned off -- it is the
+  /// one piece of motion in the app that runs continuously.
+  bool get animatedArtwork => _bool(_animatedArtwork, fallback: true);
+  Future<void> setAnimatedArtwork(bool v) => _put(_animatedArtwork, '$v');
 
   // --- lyrics --------------------------------------------------------------
 

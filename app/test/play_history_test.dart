@@ -256,6 +256,19 @@ void main() {
     });
   });
 
+  test('clearing forgets every event, not just hides them', () async {
+    // A history the user asked to be rid of that is still on disk is not
+    // cleared, it is hidden.
+    await playThrough('a', 3);
+    expect(await events(), isNotEmpty);
+
+    await history.clear();
+
+    expect(await events(), isEmpty);
+    expect(await history.playCounts(), isEmpty);
+    expect(await history.recentShas(), isEmpty);
+  });
+
   test('recents are distinct and newest first', () async {
     for (final sha in ['x', 'y', 'x']) {
       player.loadTrack(_track(sha, durationMs: 60000));

@@ -106,6 +106,17 @@ class PlayHistory extends ChangeNotifier {
     super.dispose();
   }
 
+  /// Forgets everything recorded.
+  ///
+  /// Deletes the events rather than marking them ignored: a history the user
+  /// asked to be rid of that is still on disk is not cleared, it is hidden.
+  Future<void> clear() async {
+    _sha = null;
+    _listenedMs = 0;
+    await _db.delete(_db.playEvents).go();
+    notifyListeners();
+  }
+
   // --- reading -------------------------------------------------------------
 
   /// Distinct tracks most recently played, newest first.

@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/download_store.dart';
+import '../../core/data/play_history.dart';
+import '../../core/data/storage_usage.dart';
 import '../../core/data/avatar.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
@@ -23,6 +28,10 @@ class SettingsPage extends StatefulWidget {
     required this.channel,
     required this.trackCount,
     required this.downloadCount,
+    required this.store,
+    required this.history,
+    required this.onResync,
+    this.supportDir,
   });
 
   final SettingsStore settings;
@@ -34,6 +43,13 @@ class SettingsPage extends StatefulWidget {
   final String channel;
   final int trackCount;
   final int downloadCount;
+  final DownloadStore store;
+  final PlayHistory history;
+
+  /// Re-fetches the library. Handed in rather than reached for, because the
+  /// shell owns the sync and this screen only asks for one.
+  final VoidCallback onResync;
+  final Directory? supportDir;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -42,11 +58,29 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _name;
   final _avatars = AvatarStore();
+  StorageUsage? _usage;
+
+  /// Seven taps on the build line. Hidden rather than absent: these controls
+  /// are for whoever is debugging the app, and putting them in front of
+  /// everyone else would be clutter that also invites damage.
+  int _versionTaps = 0;
+  bool _developer = false;
 
   @override
   void initState() {
     super.initState();
     _name = TextEditingController(text: widget.settings.displayName);
+    _measure();
+  }
+
+  Future<void> _measure() async {
+    final usage = await StorageUsage.measure(
+      store: widget.store,
+      manifestPath: widget.supportDir == null
+          ? null
+          : '${widget.supportDir!.path}/manifest.json',
+    );
+    if (mounted) setState(() => _usage = usage);
   }
 
   @override
@@ -162,18 +196,163 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
 
+            const _SectionLabel('Now playing'),
+            SwitchListTile(
+              value: s.animatedArtwork,
+              title: const Text('Turning artwork', style: TypeScale.body),
+              subtitle: const Text(
+                'The sleeve rotates slowly while a track plays. The only '
+                'thing in the app that moves continuously.',
+                style: TypeScale.caption,
+              ),
+              onChanged: s.setAnimatedArtwork,
+            ),
+
+            const _SectionLabel('Storage'),
+            _Row(
+              label: 'Downloaded',
+              value: _usage == null
+                  ? '—'
+                  : '${_usage!.downloadCount} '
+                        '${_usage!.downloadCount == 1 ? 'track' : 'tracks'} · '
+                        '${formatBytes(_usage!.downloadBytes)}',
+            ),
+            if (_usage != null && _usage!.missingDownloads > 0)
+              _Row(
+                label: 'Gone missing',
+                value:
+                    '${_usage!.missingDownloads} downloaded '
+                    '${_usage!.missingDownloads == 1 ? 'file' : 'files'} '
+                    'no longer on disk',
+              ),
+            _Row(
+              label: 'Library cache',
+              value: _usage == null ? '—' : formatBytes(_usage!.manifestBytes),
+            ),
+            _Row(
+              label: 'Artwork in memory',
+              value: _usage == null
+                  ? '—'
+                  : '${_usage!.imageCount} images · '
+                        '${formatBytes(_usage!.imageBytes)}',
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, 0),
+              child: Text(
+                'There is no artwork cache on disk to clear. Covers are '
+                'fetched as they are shown and kept as decoded images in '
+                'memory, which the system reclaims on its own.',
+                style: TypeScale.caption,
+              ),
+            ),
+            _Action(
+              label: 'Free artwork memory',
+              detail:
+                  'Drops decoded covers. They are fetched again as you '
+                  'scroll, so this is worth doing only if the app feels heavy.',
+              onTap: () async {
+                PaintingBinding.instance.imageCache.clear();
+                PaintingBinding.instance.imageCache.clearLiveImages();
+                await _measure();
+              },
+            ),
+
+            const _SectionLabel('Data'),
+            _Action(
+              label: 'Clear listening history',
+              detail:
+                  'Removes every play and skip this app recorded. '
+                  'Recently played, On repeat and Listen again go empty, and '
+                  'Discover falls back to ranking by what you own. Your '
+                  'music is not touched.',
+              destructive: true,
+              onTap: () => _confirm(
+                title: 'Clear listening history?',
+                body:
+                    'Everything the app learned about what you listen to '
+                    'is discarded. It starts learning again from your next '
+                    'play. No files are removed.',
+                action: 'Clear',
+                run: widget.history.clear,
+              ),
+            ),
+            _Action(
+              label: 'Refetch the library',
+              detail:
+                  'Asks the daemon for the whole library again, rather '
+                  'than the changes since last time. Nothing local is lost.',
+              onTap: () async {
+                widget.onResync();
+                Navigator.of(context).maybePop();
+              },
+            ),
+
             const _SectionLabel('Library'),
             _Row(label: 'Daemon', value: widget.offline ? 'offline' : 'online'),
             _Row(label: 'Endpoint', value: widget.endpoint),
             _Row(label: 'Tracks', value: '${widget.trackCount}'),
             _Row(label: 'Downloaded', value: '${widget.downloadCount}'),
-            _Row(
-              label: 'Build',
-              value:
-                  '${widget.channel} · '
-                  '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit} · '
-                  '${widget.buildNumber}',
+
+            const _SectionLabel('About'),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('tunes', style: TypeScale.heading),
+                  SizedBox(height: 2),
+                  Text('A music player for our music.', style: TypeScale.body),
+                ],
+              ),
             ),
+            InkWell(
+              // Seven taps, the old way in. Nothing here is dangerous enough
+              // to hide behind a password and nothing is useful enough to
+              // put in front of everyone.
+              onTap: () {
+                _versionTaps += 1;
+                if (_versionTaps >= 7 && !_developer) {
+                  setState(() => _developer = true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Developer section shown')),
+                  );
+                }
+              },
+              child: _Row(
+                label: 'Version',
+                value:
+                    '${widget.channel} · '
+                    '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit} · '
+                    'build ${widget.buildNumber}',
+              ),
+            ),
+            const _Row(label: 'Made by', value: 'Aestra Studios'),
+
+            if (_developer) ...[
+              const _SectionLabel('Developer'),
+              _Row(label: 'Endpoint', value: widget.endpoint),
+              _Row(
+                label: 'Support dir',
+                value: widget.supportDir?.path ?? 'unknown',
+              ),
+              _Row(label: 'Commit', value: widget.commit),
+              _Row(
+                label: 'Image cache',
+                value: _usage == null
+                    ? '—'
+                    : '${_usage!.imageCount} live · '
+                          '${formatBytes(_usage!.imageBytes)}',
+              ),
+              _Row(
+                label: 'Log file',
+                value: _usage == null ? '—' : formatBytes(_usage!.logBytes),
+              ),
+              _Action(
+                label: 'Re-measure storage',
+                detail: 'Walks the download index again.',
+                onTap: _measure,
+              ),
+            ],
           ],
         ),
       ),
@@ -230,6 +409,39 @@ class _SettingsPageState extends State<SettingsPage> {
         SnackBar(content: Text('Could not open the photo picker: $e')),
       );
     }
+  }
+
+  /// Every destructive action explains itself before it happens, and says
+  /// plainly what is not affected. "Clear" with no sentence under it is how
+  /// people lose things they meant to keep.
+  Future<void> _confirm({
+    required String title,
+    required String body,
+    required String action,
+    required Future<void> Function() run,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Tones.surfaceRaised,
+        title: Text(title, style: TypeScale.title),
+        content: Text(body, style: TypeScale.body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await run();
+    messenger.showSnackBar(SnackBar(content: Text(title.replaceAll('?', ''))));
   }
 
   Future<void> _nudgeOffset(int ms) async {
@@ -337,6 +549,48 @@ class _Row extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A settings row that does something, with the sentence that says what.
+class _Action extends StatelessWidget {
+  const _Action({
+    required this.label,
+    required this.detail,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  final String label;
+  final String detail;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TypeScale.body.copyWith(
+                color: destructive ? Tones.primary : Tones.text,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(detail, style: TypeScale.caption),
+          ],
+        ),
       ),
     );
   }

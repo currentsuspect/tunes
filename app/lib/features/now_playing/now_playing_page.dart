@@ -4,6 +4,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
+import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -604,8 +605,12 @@ class _Artwork extends StatelessWidget {
             size: side,
           ),
         );
-        // Subtle "alive" motion: slow rotation while playing, snap-back
-        // on pause. Cheap, gives the screen presence.
+        // Subtle "alive" motion: slow rotation while playing, snap-back on
+        // pause. It is the only thing in the app that moves continuously, so
+        // it is also the only animation with a switch of its own.
+        if (!(SettingsScope.maybeOf(context)?.animatedArtwork ?? true)) {
+          return art;
+        }
         return AnimatedRotation(
           turns: playing ? 1 : 0,
           duration: const Duration(seconds: 30),

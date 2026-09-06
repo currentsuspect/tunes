@@ -1084,16 +1084,27 @@ void main() {
     expect(find.text('Stop when the app closes'), findsOneWidget);
     expect(find.text('Display name'), findsOneWidget);
 
-    // Scrolled to rather than assumed on screen: the list is longer than the
+    // The developer section is hidden until asked for.
+    expect(find.text('Developer'), findsNothing);
+
+    // Scrolled rather than assumed on screen: the list is longer than the
     // viewport, and a lazy sliver never builds what it has not reached.
-    for (final label in ['Tap offset', 'Daemon', 'http://fake:4780']) {
-      await tester.scrollUntilVisible(
-        find.text(label),
-        200,
-        scrollable: find.byType(Scrollable).last,
-      );
-      expect(find.text(label), findsOneWidget);
+    //
+    // Dragged from a fixed point rather than from a widget: any widget used
+    // as the drag handle is itself scrolled away by the first drag and then
+    // unmounted, so the finder that named it stops resolving.
+    Future<void> reveal(String label) async {
+      for (var i = 0; i < 15 && find.text(label).evaluate().isEmpty; i++) {
+        await tester.dragFrom(const Offset(400, 400), const Offset(0, -160));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text(label), findsOneWidget, reason: 'never reached $label');
     }
+
+    await reveal('Tap offset');
+    await reveal('Made by');
+    await reveal('Daemon');
+    await reveal('http://fake:4780');
   });
 
   testWidgets('mini bar is minimal: art, title, play only', (tester) async {

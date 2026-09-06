@@ -600,6 +600,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           channel: _channel,
           trackCount: trackCount,
           downloadCount: widget.store.shas.length,
+          store: widget.store,
+          history: widget.history,
+          supportDir: widget.store.dir,
+          onResync: _reload,
         ),
       ),
     );
