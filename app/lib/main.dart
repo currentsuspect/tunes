@@ -83,6 +83,15 @@ Future<void> main() async {
           androidNotificationChannelName: 'Tunes playback',
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: true,
+          // The notification carried all four transport controls and a
+          // MediaStyle template, and the device drew none of them. Both of
+          // these were at their defaults, and audio_service documents that
+          // some devices will not render the controls or the seek bar unless
+          // the small icon is a monochrome white silhouette and the colour is
+          // opaque -- the default icon is the full-colour launcher mipmap and
+          // the default colour is fully transparent.
+          androidNotificationIcon: 'drawable/ic_stat_music',
+          notificationColor: Tones.primary,
         ),
       );
       AudioService.asyncError.listen((e) => DiagLog.log('async error: $e'));
@@ -108,7 +117,7 @@ Future<void> main() async {
   );
 }
 
-class TunesApp extends StatelessWidget {
+class TunesApp extends StatefulWidget {
   const TunesApp({
     super.key,
     required this.client,
@@ -127,19 +136,48 @@ class TunesApp extends StatelessWidget {
   final QueueStore queueStore;
 
   @override
+  State<TunesApp> createState() => _TunesAppState();
+}
+
+class _TunesAppState extends State<TunesApp> {
+  // Owned here, above MaterialApp, because DownloadScope has to sit above the
+  // Navigator. It used to be created inside AppShell, which is MaterialApp's
+  // `home` -- so every pushed route (album, artist) was a sibling of the
+  // scope rather than a descendant, DownloadScope.maybeOf returned null
+  // there, and tapping download on an album page showed nothing at all until
+  // the route was rebuilt by leaving and coming back.
+  late final DownloadManager _downloads;
+
+  @override
+  void initState() {
+    super.initState();
+    _downloads = DownloadManager(client: widget.client, store: widget.store);
+  }
+
+  @override
+  void dispose() {
+    _downloads.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    return MaterialApp(
-      title: 'tunes',
-      debugShowCheckedModeBanner: false,
-      theme: buildTunesTheme(mq),
-      home: AppShell(
-        client: client,
-        player: player,
-        store: store,
-        reachability: reachability,
-        manifestStore: manifestStore,
-        queueStore: queueStore,
+    return DownloadScope(
+      manager: _downloads,
+      child: MaterialApp(
+        title: 'tunes',
+        debugShowCheckedModeBanner: false,
+        theme: buildTunesTheme(mq),
+        home: AppShell(
+          client: widget.client,
+          player: widget.player,
+          store: widget.store,
+          reachability: widget.reachability,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
+          downloads: _downloads,
+        ),
       ),
     );
   }
@@ -154,6 +192,7 @@ class AppShell extends StatefulWidget {
     required this.reachability,
     required this.manifestStore,
     required this.queueStore,
+    required this.downloads,
   });
 
   final TunesClient client;
@@ -162,6 +201,10 @@ class AppShell extends StatefulWidget {
   final Reachability reachability;
   final ManifestStore manifestStore;
   final QueueStore queueStore;
+
+  /// Owned by [TunesApp], which publishes it above the Navigator so pushed
+  /// routes can reach it too.
+  final DownloadManager downloads;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -174,7 +217,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
   final Set<String> _downloading = {};
-  late final DownloadManager _downloads;
+  DownloadManager get _downloads => widget.downloads;
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
   // Fetched, not derived: deciding what is missing entirely needs the artist
@@ -188,7 +231,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _downloads = DownloadManager(client: widget.client, store: widget.store);
     // The screens below still take a Set<String> of in-flight shas; keep it in
     // step with the manager rather than re-plumbing six widgets.
     _downloads.addListener(_onDownloadsChanged);
@@ -205,8 +247,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
+    // Only the listener: the manager itself belongs to TunesApp, which
+    // outlives this shell.
     _downloads.removeListener(_onDownloadsChanged);
-    _downloads.dispose();
     super.dispose();
   }
 
@@ -477,9 +520,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Exposed here so any row can reach the queue without threading the
-    // manager through six screens.
-    return DownloadScope(manager: _downloads, child: _buildShell(context));
+    // The scope lives in TunesApp, above the Navigator. Re-publishing it here
+    // would cover this shell only, which is the bug that was.
+    return _buildShell(context);
   }
 
   Widget _buildShell(BuildContext context) {

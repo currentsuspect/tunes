@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
+import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/queue_store.dart';
@@ -1566,5 +1567,51 @@ void main() {
     // The one without a cover falls back to the generated tile, labelled by
     // the album so a rail of one act does not repeat the same initial.
     expect(find.text('R'), findsOneWidget);
+  });
+  testWidgets('a pushed album page can reach the download scope', (
+    tester,
+  ) async {
+    // The regression: DownloadScope was created inside AppShell, which is
+    // MaterialApp's `home`, while album and artist pages are pushed onto the
+    // root Navigator -- an ancestor of `home`. So maybeOf returned null on
+    // those routes, the row never rebuilt on progress, and tapping download
+    // did nothing visible until you left and came back.
+    final tracks = [
+      _track(
+        'XSCAPE',
+        'flac',
+        950000,
+        artist: 'Don Toliver',
+        album: 'Life of a DON',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'Life of a DON',
+          artist: 'Don Toliver',
+          year: '2021',
+          artSha: null,
+          type: 'album',
+          totalTracks: 1,
+          trackShas: ['a' * 64],
+        ),
+      ],
+    );
+    await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
+    await tester.tap(find.text('Life of a DON').first);
+    await tester.pumpAndSettle();
+
+    final context = tester.element(find.byType(AlbumPage));
+    final DownloadManager? seen = DownloadScope.maybeOf(context);
+    expect(
+      seen,
+      isNotNull,
+      reason: 'a pushed route must still be inside DownloadScope',
+    );
   });
 }
