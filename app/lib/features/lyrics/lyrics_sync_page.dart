@@ -146,6 +146,14 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 
   Duration _clampDuration(Duration d) => d.isNegative ? Duration.zero : d;
 
+  /// Moves every mark at once. Tapping along runs consistently late -- you
+  /// hear the line, then you press -- so the whole take is usually a beat
+  /// behind rather than any single mark being wrong.
+  void _shiftAll(Duration by) {
+    _dirty = true;
+    setState(() => _draft.shiftAll(by));
+  }
+
   /// Replays from just before the selected line, which is how you check a
   /// timing rather than guessing at it.
   void _replayLine() {
@@ -249,7 +257,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         ),
       );
     }
-    final untimed = _draft.lines.length - _draft.timedLineCount;
+    final untimed = _draft.untimedLineCount;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -336,6 +344,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
               onStamp: _stamp,
               onUndo: _undo,
               onNudge: _nudge,
+              onShiftAll: _shiftAll,
               onReplay: _replayLine,
             ),
           ],
@@ -482,6 +491,24 @@ class _LineList extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: Space.lg),
       itemCount: draft.lines.length,
       itemBuilder: (context, i) {
+        // Headers are never tapped, so they show no timestamp slot at all.
+        // Leaving an empty one made them look like work still to do, which is
+        // how they ended up being timed in the first place.
+        if (draft.isHeaderAt(i)) {
+          return Container(
+            height: 44,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.only(left: Space.sm),
+            child: Text(
+              draft.lines[i],
+              style: TypeScale.caption.copyWith(
+                color: Tones.textMuted,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+          );
+        }
         final isCursor = i == cursor;
         final isSelected = i == selected;
         return InkWell(
@@ -598,6 +625,7 @@ class _Controls extends StatelessWidget {
     required this.onStamp,
     required this.onUndo,
     required this.onNudge,
+    required this.onShiftAll,
     required this.onReplay,
   });
 
@@ -606,6 +634,7 @@ class _Controls extends StatelessWidget {
   final VoidCallback onStamp;
   final VoidCallback onUndo;
   final ValueChanged<Duration> onNudge;
+  final ValueChanged<Duration> onShiftAll;
   final VoidCallback onReplay;
 
   @override
@@ -621,6 +650,24 @@ class _Controls extends StatelessWidget {
         ),
         child: Column(
           children: [
+            // Everything, not just the last mark. Fixing forty lines one at a
+            // time is not a workflow.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('Shift all', style: TypeScale.caption),
+                TextButton(
+                  onPressed: () =>
+                      onShiftAll(const Duration(milliseconds: -100)),
+                  child: const Text('earlier'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      onShiftAll(const Duration(milliseconds: 100)),
+                  child: const Text('later'),
+                ),
+              ],
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [

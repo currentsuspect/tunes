@@ -94,4 +94,97 @@ void main() {
       expect(d.toLrc(), '[00:05.00]real line');
     });
   });
+
+  group('section headers', () {
+    test('recognises headers without swallowing sung parentheticals', () {
+      for (final h in [
+        '[Verse]',
+        '[Chorus 2]',
+        '[Pre-Chorus]',
+        '(Bridge)',
+        '  [Outro] ',
+        '(Hook)',
+      ]) {
+        expect(SyncDraft.isSectionHeader(h), isTrue, reason: h);
+      }
+      // These get sung, so timing must still ask for them.
+      for (final l in ['(yeah yeah)', '(ooh)', 'I remember the night']) {
+        expect(SyncDraft.isSectionHeader(l), isFalse, reason: l);
+      }
+    });
+
+    test('the cursor never lands on a header', () {
+      // The regression: [Verse] took the tap meant for the first sung line,
+      // so every timestamp sat one line too high and playback showed the
+      // previous line throughout.
+      final d = SyncDraft([
+        '[Verse]',
+        'first sung line',
+        'second sung line',
+        '[Chorus]',
+        'third',
+      ]);
+      expect(d.nextUntimedLine, 1);
+      d.lineStarts[1] = at(3);
+      expect(d.nextUntimedLine, 2);
+      d.lineStarts[2] = at(6);
+      expect(d.nextUntimedLine, 4, reason: 'must skip [Chorus]');
+      d.lineStarts[4] = at(9);
+      expect(d.nextUntimedLine, isNull);
+    });
+
+    test('does not count headers as outstanding work', () {
+      final d = SyncDraft(['[Verse]', 'only line']);
+      expect(d.untimedLineCount, 1);
+      d.lineStarts[1] = at(3);
+      expect(d.untimedLineCount, 0);
+    });
+
+    test('a header keeps its place, sharing the start of its verse', () {
+      final d = SyncDraft(['[Verse]', 'first sung line', '[Chorus]', 'third']);
+      d.lineStarts[1] = at(3);
+      d.lineStarts[3] = at(9);
+      expect(
+        d.toLrc(),
+        '[00:03.00][Verse]\n'
+        '[00:03.00]first sung line\n'
+        '[00:09.00][Chorus]\n'
+        '[00:09.00]third',
+      );
+    });
+
+    test('a trailing header with nothing after it is kept as plain text', () {
+      final d = SyncDraft(['line', '[Outro]']);
+      d.lineStarts[0] = at(3);
+      expect(d.toLrc(), contains('[Outro]'));
+      expect(d.toLrc(), contains('[00:03.00]line'));
+    });
+  });
+
+  group('shiftAll', () {
+    test('moves every line and word together', () {
+      final d = SyncDraft(['a', 'b']);
+      d.lineStarts[0] = at(3);
+      d.lineStarts[1] = at(6);
+      d.wordStarts[0][0] = at(3);
+      d.shiftAll(const Duration(milliseconds: -400));
+      expect(d.lineStarts[0], const Duration(milliseconds: 2600));
+      expect(d.lineStarts[1], const Duration(milliseconds: 5600));
+      expect(d.wordStarts[0][0], const Duration(milliseconds: 2600));
+    });
+
+    test('clamps at zero rather than going negative', () {
+      final d = SyncDraft(['a']);
+      d.lineStarts[0] = at(1);
+      d.shiftAll(const Duration(seconds: -60));
+      expect(d.lineStarts[0], Duration.zero);
+    });
+
+    test('leaves untimed lines untimed', () {
+      final d = SyncDraft(['a', 'b']);
+      d.lineStarts[0] = at(3);
+      d.shiftAll(const Duration(milliseconds: 100));
+      expect(d.lineStarts[1], isNull);
+    });
+  });
 }

@@ -29,11 +29,39 @@ class SyncDraft {
   static List<String> _wordsOf(String line) =>
       line.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
 
+  /// Section headers: `[Verse]`, `[Chorus 2]`, `(Bridge)` and friends.
+  ///
+  /// These are annotations, not words anybody sings, and timing them shifts
+  /// the whole lyric by one line: the tap meant for the first sung line lands
+  /// on the header, the next tap lands on the first line, and from then on
+  /// every line displays the one before it.
+  ///
+  /// Square brackets always count -- LRC already reserves them for tags, so a
+  /// whole line inside them is never lyric. Parentheses only count when the
+  /// content names a section, because a parenthesised line is usually a
+  /// backing vocal and very much sung.
+  static final RegExp _squareHeader = RegExp(r'^\s*\[[^\]]*\]\s*$');
+  static final RegExp _roundHeader = RegExp(
+    r'^\s*\(\s*(pre[- ]?chorus|post[- ]?chorus|chorus|verse|hook|bridge|'
+    r'intro|outro|refrain|interlude|break|drop|solo|coda|instrumental)'
+    r'[^)]*\)\s*$',
+    caseSensitive: false,
+  );
+
+  static bool isSectionHeader(String line) =>
+      _squareHeader.hasMatch(line) || _roundHeader.hasMatch(line);
+
+  bool isHeaderAt(int index) => isSectionHeader(lines[index]);
+
   List<String> wordsOf(int lineIndex) => _wordsOf(lines[lineIndex]);
 
-  /// The first line with no timestamp, or null when every line is timed.
+  /// The first line still needing a mark, or null when the timing is done.
+  ///
+  /// Skips section headers: they are never tapped, so leaving them in the
+  /// cursor's path is what put every timestamp one line too high.
   int? get nextUntimedLine {
     for (var i = 0; i < lineStarts.length; i++) {
+      if (isHeaderAt(i)) continue;
       if (lineStarts[i] == null) return i;
     }
     return null;
@@ -49,6 +77,42 @@ class SyncDraft {
 
   int get timedLineCount => lineStarts.where((d) => d != null).length;
 
+  /// Lines that still need a mark, headers excluded -- otherwise the editor
+  /// reports work outstanding that it will never ask anyone to do.
+  int get untimedLineCount {
+    var n = 0;
+    for (var i = 0; i < lines.length; i++) {
+      if (!isHeaderAt(i) && lineStarts[i] == null) n++;
+    }
+    return n;
+  }
+
+  /// Moves every mark by [by], for when the whole take is consistently late.
+  /// Nudging one mark at a time is fine for a slip; it is not a way to fix
+  /// forty lines recorded a beat behind.
+  void shiftAll(Duration by) {
+    for (var i = 0; i < lineStarts.length; i++) {
+      final t = lineStarts[i];
+      if (t != null) lineStarts[i] = _atLeastZero(t + by);
+      for (var w = 0; w < wordStarts[i].length; w++) {
+        final v = wordStarts[i][w];
+        if (v != null) wordStarts[i][w] = _atLeastZero(v + by);
+      }
+    }
+  }
+
+  static Duration _atLeastZero(Duration d) => d.isNegative ? Duration.zero : d;
+
+  /// The mark on the first timed, non-header line after [from].
+  Duration? _startOfNextTimed(int from) {
+    for (var i = from + 1; i < lines.length; i++) {
+      if (isHeaderAt(i)) continue;
+      final t = lineStarts[i];
+      if (t != null) return t;
+    }
+    return null;
+  }
+
   bool get anyTimed => timedLineCount > 0;
 
   /// Serialise to Enhanced LRC.
@@ -60,7 +124,11 @@ class SyncDraft {
     final timed = <LrcLine>[];
     final leftover = <String>[];
     for (var i = 0; i < lines.length; i++) {
-      final start = lineStarts[i];
+      // A header is never tapped, so it borrows the start of the verse it
+      // introduces. That keeps it in place on screen, and because the line
+      // after it shares the timestamp the highlight passes straight through
+      // rather than resting on a word nobody sings.
+      final start = isHeaderAt(i) ? _startOfNextTimed(i) : lineStarts[i];
       if (start == null) {
         if (lines[i].trim().isNotEmpty) leftover.add(lines[i].trim());
         continue;
