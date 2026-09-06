@@ -146,6 +146,7 @@ class _FakeClient implements TunesClient {
     String sha,
     String path, {
     void Function(int received, int total)? onProgress,
+    CancelSignal? cancel,
   }) async {
     File(path).parent.createSync(recursive: true);
     File(path).writeAsBytesSync(List.filled(100, 1));
@@ -488,7 +489,7 @@ void main() {
     );
   });
 
-  testWidgets('library tab lists tracks with quality badges', (tester) async {
+  testWidgets('library tab lists tracks, title first', (tester) async {
     await pumpApp(
       tester,
       _FakeClient(() async => _manifestOf(_library())),
@@ -497,10 +498,14 @@ void main() {
     await goToLibrary(tester);
 
     expect(find.text('Bassline'), findsOneWidget);
-    expect(find.text('FLAC 950k'), findsOneWidget);
-    expect(find.text('MP3 320k'), findsOneWidget);
     expect(find.text('Tracks'), findsWidgets);
     expect(find.text('Albums'), findsWidgets);
+
+    // The quality badge used to sit in every row and squeezed titles down to
+    // about six characters. It now lives in Now Playing's info panel, so the
+    // row must NOT carry it.
+    expect(find.text('FLAC 950k'), findsNothing);
+    expect(find.text('MP3 320k'), findsNothing);
   });
 
   testWidgets('tapping a library row starts playback on that track', (

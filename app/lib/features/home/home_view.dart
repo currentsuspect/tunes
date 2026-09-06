@@ -58,7 +58,11 @@ class HomeView extends StatelessWidget {
       }
     }
     final artistList = artists.entries.toList()
-      ..sort((a, b) => b.value.length.compareTo(a.value.length));
+      ..sort((a, b) {
+        final byCount = b.value.length.compareTo(a.value.length);
+        if (byCount != 0) return byCount;
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
     final releases = manifest.releases;
 
     final now = DateTime.now();

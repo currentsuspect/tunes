@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
+import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/queue_store.dart';
@@ -172,6 +173,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
   final Set<String> _downloading = {};
+  late final DownloadManager _downloads;
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
 
@@ -181,6 +183,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _downloads = DownloadManager(client: widget.client, store: widget.store);
+    // The screens below still take a Set<String> of in-flight shas; keep it in
+    // step with the manager rather than re-plumbing six widgets.
+    _downloads.addListener(_onDownloadsChanged);
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
     widget.player.addListener(_trackRecents);
@@ -194,6 +200,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
+    _downloads.removeListener(_onDownloadsChanged);
+    _downloads.dispose();
     super.dispose();
   }
 
@@ -313,23 +321,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _sync();
   }
 
-  Future<void> _download(ManifestTrack track) async {
-    if (_downloading.contains(track.sha)) return;
-    setState(() => _downloading.add(track.sha));
-    try {
-      await widget.client.downloadTrack(
-        track.sha,
-        widget.store.newPathFor(track.sha),
-      );
-      await widget.store.add(track.sha, widget.store.newPathFor(track.sha));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('download failed: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _downloading.remove(track.sha));
+  void _onDownloadsChanged() {
+    if (!mounted) return;
+    final active = _downloads.jobs.entries
+        .where((e) => e.value.phase != DownloadPhase.failed)
+        .map((e) => e.key)
+        .toSet();
+    // Progress fires per chunk — roughly 300 times for a 20 MB track. Only the
+    // membership of this set matters to the screens below, so rebuild the shell
+    // when a download starts or stops, never on every chunk. The rows that show
+    // progress rebuild through DownloadScope instead.
+    if (active.length == _downloading.length &&
+        active.every(_downloading.contains)) {
+      return;
     }
+    setState(() {
+      _downloading
+        ..clear()
+        ..addAll(active);
+    });
+  }
+
+  /// Hands the track to the queue. The transfer used to run inline here with
+  /// no progress callback and no way to stop it.
+  Future<void> _download(ManifestTrack track) async {
+    _downloads.enqueue(track.sha);
   }
 
   String _artUrlFor(String sha) => '${widget.client.baseUrl}/art/$sha';
@@ -441,6 +457,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Exposed here so any row can reach the queue without threading the
+    // manager through six screens.
+    return DownloadScope(manager: _downloads, child: _buildShell(context));
+  }
+
+  Widget _buildShell(BuildContext context) {
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(

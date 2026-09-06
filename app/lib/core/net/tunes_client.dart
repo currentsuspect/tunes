@@ -15,6 +15,23 @@ class ChangesResponse {
   final List<String> addedShas;
 }
 
+/// Raised when a download is cancelled by the user. Distinct from a failure:
+/// nothing went wrong, so it must not be reported as an error.
+class DownloadCancelled implements Exception {
+  const DownloadCancelled();
+  @override
+  String toString() => 'DownloadCancelled';
+}
+
+/// Cooperative cancellation for an in-flight download. Checked between chunks,
+/// so a cancel takes effect within one chunk rather than at the end of a 20 MB
+/// file.
+class CancelSignal {
+  bool _cancelled = false;
+  void cancel() => _cancelled = true;
+  bool get isCancelled => _cancelled;
+}
+
 class TunesFetchException implements Exception {
   TunesFetchException(this.message);
 
@@ -95,6 +112,7 @@ class TunesClient {
     String sha,
     String path, {
     void Function(int received, int total)? onProgress,
+    CancelSignal? cancel,
   }) async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
@@ -110,6 +128,9 @@ class TunesClient {
       var received = 0;
       try {
         await for (final chunk in res) {
+          if (cancel != null && cancel.isCancelled) {
+            throw const DownloadCancelled();
+          }
           sink.add(chunk);
           received += chunk.length;
           onProgress?.call(received, total);
@@ -118,11 +139,24 @@ class TunesClient {
       } finally {
         await sink.close();
       }
+    } on DownloadCancelled {
+      await _discardPartial(path);
+      rethrow;
     } on SocketException catch (e) {
+      await _discardPartial(path);
       throw TunesFetchException('download failed: ${e.message}');
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// A half-written file is worse than no file: it would be indexed as a
+  /// download and play as a truncated track.
+  Future<void> _discardPartial(String path) async {
+    try {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   Future<SearchResults> search(String q) async {

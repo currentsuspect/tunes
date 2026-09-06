@@ -134,11 +134,12 @@ class _SearchViewState extends State<SearchView> {
         ),
         Expanded(
           child: q.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Search your library — results appear as you type.',
-                    style: TypeScale.body,
-                  ),
+              ? _BrowseWhenEmpty(
+                  tracks: widget.tracks,
+                  releases: widget.releases,
+                  artUrlFor: widget.artUrlFor,
+                  onArtistTap: widget.onArtistTap,
+                  onAlbumTap: widget.onAlbumTap,
                 )
               : results.isEmpty && !fromServer
               ? const Center(
@@ -433,6 +434,184 @@ class _SearchViewState extends State<SearchView> {
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// What Search shows before you type.
+///
+/// It used to be one line of grey text in the middle of an otherwise empty
+/// screen. The library is already on the device, so there is no reason not to
+/// offer a way into it.
+class _BrowseWhenEmpty extends StatelessWidget {
+  const _BrowseWhenEmpty({
+    required this.tracks,
+    required this.releases,
+    required this.artUrlFor,
+    this.onArtistTap,
+    this.onAlbumTap,
+  });
+
+  final List<ManifestTrack> tracks;
+  final List<ManifestRelease> releases;
+  final String Function(String sha) artUrlFor;
+  final void Function(String artist)? onArtistTap;
+  final void Function(ManifestRelease)? onAlbumTap;
+
+  @override
+  Widget build(BuildContext context) {
+    // Weight by how much of the library each act actually accounts for, and
+    // borrow a cover from one of their tracks so the row is not a wall of
+    // initials.
+    final counts = <String, int>{};
+    final artFor = <String, String>{};
+    for (final t in tracks) {
+      final name = t.artistKey;
+      if (name.isEmpty || name == 'unknown artist') continue;
+      counts[name] = (counts[name] ?? 0) + 1;
+      final art = t.artSha;
+      if (art != null && !artFor.containsKey(name)) artFor[name] = art;
+    }
+    final top = counts.keys.toList()
+      ..sort((a, b) {
+        final byCount = counts[b]!.compareTo(counts[a]!);
+        if (byCount != 0) return byCount;
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      });
+    final artists = top.take(12).toList();
+    final albums = releases.take(12).toList();
+
+    if (artists.isEmpty && albums.isEmpty) {
+      return const Center(
+        child: Text(
+          'Search your library — results appear as you type.',
+          style: TypeScale.body,
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(top: Space.md, bottom: Space.lg),
+      children: [
+        if (artists.isNotEmpty) ...[
+          const _BrowseHeader('Your artists'),
+          SizedBox(
+            height: 132,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              itemCount: artists.length,
+              separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+              itemBuilder: (context, i) {
+                final name = artists[i];
+                final art = artFor[name];
+                return SizedBox(
+                  width: 84,
+                  child: InkWell(
+                    onTap: onArtistTap == null
+                        ? null
+                        : () => onArtistTap!(name),
+                    borderRadius: BorderRadius.circular(42),
+                    child: Column(
+                      children: [
+                        ClipOval(
+                          child: SizedBox(
+                            width: 72,
+                            height: 72,
+                            child: art == null
+                                ? InitialsAvatar(name: name, size: 72)
+                                : Image.network(
+                                    artUrlFor(art),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) =>
+                                        InitialsAvatar(name: name, size: 72),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: Space.sm),
+                        Text(
+                          name,
+                          style: TypeScale.caption,
+                          maxLines: 2,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        if (albums.isNotEmpty) ...[
+          const SizedBox(height: Space.lg),
+          const _BrowseHeader('Albums'),
+          SizedBox(
+            height: 172,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              itemCount: albums.length,
+              separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+              itemBuilder: (context, i) {
+                final r = albums[i];
+                final art = r.artSha;
+                return SizedBox(
+                  width: 124,
+                  child: InkWell(
+                    onTap: onAlbumTap == null ? null : () => onAlbumTap!(r),
+                    borderRadius: BorderRadius.circular(RadiusTokens.control),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(
+                            RadiusTokens.control,
+                          ),
+                          child: SizedBox(
+                            width: 124,
+                            height: 124,
+                            child: art == null
+                                ? Container(color: Tones.surfaceRaised)
+                                : Image.network(
+                                    artUrlFor(art),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) =>
+                                        Container(color: Tones.surfaceRaised),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: Space.sm),
+                        Text(
+                          r.title,
+                          style: TypeScale.caption,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _BrowseHeader extends StatelessWidget {
+  const _BrowseHeader(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+      child: Text(label, style: TypeScale.title),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/download_manager.dart';
 import '../../core/data/download_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/theme/tokens.dart'
@@ -95,6 +96,7 @@ class TrackRow extends StatelessWidget {
                     const SizedBox(width: Space.md),
                     Expanded(
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -113,46 +115,24 @@ class TrackRow extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: Space.md),
-                    QualityBadge(label: track.qualityLabel),
-                    const SizedBox(width: Space.md),
+                    // The title is the thing you read. A fixed-width quality
+                    // badge here squeezed it down to about six characters
+                    // ("SMUC…", "2SEAT…"); the full quality breakdown already
+                    // lives in Now Playing's info panel, where detail belongs.
+                    const SizedBox(width: Space.sm),
                     Text(
                       track.durationLabel,
                       style: TypeScale.caption.copyWith(
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
-                    ListenableBuilder(
-                      listenable: store,
-                      builder: (context, _) {
-                        if (downloading) {
-                          return const Padding(
-                            padding: EdgeInsets.all(Space.sm),
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Tones.primary,
-                              ),
-                            ),
-                          );
-                        }
-                        final dl = store.pathFor(track.sha) != null;
-                        return IconButton(
-                          onPressed: dl || offline ? null : onDownload,
-                          icon: Icon(
-                            dl
-                                ? Icons.offline_pin_rounded
-                                : Icons.download_rounded,
-                            color: dl ? Tones.primary : Tones.textMuted,
-                            size: 20,
-                          ),
-                          tooltip: dl
-                              ? 'Downloaded — offline ready'
-                              : 'Download to device',
-                        );
-                      },
+                    _DownloadControl(
+                      sha: track.sha,
+                      title: track.title,
+                      store: store,
+                      offline: offline,
+                      downloading: downloading,
+                      onDownload: onDownload,
                     ),
                   ],
                 ),
@@ -248,6 +228,147 @@ class ArtPlaceholder extends StatelessWidget {
         size: size * 0.45,
         color: Tones.textMuted,
       ),
+    );
+  }
+}
+
+/// The per-row download affordance: idle, queued, running with real progress,
+/// failed, or downloaded.
+///
+/// Previously this was a bare spinner with no percentage and no way out — a
+/// 20 MB FLAC looked identical to a hang, and a finished download could only
+/// be removed from Now Playing.
+class _DownloadControl extends StatelessWidget {
+  const _DownloadControl({
+    required this.sha,
+    required this.title,
+    required this.store,
+    required this.offline,
+    required this.downloading,
+    required this.onDownload,
+  });
+
+  final String sha;
+  final String title;
+  final DownloadStore store;
+  final bool offline;
+  final bool downloading;
+  final VoidCallback onDownload;
+
+  Future<void> _remove(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final manager = DownloadScope.maybeOf(context);
+    await store.remove(sha);
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Removed $title from downloads'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () =>
+              manager == null ? onDownload() : manager.enqueue(sha),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = DownloadScope.maybeOf(context);
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final job = manager?.jobFor(sha);
+
+        if (job != null && job.phase == DownloadPhase.failed) {
+          return IconButton(
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+            padding: EdgeInsets.zero,
+            onPressed: () {
+              manager?.dismiss(sha);
+              onDownload();
+            },
+            icon: const Icon(
+              Icons.refresh_rounded,
+              color: Tones.textMuted,
+              size: 20,
+            ),
+            tooltip: 'Download failed — tap to retry',
+          );
+        }
+
+        final active =
+            downloading ||
+            (job != null &&
+                (job.phase == DownloadPhase.queued ||
+                    job.phase == DownloadPhase.running));
+
+        if (active) {
+          final progress = job?.progress;
+          final queued = job?.phase == DownloadPhase.queued;
+          return Tooltip(
+            message: queued ? 'Queued — tap to cancel' : 'Tap to cancel',
+            child: InkWell(
+              onTap: manager == null ? null : () => manager.cancel(sha),
+              borderRadius: BorderRadius.circular(20),
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        value: queued ? null : progress,
+                        color: Tones.primary,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.close_rounded,
+                      size: 12,
+                      color: Tones.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        final dl = store.pathFor(sha) != null;
+        if (dl) {
+          return IconButton(
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+            padding: EdgeInsets.zero,
+            onPressed: () => _remove(context),
+            icon: const Icon(
+              Icons.offline_pin_rounded,
+              color: Tones.primary,
+              size: 20,
+            ),
+            tooltip: 'Downloaded — tap to remove',
+          );
+        }
+
+        return IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+          padding: EdgeInsets.zero,
+          onPressed: offline ? null : onDownload,
+          icon: const Icon(
+            Icons.download_rounded,
+            color: Tones.textMuted,
+            size: 20,
+          ),
+          tooltip: 'Download to device',
+        );
+      },
     );
   }
 }

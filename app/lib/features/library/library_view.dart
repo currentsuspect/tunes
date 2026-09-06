@@ -251,8 +251,15 @@ class _LibraryViewState extends State<LibraryView> {
         if (guest != t.artistKey) artists.putIfAbsent(guest, () => []).add(t);
       }
     }
+    // Leads first, then one-off guests. Adding featured artists as their own
+    // entries took this list from 14 names to 80, and alphabetical order buried
+    // Yeat behind a dozen artists with a single guest verse each.
     final entries = artists.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
+      ..sort((a, b) {
+        final byCount = b.value.length.compareTo(a.value.length);
+        if (byCount != 0) return byCount;
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
     return ListView.separated(
       padding: const EdgeInsets.symmetric(
         horizontal: Space.lg,
