@@ -189,6 +189,73 @@ void main() {
     expect(rows.single.completed, isTrue);
   });
 
+  /// Plays [sha] through [times] times, settling each one.
+  Future<void> playThrough(String sha, int times) async {
+    for (var i = 0; i < times; i++) {
+      player.loadTrack(_track(sha, durationMs: 60000));
+      player.listenFor(const Duration(seconds: 40));
+      history.flush();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+
+  group('on repeat', () {
+    test('ranks by how often, heaviest first', () async {
+      await playThrough('a', 2);
+      await playThrough('b', 5);
+      await playThrough('c', 3);
+
+      expect(await history.topShas(), ['b', 'c', 'a']);
+    });
+
+    test('a track played once is not "most played"', () async {
+      // Otherwise the section is an arbitrary order wearing the word "most".
+      await playThrough('once', 1);
+      await playThrough('twice', 2);
+
+      expect(await history.topShas(), ['twice']);
+    });
+
+    test('skips do not count towards it', () async {
+      player.loadTrack(_track('skipped', durationMs: 120000));
+      player.listenFor(const Duration(seconds: 10));
+      history.flush();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await playThrough('skipped', 1);
+
+      // One real play out of two starts is not two plays.
+      expect(await history.topShas(minPlays: 2), isEmpty);
+    });
+  });
+
+  group('listen again', () {
+    test('offers what is not in the current rotation', () async {
+      await playThrough('old', 4);
+      await playThrough('older', 2);
+      await playThrough('now1', 1);
+      await playThrough('now2', 1);
+
+      // The two most recently played are current rotation, not a suggestion.
+      expect(await history.listenAgainShas(skipRecent: 2), ['old', 'older']);
+    });
+
+    test('ranks the rest by how much they were played', () async {
+      await playThrough('light', 1);
+      await playThrough('heavy', 6);
+      await playThrough('recent', 1);
+
+      expect(await history.listenAgainShas(skipRecent: 1), ['heavy', 'light']);
+    });
+
+    test('is empty when everything played is still in rotation', () async {
+      // A fresh install must not be offered its own last three tracks back.
+      await playThrough('a', 1);
+      await playThrough('b', 1);
+
+      expect(await history.listenAgainShas(skipRecent: 10), isEmpty);
+    });
+  });
+
   test('recents are distinct and newest first', () async {
     for (final sha in ['x', 'y', 'x']) {
       player.loadTrack(_track(sha, durationMs: 60000));

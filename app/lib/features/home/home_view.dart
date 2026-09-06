@@ -14,6 +14,8 @@ class HomeView extends StatelessWidget {
     required this.manifest,
     required this.recents,
     required this.missingAlbums,
+    required this.onRepeat,
+    required this.listenAgain,
     required this.onArtistTap,
     required this.onAlbumTap,
     required this.onPlay,
@@ -27,6 +29,13 @@ class HomeView extends StatelessWidget {
   /// daemon rather than derived locally, because deciding this needs the
   /// artist discographies, which only the daemon holds.
   final List<MissingRelease> missingAlbums;
+
+  /// The tracks played most, and the ones played properly but not lately.
+  /// Both are derived from listening rather than chosen, so both are empty
+  /// until there is enough history to mean anything -- and empty means the
+  /// section is absent, not a rail with two covers in it.
+  final List<ManifestTrack> onRepeat;
+  final List<ManifestTrack> listenAgain;
   final void Function(String artist) onArtistTap;
   final void Function(ManifestRelease release) onAlbumTap;
   final void Function(List<ManifestTrack> tracks, int index) onPlay;
@@ -124,6 +133,26 @@ class HomeView extends StatelessWidget {
             sectionPadding: _sectionPadding,
             peek: _carouselPeek,
           ),
+        if (onRepeat.isNotEmpty)
+          _DynamicRail(
+            title: 'On repeat',
+            subtitle: 'What you keep going back to',
+            tracks: onRepeat,
+            onPlay: onPlay,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
+        if (listenAgain.isNotEmpty)
+          _DynamicRail(
+            title: 'Listen again',
+            subtitle: 'Played properly once, not lately',
+            tracks: listenAgain,
+            onPlay: onPlay,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
         if (missingAlbums.isNotEmpty)
           _MissingAlbums(
             albums: missingAlbums,
@@ -186,6 +215,129 @@ class _SectionHeader extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(padding, Space.lg, padding, Space.sm),
       child: Text(title, style: TypeScale.title),
+    );
+  }
+}
+
+/// A rail the app assembled rather than the listener: on repeat, listen
+/// again, and whatever comes after them.
+///
+/// Playable as a whole, which is the difference between a list and a
+/// playlist. Tapping one track plays the rail from there, so the rest of what
+/// was suggested follows on instead of the queue ending after one song.
+class _DynamicRail extends StatelessWidget {
+  const _DynamicRail({
+    required this.title,
+    required this.subtitle,
+    required this.tracks,
+    required this.onPlay,
+    required this.artUrlFor,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<ManifestTrack> tracks;
+  final void Function(List<ManifestTrack>, int) onPlay;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            sectionPadding,
+            Space.lg,
+            Space.sm,
+            Space.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TypeScale.title),
+                    Text(subtitle, style: TypeScale.caption),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => onPlay(tracks, 0),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('Play'),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 176,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(peek, 0, sectionPadding, 0),
+            itemCount: tracks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final t = tracks[i];
+              return SizedBox(
+                width: 132,
+                child: InkWell(
+                  onTap: () => onPlay(tracks, i),
+                  borderRadius: BorderRadius.circular(RadiusTokens.card),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 132,
+                        height: 132,
+                        child: t.artSha == null
+                            ? GeneratedArtwork.fromTrack(
+                                t,
+                                size: 132,
+                                borderRadius: RadiusTokens.card,
+                              )
+                            : ClipRRect(
+                                borderRadius: BorderRadius.circular(
+                                  RadiusTokens.card,
+                                ),
+                                child: Image.network(
+                                  artUrlFor(t.artSha!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      GeneratedArtwork.fromTrack(
+                                        t,
+                                        size: 132,
+                                        borderRadius: RadiusTokens.card,
+                                      ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        t.title,
+                        style: TypeScale.body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        t.artistDisplay,
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

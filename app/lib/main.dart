@@ -255,6 +255,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
   TunesManifest? _manifest;
   Map<String, int> _playsByArtist = const {};
+  List<ManifestTrack> _onRepeat = const [];
+  List<ManifestTrack> _listenAgain = const [];
   bool _syncing = false;
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
@@ -335,6 +337,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _onHistoryChanged() async {
     await _loadRecents();
     await _loadPlays();
+    await _loadDerivedRails();
+  }
+
+  /// The sections the app assembles from listening rather than from choice.
+  ///
+  /// Resolved against the current manifest and dropped if the track has left
+  /// the library, so a rail never offers something that cannot be played.
+  Future<void> _loadDerivedRails() async {
+    final top = await widget.history.topShas();
+    final again = await widget.history.listenAgainShas();
+    if (!mounted) return;
+    final manifest = _manifest;
+    if (manifest == null) return;
+    final bySha = {for (final t in manifest.tracks) t.sha: t};
+    List<ManifestTrack> resolve(List<String> shas) => [
+      for (final sha in shas)
+        if (bySha[sha] case final ManifestTrack t) t,
+    ];
+    setState(() {
+      _onRepeat = resolve(top);
+      _listenAgain = resolve(again);
+    });
   }
 
   /// Folds the play counters into a per-act tally for the discover ranking.
@@ -837,6 +861,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         manifest: manifest,
         recents: _recents,
         missingAlbums: _missingAlbums,
+        onRepeat: _onRepeat,
+        listenAgain: _listenAgain,
         onArtistTap: (artist) => _openArtist(artist, manifest),
         onAlbumTap: (release) => _openAlbum(release, manifest),
         onPlay: (list, index) {

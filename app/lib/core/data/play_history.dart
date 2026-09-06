@@ -139,6 +139,70 @@ class PlayHistory extends ChangeNotifier {
         .toList();
   }
 
+  /// The tracks played most, heaviest first.
+  ///
+  /// [minPlays] defaults to two because "most played" over a set of things
+  /// played once each is not a ranking, it is an arbitrary order wearing the
+  /// word "most". Below the threshold the section is absent rather than
+  /// filled with noise.
+  Future<List<String>> topShas({int limit = 20, int minPlays = 2}) async {
+    final count = _db.playEvents.id.count();
+    final rows =
+        await (_db.selectOnly(_db.playEvents)
+              ..addColumns([_db.playEvents.sha, count])
+              ..where(_db.playEvents.completed.equals(true))
+              ..groupBy([
+                _db.playEvents.sha,
+              ], having: count.isBiggerOrEqualValue(minPlays))
+              ..orderBy([
+                OrderingTerm.desc(count),
+                OrderingTerm.desc(_db.playEvents.startedAt.max()),
+              ])
+              ..limit(limit))
+            .get();
+    return rows
+        .map((r) => r.read(_db.playEvents.sha))
+        .whereType<String>()
+        .toList();
+  }
+
+  /// Tracks that were played properly, but are not what is being played now.
+  ///
+  /// Defined by rank rather than by calendar age. "Nothing in three weeks"
+  /// is the natural definition and it is useless on a young history -- it
+  /// would return nothing at all until the app had been in use for three
+  /// weeks. Skipping the [skipRecent] most recent tracks instead means the
+  /// section works from the first day and still says the same thing: things
+  /// you liked, that are not in current rotation.
+  Future<List<String>> listenAgainShas({
+    int limit = 20,
+    int skipRecent = 10,
+  }) async {
+    final count = _db.playEvents.id.count();
+    final last = _db.playEvents.startedAt.max();
+    final rows =
+        await (_db.selectOnly(_db.playEvents)
+              ..addColumns([_db.playEvents.sha, count, last])
+              ..where(_db.playEvents.completed.equals(true))
+              ..groupBy([_db.playEvents.sha])
+              ..orderBy([OrderingTerm.desc(last)]))
+            .get();
+    // The set is at most one row per track ever played, so ordering it in
+    // memory costs nothing and keeps the "skip the current rotation" rule in
+    // one readable place rather than in a window function.
+    final older = rows.skip(skipRecent).toList()
+      ..sort((a, b) {
+        final byCount = (b.read(count) ?? 0).compareTo(a.read(count) ?? 0);
+        if (byCount != 0) return byCount;
+        return (b.read(last) ?? 0).compareTo(a.read(last) ?? 0);
+      });
+    return older
+        .take(limit)
+        .map((r) => r.read(_db.playEvents.sha))
+        .whereType<String>()
+        .toList();
+  }
+
   /// How many times each track was played, for the tracks that were.
   Future<Map<String, int>> playCounts() async {
     final count = _db.playEvents.id.count();
