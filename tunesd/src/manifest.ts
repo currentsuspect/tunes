@@ -172,6 +172,49 @@ function releaseKeyFor(
 }
 
 /**
+ * How many tracks a release is supposed to contain.
+ *
+ * The tagger's TOTALTRACKS describes the edition the files actually came from.
+ * A provider's total describes whichever edition the provider happened to
+ * pick, and the two disagree often enough to matter: HARDSTONE PSYCHO is 16
+ * tracks, every one of the 16 files on disk says 16, and the provider said 23
+ * — so a complete album reported "7 missing" on the home screen.
+ *
+ * SPEC §1.2 already puts release metadata at the bottom of the identity
+ * hierarchy. This applies the same ordering to the count: file evidence first,
+ * a provider only when the files are silent.
+ *
+ * `fileTotals` must come from the tags themselves. `ManifestTrack.totalTracks`
+ * falls back to a provider's number, so counting votes from it would let one
+ * provider answer outvote the files.
+ *
+ * Returns null when nothing credible is left, which the app renders as a plain
+ * count rather than a fraction — better to say how many there are than to
+ * assert a shortfall we cannot support.
+ */
+export function resolveTotalTracks(
+  owned: number,
+  fileTotals: number[],
+  providerTotal: number | null
+): number | null {
+  const votes = new Map<number, number>();
+  for (const n of fileTotals) {
+    if (!Number.isInteger(n) || n <= 0) continue;
+    votes.set(n, (votes.get(n) ?? 0) + 1);
+  }
+  // Most-stated wins; ties go to the larger number so the answer does not
+  // depend on which track happened to be probed first.
+  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+  for (const [value] of ranked) {
+    // A total below what we already hold cannot be describing this edition.
+    // The common cause is a multi-disc tagger writing the per-disc count.
+    if (value >= owned) return value;
+  }
+  if (providerTotal != null && providerTotal >= owned) return providerTotal;
+  return null;
+}
+
+/**
  * The one key for release-level cover art. Exported so the daemon that writes
  * the cache and the manifest that reads it cannot normalise differently — they
  * did at first, and the covers silently never resolved.
@@ -360,6 +403,17 @@ export function buildManifest(
   const fileStatedAlbum = new Set(
     allProbes.filter((p) => Boolean(p.tags.album?.trim())).map((p) => p.sha)
   );
+  // What the tagger said the release holds, straight from the tags. Read from
+  // the probe rather than from ManifestTrack.totalTracks, which already falls
+  // back to a provider's number -- counting votes from that would let one
+  // provider answer outvote every file on disk.
+  const fileStatedTotal = new Map<string, number>();
+  for (const p of allProbes) {
+    const n = p.tags.totalTracks;
+    if (typeof n === "number" && Number.isInteger(n) && n > 0) {
+      fileStatedTotal.set(p.sha, n);
+    }
+  }
   const tracksForReleases = canonicalTracks;
   const releaseMap = new Map<string, ManifestRelease>();
   // Everyone credited on each release, so a joint album can be recognised even
@@ -566,7 +620,19 @@ export function buildManifest(
         return a.sha < b.sha ? -1 : 1;
       });
       const groupId = r.groupId ?? linkMeta.get(r.id)?.groupId ?? null;
-      return { ...r, groupId, trackShas: sorted.map((x) => x.sha), tracks: sorted };
+      const shas = sorted.map((x) => x.sha);
+      // Recomputed here, after the merge pass has settled which tracks belong
+      // to this release. The merge takes the largest total it has seen, which
+      // is how a 16-track album ended up claiming 23.
+      const totalTracks = resolveTotalTracks(
+        shas.length,
+        shas.flatMap((sha) => {
+          const n = fileStatedTotal.get(sha);
+          return n == null ? [] : [n];
+        }),
+        r.totalTracks
+      );
+      return { ...r, groupId, totalTracks, trackShas: shas, tracks: sorted };
     });
 
   const integrityBody = JSON.stringify({ schema: 4, tracks: canonicalTracks, releases });
