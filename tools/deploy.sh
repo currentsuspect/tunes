@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tunes fast-iteration deploy: newest CI debug APK → wireless adb → launch.
+# Tunes fast-iteration deploy: newest CI release APK → wireless adb → launch.
 #
 # One-time setup (phone + this box on the same Wi-Fi):
 #   Phone: Settings → Developer options → Wireless debugging → ON,
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO="${REPO:-currentsuspect/tunes}"
-ARTIFACT="tunes-debug-apk"
+ARTIFACT="tunes-apk"
 ADB="${ADB:-$HOME/dev/platform-tools/platform-tools/adb}"
 PKG="com.currentsuspect.tunes"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,13 +31,19 @@ if [ "${1:-}" != "--no-fetch" ]; then
     exit 1
   fi
   echo "→ downloading artifact from run $run_id (commit $head_sha)"
-  rm -f "$ROOT/tools/dist/app-debug.apk"
+  # Clear every stale APK, not just the one we are about to replace --
+  # otherwise the picker below can find last week's build and install it
+  # while reporting success.
+  find "$ROOT/tools/dist" -name '*.apk' -delete
   rm -rf "$ROOT/tools/dist/$ARTIFACT"
   gh run download "$run_id" -R "$REPO" -n "$ARTIFACT" -D "$ROOT/tools/dist/"
 fi
 
-APK=$(ls "$ROOT"/tools/dist/app-debug.apk 2>/dev/null || ls "$ROOT"/tools/dist/*/app-debug.apk | head -1)
+APK=$(find "$ROOT/tools/dist" -name '*.apk' -print -quit)
+[ -n "$APK" ] || { echo "no APK in tools/dist — run without --no-fetch" >&2; exit 1; }
 echo "→ installing $(basename "$APK") ($(du -h "$APK" | cut -f1))"
+# Release and debug builds share the committed tunes-debug.keystore, so this
+# upgrades in place instead of failing on a signature mismatch.
 "$ADB" install -r "$APK"
 
 echo "→ launching"

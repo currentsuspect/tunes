@@ -64,17 +64,23 @@ jobs:
         run: flutter test
         working-directory: app
 
-      - name: Debug APK builds
+      # Release, not debug. A debug APK runs Dart in the JIT with a service
+      # isolate attached and every assert live; on a mid-range phone that is
+      # the difference between a 15-second cold start and a normal one. It is
+      # also the build that gets sideloaded and judged, so it has to be the
+      # one CI produces. Signed with the committed debug keystore (see
+      # android/app/build.gradle.kts), so it installs over previous builds.
+      - name: Release APK builds
         working-directory: app
         run: |
-          flutter build apk --debug \
+          flutter build apk --release \
             --dart-define=GIT_COMMIT=${{ github.sha }} \
             --dart-define=BUILD_NUMBER=${{ github.run_number }} \
             --dart-define=CHANNEL=dev
 
-      - name: Upload debug APK
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: tunes-debug-apk
-          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          name: tunes-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
