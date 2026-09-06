@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
+import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
 import '../library/library_widgets.dart';
 
@@ -11,6 +12,7 @@ class HomeView extends StatelessWidget {
     super.key,
     required this.manifest,
     required this.recents,
+    required this.missingAlbums,
     required this.onArtistTap,
     required this.onAlbumTap,
     required this.onPlay,
@@ -19,6 +21,11 @@ class HomeView extends StatelessWidget {
 
   final TunesManifest manifest;
   final List<ManifestTrack> recents;
+
+  /// Albums by acts already here that are absent entirely. Supplied by the
+  /// daemon rather than derived locally, because deciding this needs the
+  /// artist discographies, which only the daemon holds.
+  final List<MissingRelease> missingAlbums;
   final void Function(String artist) onArtistTap;
   final void Function(ManifestRelease release) onAlbumTap;
   final void Function(List<ManifestTrack> tracks, int index) onPlay;
@@ -113,6 +120,13 @@ class HomeView extends StatelessWidget {
             now: now,
             onPlay: onPlay,
             artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
+        if (missingAlbums.isNotEmpty)
+          _MissingAlbums(
+            albums: missingAlbums,
+            onArtistTap: onArtistTap,
             sectionPadding: _sectionPadding,
             peek: _carouselPeek,
           ),
@@ -276,6 +290,85 @@ class _JustAddedCarousel extends StatelessWidget {
   }
 }
 
+/// Albums by acts already in the library that are absent entirely.
+///
+/// There is no artwork to show — we do not have the release — so every card
+/// uses the generated cover. That is honest: a placeholder that looked like
+/// real art would imply we hold something we do not.
+class _MissingAlbums extends StatelessWidget {
+  const _MissingAlbums({
+    required this.albums,
+    required this.onArtistTap,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final List<MissingRelease> albums;
+  final void Function(String artist) onArtistTap;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Missing from your collection', padding: sectionPadding),
+        SizedBox(
+          height: 176,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(peek, 0, sectionPadding, 0),
+            itemCount: albums.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final a = albums[i];
+              return SizedBox(
+                width: 132,
+                child: InkWell(
+                  // Tapping goes to the artist, which is the only place we can
+                  // actually say anything more about a record we do not have.
+                  onTap: () => onArtistTap(a.artist),
+                  borderRadius: BorderRadius.circular(RadiusTokens.card),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Opacity(
+                        // Reads as "not here yet" beside the fully-opaque
+                        // covers of everything the library actually holds.
+                        opacity: 0.55,
+                        child: GeneratedArtwork(
+                          title: a.title,
+                          artist: a.artist,
+                          size: 132,
+                          borderRadius: RadiusTokens.card,
+                        ),
+                      ),
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        a.title,
+                        style: TypeScale.body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        a.year == null ? a.artist : '${a.artist} · ${a.year}',
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _MissingList extends StatelessWidget {
   const _MissingList({
     required this.releases,
@@ -294,7 +387,11 @@ class _MissingList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader('Missing from your collection', padding: sectionPadding),
+        // Distinct from "Missing from your collection" above: this is an album
+        // that is here but incomplete, which is a different thing to do about
+        // it. Sharing one heading made a partial album and an absent one look
+        // like the same problem.
+        _SectionHeader('Finish these albums', padding: sectionPadding),
         for (final r in releases.take(4)) ...[
           Padding(
             padding: EdgeInsets.symmetric(horizontal: sectionPadding),

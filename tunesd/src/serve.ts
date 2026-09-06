@@ -15,6 +15,7 @@ import {
   dedupeExternalArtists,
   dedupeExternalReleases,
   joinDiscography,
+  missingFromCollection,
   normName,
 } from "./discography.js";
 
@@ -208,6 +209,34 @@ export class ManifestServer {
           res.end(
             JSON.stringify({ tracks, releases, artists, externalArtists, externalReleases })
           );
+          return;
+        }
+
+        if (url.pathname === "/missing") {
+          const limitRaw = Number(url.searchParams.get("limit"));
+          const limit =
+            Number.isFinite(limitRaw) && limitRaw > 0
+              ? Math.min(Math.trunc(limitRaw), 200)
+              : 40;
+          const manifest = await this.getManifest();
+          // Weight by the act, not the raw credit line, so a guest verse does
+          // not rank an artist the owner barely listens to above one they do.
+          const tracksPerArtist = new Map<string, number>();
+          for (const t of manifest.tracks) {
+            const act = (t.primaryArtist || t.artist || "").trim();
+            if (act === "") continue;
+            tracksPerArtist.set(act, (tracksPerArtist.get(act) ?? 0) + 1);
+          }
+          const groups = missingFromCollection(
+            [...tracksPerArtist].map(([name, tracks]) => ({ name, tracks })),
+            this.getDiscographies(),
+            manifest.releases,
+            { limit }
+          );
+          res.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          res.end(JSON.stringify({ groups }));
           return;
         }
 

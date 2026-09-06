@@ -195,6 +195,31 @@ class TunesClient {
     }
   }
 
+  /// Albums by acts in the library that the library does not have.
+  ///
+  /// The daemon decides this: it holds the artist discographies, and it skips
+  /// any artist whose discography it cannot corroborate against something
+  /// already owned, so a common name resolving to the wrong artist does not
+  /// turn into a wrong recommendation.
+  Future<List<MissingRelease>> missing({int limit = 40}) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final uri = Uri.parse('$baseUrl/missing?limit=$limit');
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        throw TunesFetchException('missing ${res.statusCode}');
+      }
+      final body = await res.transform(utf8.decoder).join();
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      return (json['groups'] as List<dynamic>? ?? const [])
+          .map((g) => MissingRelease.fromJson(g as Map<String, dynamic>))
+          .toList();
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {

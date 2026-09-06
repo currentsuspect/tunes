@@ -151,3 +151,46 @@ class ArtistDiscography {
     );
   }
 }
+
+/// An album by an act in the library that the library does not have.
+///
+/// Distinct from [DiscographyGroup], which describes one entry in a single
+/// artist's catalogue and carries the owned/not-owned answer. This is the
+/// cross-library view: the daemon has already decided it is missing, and
+/// which act to credit it to.
+class MissingRelease {
+  const MissingRelease({
+    required this.id,
+    required this.title,
+    required this.artist,
+    required this.type,
+    required this.year,
+    required this.artistTracks,
+  });
+
+  final String id;
+  final String title;
+
+  /// The act, spelled the way the library spells it, so tapping through
+  /// reaches the artist page.
+  final String artist;
+  final String? type;
+  final String? year;
+
+  /// How many of that act's tracks are held. The daemon ranks on this; the
+  /// app shows it so a suggestion carries its own justification.
+  final int artistTracks;
+
+  factory MissingRelease.fromJson(Map<String, dynamic> json) {
+    return MissingRelease(
+      id: (json['id'] as String?) ?? '',
+      title: (json['title'] as String?) ?? '',
+      artist: (json['forArtist'] as String?) ?? '',
+      type: json['type'] as String?,
+      year:
+          (json['year'] as String?) ??
+          (json['date'] as String?)?.split('-').first,
+      artistTracks: (json['artistTracks'] as num?)?.toInt() ?? 0,
+    );
+  }
+}

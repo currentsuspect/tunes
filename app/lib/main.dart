@@ -18,6 +18,7 @@ import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
+import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'features/album/album_page.dart';
 import 'features/artist/artist_page.dart';
@@ -176,6 +177,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final DownloadManager _downloads;
   final String _libraryFilter = '';
   List<ManifestTrack> _recents = [];
+  // Fetched, not derived: deciding what is missing entirely needs the artist
+  // discographies, which live on the daemon. Failure is silent -- the section
+  // simply does not appear, which is the right answer when we cannot say.
+  List<MissingRelease> _missingAlbums = const [];
 
   bool _wasOffline = false;
 
@@ -314,6 +319,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (synced) _lastSyncAt = DateTime.now();
         _syncing = false;
       });
+    }
+    // Not awaited: this is a suggestion rail, and the library must not wait
+    // on it. Only refreshed after a real sync, since the answer changes only
+    // when what we hold changes.
+    if (mounted && synced) unawaited(_loadMissing());
+  }
+
+  Future<void> _loadMissing() async {
+    try {
+      final albums = await widget.client.missing();
+      if (mounted) setState(() => _missingAlbums = albums);
+    } catch (_) {
+      // An older daemon answers 404 here, and offline answers nothing. Both
+      // mean "cannot say", so leave whatever we last knew on screen rather
+      // than blanking a section that was correct a minute ago.
     }
   }
 
@@ -656,6 +676,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _ => HomeView(
         manifest: manifest,
         recents: _recents,
+        missingAlbums: _missingAlbums,
         onArtistTap: (artist) => _openArtist(artist, manifest),
         onAlbumTap: (release) => _openAlbum(release, manifest),
         onPlay: (list, index) {

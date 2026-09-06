@@ -48,6 +48,109 @@ export function joinDiscography(
   });
 }
 
+/** A release group by an act in the library that the library does not have. */
+export interface MissingRelease extends DiscographyGroup {
+  /** The act it belongs to, spelled the way the library spells it. */
+  forArtist: string;
+  /** How many of that act's tracks are held, which is the ranking signal. */
+  artistTracks: number;
+}
+
+/**
+ * Titles compare more strictly than names do. `normName` only lowercases and
+ * collapses spaces, which is right for artists but leaves "Don't Be Dumb" and
+ * "Don’t Be Dumb" — a straight apostrophe against a curly one — looking like
+ * two different albums, and the whole feature turns on deciding whether a
+ * title is already owned.
+ */
+function titleKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * The same title with a trailing edition qualifier dropped, so "2093 (P2)"
+ * and "2093" are one record when asking "do you already have this?".
+ *
+ * Deliberately only a *trailing bracketed* suffix. Trimming more — a token
+ * subset, say — would fold "Alivë" into "2 Alivë", which are two different
+ * Yeat albums, and quietly stop recommending one of them.
+ */
+function baseTitleKey(s: string): string {
+  const stripped = titleKey(s.replace(/\s*[([{][^)\]}]*[)\]}]\s*$/, ""));
+  return stripped === "" ? titleKey(s) : stripped;
+}
+
+/**
+ * Albums by acts already in the library that the library does not have.
+ *
+ * This replaces a "missing" count derived from track totals, which could only
+ * ever say "you have 14 of 16 of something you already own" and, once the
+ * totals were made truthful, said nothing at all.
+ *
+ * **An artist whose discography we cannot corroborate is skipped, not
+ * guessed.** Discographies are fetched by name, and MusicBrainz answers a
+ * common name with whichever artist it likes: asking for "Lunchbox" returns an
+ * indie act with none of the rapper's records, and "Len" returns the nineties
+ * band. Recommending those would swap one untruth for another. So an act only
+ * contributes suggestions when at least one group in its discography matches
+ * something already held — proof we resolved the right artist.
+ *
+ * The cost is real and worth naming: an act whose held material is not an
+ * official release (a leak, a mixtape) corroborates against nothing and is
+ * skipped even when the discography is correct.
+ *
+ * Singles and compilations are excluded by default. A discography is mostly
+ * singles, and a list of two hundred of them is not a thing anyone can act on.
+ */
+export function missingFromCollection(
+  libraryArtists: Array<{ name: string; tracks: number }>,
+  discographies: Map<string, ArtistDiscography>,
+  releases: Array<{ title: string; groupId?: string | null }>,
+  opts: { limit?: number; types?: ReadonlySet<string> } = {}
+): MissingRelease[] {
+  const types = opts.types ?? new Set(["album", "ep"]);
+  const ownedGroupIds = new Set(
+    releases.map((r) => r.groupId).filter((id): id is string => id != null)
+  );
+  const ownedTitles = new Set(releases.map((r) => titleKey(r.title)));
+  const ownedBaseTitles = new Set(releases.map((r) => baseTitleKey(r.title)));
+  const isOwned = (g: DiscographyGroup): boolean =>
+    ownedGroupIds.has(g.id) ||
+    ownedTitles.has(titleKey(g.title)) ||
+    ownedBaseTitles.has(baseTitleKey(g.title));
+
+  const out: MissingRelease[] = [];
+  const seen = new Set<string>();
+  // Strongest signal first, so a cap keeps the acts the owner listens to most.
+  const ranked = [...libraryArtists].sort(
+    (a, b) => b.tracks - a.tracks || a.name.localeCompare(b.name)
+  );
+  for (const artist of ranked) {
+    const d = discographies.get(normName(artist.name));
+    if (!d) continue;
+    if (!d.groups.some(isOwned)) continue;
+    for (const g of d.groups) {
+      if (isOwned(g)) continue;
+      if (!types.has((g.type ?? "").toLowerCase())) continue;
+      // One album can sit in two acts' discographies; credit it to the act
+      // with more tracks held, which the ranking above visits first.
+      if (seen.has(g.id)) continue;
+      seen.add(g.id);
+      out.push({ ...g, forArtist: artist.name, artistTracks: artist.tracks });
+    }
+  }
+  out.sort(
+    (a, b) =>
+      b.artistTracks - a.artistTracks ||
+      (b.date ?? b.year ?? "").localeCompare(a.date ?? a.year ?? "") ||
+      a.title.localeCompare(b.title)
+  );
+  return opts.limit != null ? out.slice(0, opts.limit) : out;
+}
+
 export interface ExternalArtist {
   name: string;
   mbid: string;

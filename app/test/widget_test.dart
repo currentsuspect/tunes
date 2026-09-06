@@ -80,7 +80,13 @@ class _TestQueueStore extends QueueStore {
 }
 
 class _FakeClient implements TunesClient {
-  _FakeClient(this.result, {this.onSearch, this.onDiscography, this.onChanges});
+  _FakeClient(
+    this.result, {
+    this.onSearch,
+    this.onDiscography,
+    this.onChanges,
+    this.onMissing,
+  });
 
   @override
   Future<ChangesResponse> fetchChanges(DateTime since) async {
@@ -98,7 +104,14 @@ class _FakeClient implements TunesClient {
   final Future<SearchResults> Function(String q)? onSearch;
   final Future<ArtistDiscography> Function(String artist)? onDiscography;
   final Future<ChangesResponse> Function(DateTime since)? onChanges;
+  final Future<List<MissingRelease>> Function()? onMissing;
   final List<DateTime> changesCalls = [];
+
+  @override
+  Future<List<MissingRelease>> missing({int limit = 40}) async {
+    final custom = onMissing;
+    return custom != null ? custom() : const [];
+  }
 
   @override
   String get baseUrl => 'http://fake:4780';
@@ -816,7 +829,7 @@ void main() {
     expect(find.text('not in library'), findsNWidgets(2));
   });
 
-  testWidgets('home surfaces missing-from-collection and released-this-year', (
+  testWidgets('home surfaces a part-owned album and released-this-year', (
     tester,
   ) async {
     final tracks = [
@@ -857,7 +870,11 @@ void main() {
     );
     await pumpApp(tester, _FakeClient(() async => manifest), FakeTunePlayer());
 
-    expect(find.text('Missing from your collection'), findsOneWidget);
+    // An album that is here but incomplete belongs under "Finish these
+    // albums". "Missing from your collection" now means a record we do not
+    // have at all, which the daemon decides.
+    expect(find.text('Finish these albums'), findsOneWidget);
+    expect(find.text('Missing from your collection'), findsNothing);
     expect(find.textContaining('1/19'), findsOneWidget);
     expect(find.text('Released this year'), findsOneWidget);
     expect(find.textContaining('HARDSTONE PSYCHO'), findsWidgets);
@@ -1477,4 +1494,41 @@ void main() {
       expect(find.textContaining('complete'), findsNothing);
     },
   );
+
+  testWidgets('missing albums come from the daemon, not from track counts', (
+    tester,
+  ) async {
+    // Deciding an album is absent entirely needs the artist discographies,
+    // which only the daemon holds. The app must not try to derive it.
+    final client = _FakeClient(
+      () async => _manifestOf(_library()),
+      onMissing: () async => const [
+        MissingRelease(
+          id: 'g1',
+          title: 'UTOPIA',
+          artist: 'Travis Scott',
+          type: 'Album',
+          year: '2023',
+          artistTracks: 17,
+        ),
+      ],
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+    await tester.pumpAndSettle();
+    expect(find.text('Missing from your collection'), findsOneWidget);
+    expect(find.text('UTOPIA'), findsOneWidget);
+    expect(find.textContaining('Travis Scott'), findsWidgets);
+  });
+
+  testWidgets('the missing section stays away when there is nothing to say', (
+    tester,
+  ) async {
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      FakeTunePlayer(),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Missing from your collection'), findsNothing);
+  });
 }
