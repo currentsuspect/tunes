@@ -11,6 +11,8 @@ import '../../features/library/library_widgets.dart';
 /// We pick two colours from a fixed palette by hashing the title,
 /// gradient them diagonally, and overlay the first letter of the
 /// primary artist (or the first letter of the title if no artist).
+/// Callers showing several records by one act pass [label] instead,
+/// so the tiles do not all draw the same initial.
 class GeneratedArtwork extends StatelessWidget {
   const GeneratedArtwork({
     super.key,
@@ -18,6 +20,7 @@ class GeneratedArtwork extends StatelessWidget {
     required this.artist,
     this.size = 100,
     this.borderRadius = 8,
+    this.label,
   });
 
   /// Convenience: build from a [ManifestTrack] if you have one.
@@ -41,6 +44,15 @@ class GeneratedArtwork extends StatelessWidget {
   final double size;
   final double borderRadius;
 
+  /// Overrides the letters drawn on the tile.
+  ///
+  /// The default is the artist's initial, which is what identifies a tile in
+  /// a mixed list of tracks. In a rail of one act's records that makes every
+  /// card read the same — six Yeat albums all showing "Y" — so those callers
+  /// pass the album's initials instead. The colours already vary, because the
+  /// seed includes the title.
+  final String? label;
+
   static const _palette = <Color>[
     Color(0xFF8E44AD),
     Color(0xFF2C3E50),
@@ -58,9 +70,11 @@ class GeneratedArtwork extends StatelessWidget {
     final seed = _seedFor(title, artist);
     final a = _palette[seed % _palette.length];
     final b = _palette[(seed ~/ _palette.length) % _palette.length];
-    final letter = _initial(
-      artist.isNotEmpty && artist != 'unknown artist' ? artist : title,
-    );
+    final letter =
+        label ??
+        _initial(
+          artist.isNotEmpty && artist != 'unknown artist' ? artist : title,
+        );
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: Container(
@@ -78,7 +92,8 @@ class GeneratedArtwork extends StatelessWidget {
             letter,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.92),
-              fontSize: size * 0.45,
+              // Two letters at the one-letter size overflow a small tile.
+              fontSize: size * (letter.characters.length > 1 ? 0.30 : 0.45),
               fontWeight: FontWeight.w600,
               height: 1.0,
               letterSpacing: -0.5,

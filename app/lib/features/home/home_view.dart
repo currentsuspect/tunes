@@ -342,6 +342,10 @@ class _MissingAlbums extends StatelessWidget {
                           artist: a.artist,
                           size: 132,
                           borderRadius: RadiusTokens.card,
+                          // The act is named in the caption and repeats down
+                          // the whole rail; the album is what distinguishes
+                          // one card from the next.
+                          label: initialsFor(a.title),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
