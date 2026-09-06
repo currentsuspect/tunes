@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/avatar.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
-import '../../core/ui/initials.dart';
+import '../../core/ui/profile_avatar.dart';
 
 /// Who you are and how the app behaves.
 ///
@@ -42,6 +41,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _name;
+  final _avatars = AvatarStore();
 
   @override
   void initState() {
@@ -77,7 +77,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               child: Row(
                 children: [
-                  _Avatar(name: s.displayName, path: s.avatarPath),
+                  _AvatarButton(
+                    name: s.displayName,
+                    path: s.avatarPath,
+                    onTap: _editAvatar,
+                  ),
                   const SizedBox(width: Space.md),
                   Expanded(
                     child: TextField(
@@ -176,6 +180,58 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// Choosing, replacing or clearing the profile picture.
+  ///
+  /// The old file is deleted only once the new path is saved, so a failure
+  /// anywhere in here leaves the picture you already had.
+  Future<void> _editAvatar() async {
+    final s = widget.settings;
+    final messenger = ScaffoldMessenger.of(context);
+    if (s.avatarPath != null) {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: Tones.surfaceRaised,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose a photo', style: TypeScale.body),
+                onTap: () => Navigator.of(context).pop('pick'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded),
+                title: const Text('Remove photo', style: TypeScale.body),
+                onTap: () => Navigator.of(context).pop('remove'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (choice == null) return;
+      if (choice == 'remove') {
+        final old = s.avatarPath;
+        await s.setAvatarPath(null);
+        await _avatars.discard(old);
+        return;
+      }
+    }
+    try {
+      final old = s.avatarPath;
+      final path = await _avatars.pick();
+      // Dismissing the picker is not a change of mind about the picture you
+      // already have, so nothing is touched.
+      if (path == null) return;
+      await s.setAvatarPath(path);
+      await _avatars.discard(old);
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not open the photo picker: $e')),
+      );
+    }
+  }
+
   Future<void> _nudgeOffset(int ms) async {
     final next = widget.settings.lyricsTapOffset + Duration(milliseconds: ms);
     // Beyond a second either way it is not reaction time any more.
@@ -184,21 +240,53 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name, required this.path});
+/// The picture, with the badge that says it can be changed.
+///
+/// A tappable avatar with nothing on it reads as decoration, and the one
+/// place people look for "change my picture" is the picture itself.
+class _AvatarButton extends StatelessWidget {
+  const _AvatarButton({
+    required this.name,
+    required this.path,
+    required this.onTap,
+  });
 
   final String name;
   final String? path;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final p = path;
-    if (p != null && File(p).existsSync()) {
-      return ClipOval(
-        child: Image.file(File(p), width: 56, height: 56, fit: BoxFit.cover),
-      );
-    }
-    return InitialsAvatar(name: name.isEmpty ? '?' : name, size: 56);
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 62,
+        height: 62,
+        child: Stack(
+          children: [
+            ProfileAvatar(name: name, path: path, size: 56),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Tones.surfaceRaised,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Tones.surface, width: 2),
+                ),
+                child: const Icon(
+                  Icons.photo_camera_rounded,
+                  size: 12,
+                  color: Tones.textMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

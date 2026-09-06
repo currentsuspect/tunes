@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../domain/manifest.dart';
+import 'transport_rules.dart';
 
 enum PlaybackRepeat { off, all, one }
 
@@ -63,6 +64,11 @@ class MediaKitTunePlayer extends TunePlayer {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _lastNotifiedPosition = Duration.zero;
+
+  /// When "previous" last restarted the current track, so the press after it
+  /// can step back instead of restarting again. Cleared by anything that
+  /// changes what is playing.
+  DateTime? _restartedAt;
   PlaybackRepeat _repeat = PlaybackRepeat.off;
   bool _shuffle = false;
 
@@ -213,18 +219,35 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
-    if (_index > 0) {
-      player.previous();
-      return;
+    final restartedAt = _restartedAt;
+    final action = previousActionFor(
+      position: _position,
+      index: _index,
+      queueLength: _queue.length,
+      repeatAll: _repeat == PlaybackRepeat.all,
+      sinceRestart: restartedAt == null
+          ? null
+          : DateTime.now().difference(restartedAt),
+    );
+    // Only a restart arms the double press. Anything else -- including the
+    // step back it leads to -- disarms it, so three presses do not walk the
+    // queue backwards on their own.
+    _restartedAt = action == PreviousAction.restart ? DateTime.now() : null;
+    switch (action) {
+      case PreviousAction.previousTrack:
+        player.previous();
+      case PreviousAction.wrapToLast:
+        player.jump(_queue.length - 1);
+        _index = _queue.length - 1;
+        notifyListeners();
+      case PreviousAction.restart:
+        // Position is reported by the decoder, so it does not reset until the
+        // seek lands. Set it here too, so the screen agrees with the button
+        // immediately rather than a frame or two later.
+        player.seek(Duration.zero);
+        _position = Duration.zero;
+        notifyListeners();
     }
-    // At first track: wrap to last when repeat-all, else restart.
-    if (_repeat == PlaybackRepeat.all && _queue.length > 1) {
-      player.jump(_queue.length - 1);
-      _index = _queue.length - 1;
-      notifyListeners();
-      return;
-    }
-    player.seek(Duration.zero);
   }
 
   @override
@@ -239,6 +262,9 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void seek(Duration target) {
+    // Scrubbing is a fresh decision about where to be, so the press that
+    // follows is a first press again, not the second of a pair.
+    _restartedAt = null;
     _player?.seek(target);
   }
 
@@ -323,6 +349,12 @@ class MediaKitTunePlayer extends TunePlayer {
     });
     player.stream.playlist.listen((pl) {
       if (pl.index >= 0) {
+        if (pl.index != _index) {
+          // A different track is playing -- skipped to, or arrived at on its
+          // own. Either way the restart that armed the double press belongs
+          // to a track that is no longer on.
+          _restartedAt = null;
+        }
         _index = pl.index;
         notifyListeners();
       }

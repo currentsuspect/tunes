@@ -21,6 +21,7 @@ import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
+import 'core/ui/profile_avatar.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'features/album/album_page.dart';
@@ -624,17 +625,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           final count = _manifest?.tracks.length ?? 0;
                           _openProfile(count);
                         },
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Tones.surfaceRaised,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.person_rounded,
-                            size: 22,
-                            color: Tones.textMuted,
+                        // Listens to settings directly: choosing a picture in
+                        // the screen this opens should change the thing you
+                        // came back to, without a restart.
+                        child: ListenableBuilder(
+                          listenable: widget.settings,
+                          builder: (context, _) => ProfileAvatar(
+                            name: widget.settings.displayName,
+                            path: widget.settings.avatarPath,
+                            size: 38,
                           ),
                         ),
                       ),

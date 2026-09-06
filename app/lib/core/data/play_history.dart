@@ -115,10 +115,22 @@ class PlayHistory extends ChangeNotifier {
   Future<List<String>> recentShas({int limit = 20}) async {
     final rows =
         await (_db.selectOnly(_db.playEvents)
-              ..addColumns([_db.playEvents.sha, _db.playEvents.startedAt.max()])
+              ..addColumns([
+                _db.playEvents.sha,
+                _db.playEvents.startedAt.max(),
+                _db.playEvents.id.max(),
+              ])
               ..where(_db.playEvents.completed.equals(true))
               ..groupBy([_db.playEvents.sha])
-              ..orderBy([OrderingTerm.desc(_db.playEvents.startedAt.max())])
+              // Two listens can start in the same millisecond -- an interlude
+              // straight into the next track, or anything replayed quickly --
+              // and a timestamp alone leaves their order to the database to
+              // decide. The row id records which was written second, which is
+              // exactly what "more recent" means here.
+              ..orderBy([
+                OrderingTerm.desc(_db.playEvents.startedAt.max()),
+                OrderingTerm.desc(_db.playEvents.id.max()),
+              ])
               ..limit(limit))
             .get();
     return rows

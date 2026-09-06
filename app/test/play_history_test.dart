@@ -198,6 +198,11 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
     // x played twice is one thing you were listening to, not two rows.
+    //
+    // All three listens are recorded within the same millisecond, so this
+    // also pins the tie-break: with timestamps equal, the order has to come
+    // from which row was written last, not from whatever the database
+    // happens to return.
     expect(await history.recentShas(), ['x', 'y']);
     expect(await history.playCounts(), {'x': 2, 'y': 1});
   });
