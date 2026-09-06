@@ -103,4 +103,24 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> seekBackward(bool begin) async {
     if (!begin) player.seek(player.position - const Duration(seconds: 10));
   }
+
+  /// The app was swiped out of the recents list.
+  ///
+  /// Without this the foreground service kept the process alive and the audio
+  /// simply carried on: no mini player to stop it, and reopening the app and
+  /// pressing play started a *second* stream over the first. Stopping here
+  /// makes closing the app mean what it looks like it means.
+  @override
+  Future<void> onTaskRemoved() async {
+    await stop();
+    await super.onTaskRemoved();
+  }
+
+  /// The user dismissed the notification, which is the other way of saying
+  /// "I am done listening".
+  @override
+  Future<void> onNotificationDeleted() async {
+    await stop();
+    await super.onNotificationDeleted();
+  }
 }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'core/audio/audio_focus.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
@@ -103,6 +104,9 @@ Future<void> main() async {
   }
 
   player.onFirstPlay = ensureAudioService;
+  // Not awaited: it only has to be in place before the first track, and the
+  // library should not wait on the audio session to draw.
+  unawaited(AudioFocus(player).attach());
 
   DiagLog.log('runApp');
   runApp(

@@ -367,6 +367,11 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     super.initState();
     _parse();
     _playhead = PlayheadClock(player: widget.player, vsync: this);
+    // The line follows the same projected clock as the word sweep. It used to
+    // read player.position, which is up to 250ms stale and only refreshes
+    // when the player notifies -- so words glided on time while the line
+    // changed late, which is the part you notice.
+    _playhead.addListener(_onPlayerChange);
     widget.player.addListener(_onPlayerChange);
   }
 
@@ -391,6 +396,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   @override
   void dispose() {
     widget.player.removeListener(_onPlayerChange);
+    _playhead.removeListener(_onPlayerChange);
     _playhead.dispose();
     super.dispose();
   }
@@ -398,8 +404,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   void _onPlayerChange() {
     final lrc = _lrc;
     if (lrc == null || lrc.lines.isEmpty) return;
-    final pos = widget.player.position;
-    final active = LrcParser.activeLine(lrc, pos);
+    final active = LrcParser.activeLine(lrc, _playhead.value);
     final idx = active == null ? null : lrc.lines.indexOf(active);
     if (idx != _activeIndex && mounted) {
       setState(() => _activeIndex = idx);
