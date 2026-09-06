@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
 
@@ -238,19 +239,11 @@ class _PersonRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            ClipOval(
-              child: SizedBox(
-                width: 44,
-                height: 44,
-                child: sha == null
-                    ? InitialsAvatar(name: name, size: 44)
-                    : Image.network(
-                        artUrlFor(sha),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            InitialsAvatar(name: name, size: 44),
-                      ),
-              ),
+            Artwork(
+              url: sha == null ? null : artUrlFor(sha),
+              size: 44,
+              borderRadius: 22,
+              fallback: InitialsAvatar(name: name, size: 44),
             ),
             const SizedBox(width: Space.md),
             Expanded(
@@ -306,20 +299,11 @@ class _AlbumRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 44,
-                height: 44,
-                child: sha == null
-                    ? Container(color: Tones.surfaceRaised)
-                    : Image.network(
-                        artUrlFor(sha),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            Container(color: Tones.surfaceRaised),
-                      ),
-              ),
+            Artwork(
+              url: sha == null ? null : artUrlFor(sha),
+              size: 44,
+              borderRadius: 6,
+              fallback: const ArtworkPlaceholder(borderRadius: 6),
             ),
             const SizedBox(width: Space.md),
             Expanded(

@@ -6,6 +6,7 @@ import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
@@ -126,20 +127,11 @@ class _ArtistPageState extends State<ArtistPage> {
                   Center(
                     child: () {
                       final photo = widget.manifest.artistArt(artist);
-                      if (photo == null) {
-                        return InitialsAvatar(name: artist, size: 140);
-                      }
-                      return ClipOval(
-                        child: SizedBox(
-                          width: 140,
-                          height: 140,
-                          child: Image.network(
-                            widget.artUrlFor(photo),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                InitialsAvatar(name: artist, size: 140),
-                          ),
-                        ),
+                      return Artwork(
+                        url: photo == null ? null : widget.artUrlFor(photo),
+                        size: 140,
+                        borderRadius: 70,
+                        fallback: InitialsAvatar(name: artist, size: 140),
                       );
                     }(),
                   ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../core/ui/missing_cover.dart';
@@ -342,27 +343,15 @@ class _DynamicRail extends StatelessWidget {
                       SizedBox(
                         width: 132,
                         height: 132,
-                        child: t.artSha == null
-                            ? GeneratedArtwork.fromTrack(
-                                t,
-                                size: 132,
-                                borderRadius: RadiusTokens.card,
-                              )
-                            : ClipRRect(
-                                borderRadius: BorderRadius.circular(
-                                  RadiusTokens.card,
-                                ),
-                                child: Image.network(
-                                  artUrlFor(t.artSha!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      GeneratedArtwork.fromTrack(
-                                        t,
-                                        size: 132,
-                                        borderRadius: RadiusTokens.card,
-                                      ),
-                                ),
-                              ),
+                        child: Artwork(
+                          url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                          size: 132,
+                          fallback: GeneratedArtwork.fromTrack(
+                            t,
+                            size: 132,
+                            borderRadius: RadiusTokens.card,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
@@ -434,28 +423,15 @@ class _JustAddedCarousel extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(RadiusTokens.card),
-                        child: SizedBox(
-                          width: 132,
-                          height: 100,
-                          child: t.artSha != null
-                              ? Image.network(
-                                  artUrlFor(t.artSha!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => GeneratedArtwork(
-                                    title: t.title,
-                                    artist: t.artistDisplay,
-                                    size: 100,
-                                    borderRadius: RadiusTokens.card,
-                                  ),
-                                )
-                              : GeneratedArtwork(
-                                  title: t.title,
-                                  artist: t.artistDisplay,
-                                  size: 100,
-                                  borderRadius: RadiusTokens.card,
-                                ),
+                      Artwork(
+                        url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                        size: 132,
+                        height: 100,
+                        fallback: GeneratedArtwork(
+                          title: t.title,
+                          artist: t.artistDisplay,
+                          size: 100,
+                          borderRadius: RadiusTokens.card,
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -811,21 +787,12 @@ class _ArtistsRail extends StatelessWidget {
                   borderRadius: BorderRadius.circular(RadiusTokens.control),
                   child: Column(
                     children: [
-                      if (artSha != null)
-                        ClipOval(
-                          child: SizedBox(
-                            width: 64,
-                            height: 64,
-                            child: Image.network(
-                              artUrlFor(artSha),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  InitialsAvatar(name: e.key, size: 64),
-                            ),
-                          ),
-                        )
-                      else
-                        InitialsAvatar(name: e.key, size: 64),
+                      Artwork(
+                        url: artSha == null ? null : artUrlFor(artSha),
+                        size: 64,
+                        borderRadius: 32,
+                        fallback: InitialsAvatar(name: e.key, size: 64),
+                      ),
                       const SizedBox(height: Space.xs),
                       Text(
                         e.key,
@@ -884,28 +851,14 @@ class _AlbumsRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(RadiusTokens.card),
-                        child: SizedBox(
-                          width: 130,
-                          height: 130,
-                          child: r.artSha != null
-                              ? Image.network(
-                                  artUrlFor(r.artSha!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => GeneratedArtwork(
-                                    title: r.title,
-                                    artist: r.artist,
-                                    size: 130,
-                                    borderRadius: RadiusTokens.card,
-                                  ),
-                                )
-                              : GeneratedArtwork(
-                                  title: r.title,
-                                  artist: r.artist,
-                                  size: 130,
-                                  borderRadius: RadiusTokens.card,
-                                ),
+                      Artwork(
+                        url: r.artSha == null ? null : artUrlFor(r.artSha!),
+                        size: 130,
+                        fallback: GeneratedArtwork(
+                          title: r.title,
+                          artist: r.artist,
+                          size: 130,
+                          borderRadius: RadiusTokens.card,
                         ),
                       ),
                       const SizedBox(height: Space.xs),

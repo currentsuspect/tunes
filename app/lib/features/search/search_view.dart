@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/net/tunes_client.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
@@ -514,19 +515,11 @@ class _BrowseWhenEmpty extends StatelessWidget {
                     borderRadius: BorderRadius.circular(42),
                     child: Column(
                       children: [
-                        ClipOval(
-                          child: SizedBox(
-                            width: 72,
-                            height: 72,
-                            child: art == null
-                                ? InitialsAvatar(name: name, size: 72)
-                                : Image.network(
-                                    artUrlFor(art),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) =>
-                                        InitialsAvatar(name: name, size: 72),
-                                  ),
-                          ),
+                        Artwork(
+                          url: art == null ? null : artUrlFor(art),
+                          size: 72,
+                          borderRadius: 36,
+                          fallback: InitialsAvatar(name: name, size: 72),
                         ),
                         const SizedBox(height: Space.sm),
                         Text(
@@ -565,21 +558,12 @@ class _BrowseWhenEmpty extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(
-                            RadiusTokens.control,
-                          ),
-                          child: SizedBox(
-                            width: 124,
-                            height: 124,
-                            child: art == null
-                                ? Container(color: Tones.surfaceRaised)
-                                : Image.network(
-                                    artUrlFor(art),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) =>
-                                        Container(color: Tones.surfaceRaised),
-                                  ),
+                        Artwork(
+                          url: art == null ? null : artUrlFor(art),
+                          size: 124,
+                          borderRadius: RadiusTokens.control,
+                          fallback: const ArtworkPlaceholder(
+                            borderRadius: RadiusTokens.control,
                           ),
                         ),
                         const SizedBox(height: Space.sm),

@@ -8,6 +8,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/theme/tokens.dart'
     show Tones, TypeScale, Space, RadiusTokens;
 import '../../domain/manifest.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/track_actions_sheet.dart';
 
@@ -197,32 +198,23 @@ class ArtThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (sha != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: Image.network(
-          artUrlFor(sha!),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => GeneratedArtwork(
+    // The generated tile is both the stand-in and the failure case: it is
+    // derived from the title and artist, so it is never a blank square, and a
+    // cover arriving later fades over the top of it.
+    final generated = (title.isNotEmpty || artist.isNotEmpty)
+        ? GeneratedArtwork(
             title: title,
             artist: artist,
             size: size,
             borderRadius: borderRadius,
-          ),
-        ),
-      );
-    }
-    if (title.isNotEmpty || artist.isNotEmpty) {
-      return GeneratedArtwork(
-        title: title,
-        artist: artist,
-        size: size,
-        borderRadius: borderRadius,
-      );
-    }
-    return const ArtPlaceholder();
+          )
+        : ArtworkPlaceholder(borderRadius: borderRadius);
+    return Artwork(
+      url: sha == null ? null : artUrlFor(sha!),
+      size: size,
+      borderRadius: borderRadius,
+      fallback: generated,
+    );
   }
 }
 

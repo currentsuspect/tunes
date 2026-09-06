@@ -5,6 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
@@ -103,28 +104,16 @@ class AlbumPage extends StatelessWidget {
                 ),
                 children: [
                   Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(RadiusTokens.card),
-                      child: SizedBox(
-                        width: 220,
-                        height: 220,
-                        child: release.artSha != null
-                            ? Image.network(
-                                artUrlFor(release.artSha!),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => GeneratedArtwork(
-                                  title: release.title,
-                                  artist: release.artist,
-                                  size: 220,
-                                  borderRadius: RadiusTokens.card,
-                                ),
-                              )
-                            : GeneratedArtwork(
-                                title: release.title,
-                                artist: release.artist,
-                                size: 220,
-                                borderRadius: RadiusTokens.card,
-                              ),
+                    child: Artwork(
+                      url: release.artSha == null
+                          ? null
+                          : artUrlFor(release.artSha!),
+                      size: 220,
+                      fallback: GeneratedArtwork(
+                        title: release.title,
+                        artist: release.artist,
+                        size: 220,
+                        borderRadius: RadiusTokens.card,
                       ),
                     ),
                   ),

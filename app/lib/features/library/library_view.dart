@@ -6,6 +6,7 @@ import '../../core/data/likes_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
@@ -241,19 +242,11 @@ class _LibraryViewState extends State<LibraryView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(RadiusTokens.card),
-                    child: SizedBox.expand(
-                      child: r.artSha != null
-                          ? Image.network(
-                              widget.artUrlFor(r.artSha!),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => GeneratedArtwork(
-                                title: r.title,
-                                artist: r.artist,
-                              ),
-                            )
-                          : GeneratedArtwork(title: r.title, artist: r.artist),
+                  child: Artwork.fill(
+                    url: r.artSha == null ? null : widget.artUrlFor(r.artSha!),
+                    fallback: GeneratedArtwork(
+                      title: r.title,
+                      artist: r.artist,
                     ),
                   ),
                 ),
@@ -322,20 +315,11 @@ class _LibraryViewState extends State<LibraryView> {
                   for (final a in widget.artists) {
                     if (a.name == name) photo = a.artSha;
                   }
-                  if (photo == null) {
-                    return InitialsAvatar(name: name, size: 48);
-                  }
-                  return ClipOval(
-                    child: SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: Image.network(
-                        widget.artUrlFor(photo),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            InitialsAvatar(name: name, size: 48),
-                      ),
-                    ),
+                  return Artwork(
+                    url: photo == null ? null : widget.artUrlFor(photo),
+                    size: 48,
+                    borderRadius: 24,
+                    fallback: InitialsAvatar(name: name, size: 48),
                   );
                 }(),
                 const SizedBox(width: Space.md),

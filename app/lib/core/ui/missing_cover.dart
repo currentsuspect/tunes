@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/discography.dart';
 import '../theme/tokens.dart';
+import 'artwork.dart';
 import 'generated_artwork.dart';
 import 'initials.dart';
 
@@ -39,18 +40,10 @@ class MissingCover extends StatelessWidget {
       label: initialsFor(album.title),
     );
     final sha = album.artSha;
-    if (sha == null) return generated;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(RadiusTokens.card),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Image.network(
-          artUrlFor(sha),
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => generated,
-        ),
-      ),
+    return Artwork(
+      url: sha == null ? null : artUrlFor(sha),
+      size: size,
+      fallback: generated,
     );
   }
 }

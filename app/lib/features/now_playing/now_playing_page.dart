@@ -5,6 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/like_button.dart';
 import '../player/scrubber.dart';
@@ -594,26 +595,13 @@ class _Artwork extends StatelessWidget {
         // phone the leftover height used to become an empty band above and
         // below the sleeve rather than more sleeve.
         final side = available.clamp(0.0, 420.0);
-        final art = ClipRRect(
-          borderRadius: BorderRadius.circular(RadiusTokens.card),
-          child: SizedBox(
-            width: side,
-            height: side,
-            child: track.artSha != null
-                ? Image.network(
-                    artUrlFor(track.artSha!),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => GeneratedArtwork(
-                      title: track.title,
-                      artist: track.artistDisplay,
-                      size: side,
-                    ),
-                  )
-                : GeneratedArtwork(
-                    title: track.title,
-                    artist: track.artistDisplay,
-                    size: side,
-                  ),
+        final art = Artwork(
+          url: track.artSha == null ? null : artUrlFor(track.artSha!),
+          size: side,
+          fallback: GeneratedArtwork(
+            title: track.title,
+            artist: track.artistDisplay,
+            size: side,
           ),
         );
         // Subtle "alive" motion: slow rotation while playing, snap-back

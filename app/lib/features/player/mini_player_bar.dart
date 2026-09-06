@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../domain/manifest.dart';
 
 class MiniPlayerBar extends StatefulWidget {
@@ -241,17 +242,13 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                 _resolved ? 0 : _dragDx.clamp(-24.0, 24.0) * 0.6,
                 0,
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: track.artSha != null && widget.artUrlFor != null
-                    ? Image.network(
-                        widget.artUrlFor!(track.artSha!),
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const _MiniArtPlaceholder(),
-                      )
-                    : const _MiniArtPlaceholder(),
+              child: Artwork(
+                url: track.artSha != null && widget.artUrlFor != null
+                    ? widget.artUrlFor!(track.artSha!)
+                    : null,
+                size: 44,
+                borderRadius: 8,
+                fallback: const _MiniArtPlaceholder(),
               ),
             ),
             const SizedBox(width: Space.md),
