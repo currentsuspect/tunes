@@ -47,10 +47,11 @@ class LyricsSheet extends StatefulWidget {
 
 class _LyricsSheetState extends State<LyricsSheet> {
   bool _editing = false;
-  // Local copy of the lyrics text so the view reflects edits without
-  // waiting for the parent to re-supply the track. onSave writes to
-  // both the persistent store AND this field, so the view updates
-  // immediately on save.
+  bool _saving = false;
+  // The lyrics as they now stand, which after a save is newer than the track
+  // the parent handed us -- the parent does not re-supply it. Editing has to
+  // start from this, not from `widget.track.lyrics`, or the editor opens on
+  // the pre-save text and saving again quietly reverts the user's work.
   late String _lyrics;
   late TextEditingController _controller;
 
@@ -65,6 +66,47 @@ class _LyricsSheetState extends State<LyricsSheet> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  void _startEdit() {
+    _controller.text = _lyrics;
+    // Land the caret at the end rather than at 0, so typing appends to
+    // existing lyrics instead of pushing text in front of the first line.
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+    setState(() => _editing = true);
+  }
+
+  void _cancelEdit() {
+    _controller.text = _lyrics;
+    FocusScope.of(context).unfocus();
+    setState(() => _editing = false);
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final text = _controller.text.trim();
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(text);
+    } catch (e) {
+      // Stay in the editor holding the text. Dropping back to the view on a
+      // failed write would look exactly like a successful save while losing
+      // everything the user just typed.
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save lyrics: $e')));
+      return;
+    }
+    if (!mounted) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _lyrics = text;
+      _editing = false;
+      _saving = false;
+    });
   }
 
   @override
@@ -85,22 +127,12 @@ class _LyricsSheetState extends State<LyricsSheet> {
                 _Header(
                   track: widget.track,
                   editing: _editing,
+                  saving: _saving,
+                  kind: _LyricsKind.of(_lyrics),
                   onClose: () => Navigator.of(context).pop(),
-                  onToggleEdit: () => setState(() {
-                    _editing = !_editing;
-                    if (_editing) _controller.text = widget.track.lyrics ?? '';
-                  }),
-                  onSave: _editing
-                      ? () async {
-                          final text = _controller.text;
-                          await widget.onSave(text);
-                          if (!mounted) return;
-                          setState(() {
-                            _editing = false;
-                            _lyrics = text;
-                          });
-                        }
-                      : null,
+                  onEdit: _startEdit,
+                  onCancel: _cancelEdit,
+                  onSave: _save,
                 ),
                 const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
                 Expanded(
@@ -113,6 +145,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
                           lyrics: _lyrics,
                           player: widget.player,
                           scrollController: scrollController,
+                          onAddLyrics: _startEdit,
                         ),
                 ),
               ],
@@ -124,26 +157,54 @@ class _LyricsSheetState extends State<LyricsSheet> {
   }
 }
 
+/// Whether the lyrics carry timing, which decides both the badge in the header
+/// and how the body is rendered.
+enum _LyricsKind {
+  none,
+  plain,
+  synced;
+
+  static _LyricsKind of(String lyrics) {
+    if (lyrics.trim().isEmpty) return none;
+    final lrc = LrcParser.parse(lyrics);
+    if (lrc.lines.isNotEmpty) return synced;
+    if (lrc.untimed.isNotEmpty) return plain;
+    return none;
+  }
+
+  String? get label => switch (this) {
+    none => null,
+    plain => 'Plain text',
+    synced => 'Synced',
+  };
+}
+
 class _Header extends StatelessWidget {
   const _Header({
     required this.track,
     required this.editing,
+    required this.saving,
+    required this.kind,
     required this.onClose,
-    required this.onToggleEdit,
+    required this.onEdit,
+    required this.onCancel,
     required this.onSave,
   });
 
   final ManifestTrack track;
   final bool editing;
+  final bool saving;
+  final _LyricsKind kind;
   final VoidCallback onClose;
-  final VoidCallback onToggleEdit;
-  final VoidCallback? onSave;
+  final VoidCallback onEdit;
+  final VoidCallback onCancel;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        Space.lg,
+        Space.sm,
         Space.md,
         Space.md,
         Space.sm,
@@ -156,6 +217,7 @@ class _Header extends StatelessWidget {
               Icons.keyboard_arrow_down_rounded,
               color: Tones.textMuted,
             ),
+            tooltip: 'Close',
           ),
           Expanded(
             child: Column(
@@ -167,20 +229,67 @@ class _Header extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  track.artistAlbumLine,
-                  style: TypeScale.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        track.artistAlbumLine,
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    // Says whether tapping a line will seek. Without it the
+                    // two very different bodies below look like the same
+                    // screen failing to highlight anything.
+                    if (!editing && kind.label != null) ...[
+                      const SizedBox(width: Space.sm),
+                      _Badge(kind.label!),
+                    ],
+                  ],
                 ),
               ],
             ),
           ),
-          if (editing)
-            TextButton(onPressed: onSave, child: const Text('Save'))
-          else
-            TextButton(onPressed: onToggleEdit, child: const Text('Edit')),
+          if (editing) ...[
+            TextButton(
+              onPressed: saving ? null : onCancel,
+              child: const Text('Cancel'),
+            ),
+            if (saving)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: Space.md),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              TextButton(onPressed: onSave, child: const Text('Save')),
+          ] else
+            TextButton(onPressed: onEdit, child: const Text('Edit')),
         ],
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: Tones.surfaceRaised,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TypeScale.caption.copyWith(color: Tones.textMuted),
       ),
     );
   }
@@ -191,25 +300,45 @@ class _View extends StatefulWidget {
     required this.lyrics,
     required this.player,
     required this.scrollController,
+    required this.onAddLyrics,
   });
 
   final String lyrics;
   final TunePlayer player;
   final ScrollController scrollController;
+  final VoidCallback onAddLyrics;
 
   @override
   State<_View> createState() => _ViewState();
 }
 
 class _ViewState extends State<_View> {
-  late Lrc? _lrc;
+  Lrc? _lrc;
   int? _activeIndex;
 
   @override
   void initState() {
     super.initState();
-    _lrc = widget.lyrics.isEmpty ? null : LrcParser.parse(widget.lyrics);
+    _parse();
     widget.player.addListener(_onPlayerChange);
+  }
+
+  @override
+  void didUpdateWidget(_View oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Flutter reuses this State across a rebuild, so without this a save
+    // never reached the screen: parsing happened once in initState, and
+    // pasting lyrics into a track that had none left the empty state up.
+    if (oldWidget.lyrics != widget.lyrics) {
+      setState(() {
+        _parse();
+        _activeIndex = null;
+      });
+    }
+  }
+
+  void _parse() {
+    _lrc = widget.lyrics.trim().isEmpty ? null : LrcParser.parse(widget.lyrics);
   }
 
   @override
@@ -220,11 +349,11 @@ class _ViewState extends State<_View> {
 
   void _onPlayerChange() {
     final lrc = _lrc;
-    if (lrc == null) return;
+    if (lrc == null || lrc.lines.isEmpty) return;
     final pos = widget.player.position;
     final active = LrcParser.activeLine(lrc, pos);
     final idx = active == null ? null : lrc.lines.indexOf(active);
-    if (idx != _activeIndex) {
+    if (idx != _activeIndex && mounted) {
       setState(() => _activeIndex = idx);
     }
   }
@@ -232,33 +361,26 @@ class _ViewState extends State<_View> {
   @override
   Widget build(BuildContext context) {
     final lrc = _lrc;
-    if (lrc == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(Space.xl),
-          child: Text(
-            'No lyrics yet. Paste an LRC file into the editor, or paste '
-            'plain text and it will display without timing.\n\n'
-            'Lyrics live in the local database and survive syncs.',
-            textAlign: TextAlign.center,
-            style: TypeScale.body.copyWith(color: Tones.textMuted),
-          ),
-        ),
-      );
+    if (lrc == null || (lrc.lines.isEmpty && lrc.untimed.isEmpty)) {
+      return _Empty(onAddLyrics: widget.onAddLyrics);
     }
     if (lrc.lines.isEmpty) {
-      // Track has lyrics text but no timed lines — display as a single
-      // static block, no active-line tracking.
+      // Plain text: no timing to follow, so it is one readable block. This
+      // read `lrc.lines` before -- the timed list, which is empty in exactly
+      // this case -- so pasting plain lyrics rendered a blank sheet.
       return SingleChildScrollView(
         controller: widget.scrollController,
-        padding: const EdgeInsets.all(Space.lg),
-        child: Text(_plainTextFromLrc(lrc), style: TypeScale.body),
+        padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 64),
+        child: Text(
+          lrc.untimed.join('\n'),
+          style: TypeScale.body.copyWith(height: 1.6),
+        ),
       );
     }
     final activeIdx = _activeIndex ?? -1;
     return ListView.separated(
       controller: widget.scrollController,
-      padding: const EdgeInsets.all(Space.lg),
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 64),
       itemCount: lrc.lines.length,
       separatorBuilder: (_, _) => const SizedBox(height: Space.md),
       itemBuilder: (context, i) {
@@ -284,9 +406,48 @@ class _ViewState extends State<_View> {
       },
     );
   }
+}
 
-  String _plainTextFromLrc(Lrc lrc) {
-    return lrc.lines.map((l) => l.text).join('\n');
+class _Empty extends StatelessWidget {
+  const _Empty({required this.onAddLyrics});
+  final VoidCallback onAddLyrics;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(Space.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lyrics_outlined, size: 40, color: Tones.textMuted),
+            const SizedBox(height: Space.md),
+            Text(
+              'No lyrics yet',
+              style: TypeScale.title,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              'Paste an LRC file to follow along with the track, or paste '
+              'plain text to just read it.\n\n'
+              'Lyrics live in the local database and survive syncs.',
+              textAlign: TextAlign.center,
+              style: TypeScale.body.copyWith(color: Tones.textMuted),
+            ),
+            const SizedBox(height: Space.lg),
+            // The Edit control is a small word in the corner. On the one
+            // screen whose whole purpose is "there is nothing here yet",
+            // the way forward should be the obvious thing to press.
+            FilledButton.icon(
+              onPressed: onAddLyrics,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add lyrics'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -307,8 +468,14 @@ class _Editor extends StatelessWidget {
         expands: true,
         textAlignVertical: TextAlignVertical.top,
         style: TypeScale.body.copyWith(height: 1.4),
-        decoration: const InputDecoration(
-          hintText: '[00:00.00]Paste LRC here, or just plain text\n[00:12.34]First line',
+        decoration: InputDecoration(
+          hintText:
+              '[00:00.00]Paste LRC here, or just plain text\n'
+              '[00:12.34]First line',
+          hintStyle: TypeScale.body.copyWith(
+            color: Tones.textMuted.withValues(alpha: 0.5),
+            height: 1.4,
+          ),
           border: InputBorder.none,
         ),
       ),
