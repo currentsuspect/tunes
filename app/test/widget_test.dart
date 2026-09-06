@@ -9,6 +9,7 @@ import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
+import 'package:tunes/core/data/play_history.dart';
 import 'package:tunes/core/data/queue_store.dart';
 import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/data/reachability.dart';
@@ -396,6 +397,7 @@ void main() {
   late ManifestStore manifestStore;
   late QueueStore queueStore;
   late SettingsStore settings;
+  late PlayHistory history;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('tunes-test-');
@@ -421,6 +423,7 @@ void main() {
     FakeTunePlayer player, {
     Reachability? reachability,
   }) async {
+    history = PlayHistory(db, player);
     await tester.pumpWidget(
       TunesApp(
         client: client,
@@ -430,6 +433,7 @@ void main() {
         manifestStore: manifestStore,
         queueStore: queueStore,
         settings: settings,
+        history: history,
       ),
     );
     await tester.pumpAndSettle();

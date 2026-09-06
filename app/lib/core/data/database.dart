@@ -20,6 +20,34 @@ class Settings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
+/// One row per listen, kept as events rather than counters.
+///
+/// A counter can answer "how many times", and nothing else. The discovery
+/// work needs to ask questions that have not been decided yet -- what was
+/// abandoned, what was played to the end, what was on heavy rotation last
+/// month and is not now -- and every one of those is unanswerable once the
+/// events have been folded into a total.
+class PlayEvents extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get sha => text()();
+
+  /// Epoch milliseconds, so recency is a comparison rather than a parse.
+  IntColumn get startedAt => integer()();
+
+  /// Milliseconds actually heard, accumulated from playback rather than taken
+  /// from the end position: seeking to the last second of a track is not the
+  /// same as listening to it.
+  IntColumn get listenedMs => integer()();
+
+  /// The track's own length at the time, so a ratio can be recomputed later
+  /// without joining against a library that may have changed.
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+
+  /// Whether this counted as a play under the rule in PlayHistory. Stored so
+  /// the decision is auditable, and recomputable if the rule changes.
+  BoolColumn get completed => boolean().withDefault(const Constant(false))();
+}
+
 class Tracks extends Table {
   TextColumn get sha => text()();
   IntColumn get size => integer().withDefault(const Constant(0))();
@@ -139,6 +167,7 @@ class SyncState extends Table {
     TrackEdits,
     QueueEntries,
     Settings,
+    PlayEvents,
   ],
 )
 class TunesDatabase extends _$TunesDatabase {
@@ -150,7 +179,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -197,6 +226,13 @@ class TunesDatabase extends _$TunesDatabase {
         // an absent key means "the default", so an upgraded install starts
         // with the same behaviour it had.
         await m.createTable(settings);
+      }
+      if (from < 7) {
+        // v6 -> v7: play history. New table only. An install upgrading here
+        // starts with no history, which is the truth -- nothing was recorded
+        // before, and inventing plays from the library would poison every
+        // taste signal built on top of it.
+        await m.createTable(playEvents);
       }
     },
   );

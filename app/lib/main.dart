@@ -13,6 +13,7 @@ import 'core/data/database.dart';
 import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
 import 'core/data/manifest_store.dart';
+import 'core/data/play_history.dart';
 import 'core/data/queue_store.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
@@ -117,6 +118,10 @@ Future<void> main() async {
   // exist yet.
   unawaited(player.setGapless(settings.gapless));
 
+  // Watches the player from here on, so a listen is recorded whether it was
+  // started from the library, a notification, or a headset button.
+  final history = PlayHistory(db, player);
+
   player.onFirstPlay = ensureAudioService;
   // Not awaited: it only has to be in place before the first track, and the
   // library should not wait on the audio session to draw.
@@ -132,6 +137,7 @@ Future<void> main() async {
       manifestStore: manifestStore,
       queueStore: queueStore,
       settings: settings,
+      history: history,
     ),
   );
 }
@@ -146,6 +152,7 @@ class TunesApp extends StatefulWidget {
     required this.manifestStore,
     required this.queueStore,
     required this.settings,
+    required this.history,
   });
 
   final TunesClient client;
@@ -155,6 +162,7 @@ class TunesApp extends StatefulWidget {
   final ManifestStore manifestStore;
   final QueueStore queueStore;
   final SettingsStore settings;
+  final PlayHistory history;
 
   @override
   State<TunesApp> createState() => _TunesAppState();
@@ -200,6 +208,7 @@ class _TunesAppState extends State<TunesApp> {
             manifestStore: widget.manifestStore,
             queueStore: widget.queueStore,
             settings: widget.settings,
+            history: widget.history,
             downloads: _downloads,
           ),
         ),
@@ -218,6 +227,7 @@ class AppShell extends StatefulWidget {
     required this.manifestStore,
     required this.queueStore,
     required this.settings,
+    required this.history,
     required this.downloads,
   });
 
@@ -228,6 +238,7 @@ class AppShell extends StatefulWidget {
   final ManifestStore manifestStore;
   final QueueStore queueStore;
   final SettingsStore settings;
+  final PlayHistory history;
 
   /// Owned by [TunesApp], which publishes it above the Navigator so pushed
   /// routes can reach it too.
@@ -264,6 +275,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
     widget.player.addListener(_trackRecents);
+    // Recents used to live only in memory, so closing the app forgot what you
+    // had been listening to. They come from the recorded history now.
+    widget.history.addListener(_loadRecents);
+    _loadRecents();
     // Hydrate from the store before kicking off a sync, so the sync's
     // setState doesn't race against a stale in-memory snapshot.
     _bootstrap();
@@ -274,6 +289,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
+    widget.history.removeListener(_loadRecents);
     // Only the listener: the manager itself belongs to TunesApp, which
     // outlives this shell.
     _downloads.removeListener(_onDownloadsChanged);
@@ -285,6 +301,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && !widget.reachability.offline) {
       _reload();
     }
+    if (state == AppLifecycleState.paused) {
+      // Settle the listen in progress. Leaving mid-track is ordinary, and an
+      // unsettled listen is one that never happened.
+      widget.history.flush();
+    }
+  }
+
+  /// Newest first, and only tracks still in the library -- history outlives
+  /// the files it refers to, and a recent play of something since removed is
+  /// not something to put on the home screen.
+  Future<void> _loadRecents() async {
+    final shas = await widget.history.recentShas();
+    if (!mounted) return;
+    final manifest = _manifest;
+    if (manifest == null) return;
+    final bySha = {for (final t in manifest.tracks) t.sha: t};
+    final tracks = [
+      for (final sha in shas)
+        if (bySha[sha] case final ManifestTrack t) t,
+    ];
+    if (tracks.isEmpty) return;
+    setState(() => _recents = tracks);
   }
 
   void _onReachability() {
@@ -378,6 +416,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (mounted && applyOk) {
           final fresh = await _manifestFromStore();
           if (mounted) setState(() => _manifest = fresh);
+          // The first load happens before the manifest exists, so recents
+          // cannot resolve their tracks until now.
+          unawaited(_loadRecents());
           synced = true;
         }
       } else if (fetchError != null && mounted) {
