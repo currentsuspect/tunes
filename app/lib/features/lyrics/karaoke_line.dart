@@ -1,62 +1,8 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
-import '../../core/audio/playhead.dart';
-import '../../core/audio/tune_player.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/theme/tokens.dart';
-
-/// A smooth playhead for the lyric view.
-///
-/// The player notifies at most four times a second, which is too coarse to
-/// sweep a highlight across a word. This takes each report as a fix and
-/// projects between them on a ticker, so only the widgets that listen here
-/// repaint at frame rate -- the lyric list itself does not.
-///
-/// The ticker only runs while something is playing, so a paused sheet costs
-/// nothing.
-class PlayheadClock extends ValueNotifier<Duration> {
-  PlayheadClock({required this.player, required TickerProvider vsync})
-    : super(player.position) {
-    _ticker = vsync.createTicker(_onTick);
-    player.addListener(_onPlayerChanged);
-    _onPlayerChanged();
-  }
-
-  final TunePlayer player;
-  late final Ticker _ticker;
-  Duration _reported = Duration.zero;
-  DateTime _reportedAt = DateTime.now();
-
-  void _onPlayerChanged() {
-    _reported = player.position;
-    _reportedAt = DateTime.now();
-    if (player.playing && !_ticker.isActive) {
-      _ticker.start();
-    } else if (!player.playing && _ticker.isActive) {
-      _ticker.stop();
-    }
-    if (!player.playing) value = _reported;
-  }
-
-  void _onTick(Duration _) {
-    value = projectPosition(
-      reported: _reported,
-      reportedAt: _reportedAt,
-      now: DateTime.now(),
-      playing: player.playing,
-      duration: player.duration,
-    );
-  }
-
-  @override
-  void dispose() {
-    player.removeListener(_onPlayerChanged);
-    _ticker.dispose();
-    super.dispose();
-  }
-}
 
 /// One lyric line rendered word by word, with the highlight sweeping across
 /// the word currently being sung.

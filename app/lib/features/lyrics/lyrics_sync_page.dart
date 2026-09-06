@@ -3,13 +3,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/sync_draft.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
-import 'karaoke_line.dart';
 
 /// Which pass the editor is on.
 enum SyncMode {

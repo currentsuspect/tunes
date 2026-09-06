@@ -8,6 +8,7 @@ import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
+import 'package:tunes/core/audio/playhead_clock.dart';
 import 'package:tunes/core/data/likes_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/play_history.dart';
@@ -402,6 +403,10 @@ void main() {
   late PlayHistory history;
 
   setUp(() async {
+    // Continuous ticking and pumpAndSettle cannot both be true: the clock
+    // schedules a frame every frame while playing, so a settle after starting
+    // playback would never finish. Positions still flow from the player.
+    PlayheadClock.ticking = false;
     tempDir = await Directory.systemTemp.createTemp('tunes-test-');
     store = DownloadStore(tempDir);
     await store.load();
@@ -477,8 +482,13 @@ void main() {
     expect(client.changesCalls, isEmpty);
     expect(find.text('2 tracks · 1 artist · 2 releases'), findsOneWidget);
 
-    // Force a second sync via the manual refresh button.
-    await tester.tap(find.byIcon(Icons.refresh));
+    // Force a second sync by pulling the feed down, which is the only way to
+    // ask for one now that the header button is gone.
+    await tester.fling(
+      find.text('2 tracks · 1 artist · 2 releases'),
+      const Offset(0, 320),
+      1000,
+    );
     await tester.pumpAndSettle();
 
     // Second sync: _lastSyncAt is set → /changes called with it; empty
@@ -511,10 +521,10 @@ void main() {
       FakeTunePlayer(),
     );
 
-    expect(
-      find.textContaining('No library yet — channels are configured'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Your library is empty'), findsOneWidget);
+    // The empty state has to offer the gesture, since there is no content to
+    // discover it on.
+    expect(find.textContaining('pull down'), findsOneWidget);
   });
 
   testWidgets('library tab lists tracks, title first', (tester) async {

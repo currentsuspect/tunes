@@ -7,6 +7,7 @@ import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/like_button.dart';
+import '../player/scrubber.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
 import '../artist/artist_page.dart';
@@ -37,12 +38,6 @@ class NowPlayingPage extends StatelessWidget {
   final String Function(String sha) artUrlFor;
   final ManifestStore manifestStore;
   final QueueStore? queueStore;
-
-  String _label(Duration d) {
-    final s = d.inSeconds;
-    final m = (s ~/ 60).toString().padLeft(2, '0');
-    return '$m:${(s % 60).toString().padLeft(2, '0')}';
-  }
 
   void _openQueue(BuildContext context) {
     final qs = queueStore;
@@ -193,13 +188,9 @@ class NowPlayingPage extends StatelessWidget {
                 child: Text('Nothing playing', style: TypeScale.body),
               );
             }
-            final position = player.position;
             final duration = player.duration.inMilliseconds > 0
                 ? player.duration
                 : Duration(milliseconds: current.durationMs ?? 0);
-            final value = position.inMilliseconds
-                .clamp(0, duration.inMilliseconds)
-                .toDouble();
             final downloaded = store.pathFor(current.sha) != null;
 
             return SafeArea(
@@ -366,8 +357,13 @@ class NowPlayingPage extends StatelessWidget {
                             ),
                             Expanded(
                               child: Padding(
+                                // lg, not xl: the sleeve is the subject of
+                                // this screen and forty points of margin a
+                                // side was giving away sixty-four points of
+                                // it to nothing.
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: Space.xl,
+                                  horizontal: Space.lg,
+                                  vertical: Space.sm,
                                 ),
                                 child: Center(
                                   child: _Artwork(
@@ -407,7 +403,7 @@ class NowPlayingPage extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                  const SizedBox(height: Space.lg),
+                                  const SizedBox(height: Space.md),
                                 ],
                               ),
                             ),
@@ -415,70 +411,9 @@ class NowPlayingPage extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                 horizontal: Space.lg,
                               ),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    _label(position),
-                                    style: TypeScale.caption.copyWith(
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Builder(
-                                      builder: (context) {
-                                        // A bare Slider inherits a rail colour that is
-                                        // invisible on this background, so at 0:00 the
-                                        // thumb looked like a dot floating between two
-                                        // timestamps with no track at all.
-                                        // `clamp` is declared on num and returns num, so
-                                        // the toDouble() has to come after it.
-                                        final maxMs = duration.inMilliseconds
-                                            .clamp(1, double.infinity)
-                                            .toDouble();
-                                        return SliderTheme(
-                                          data: SliderThemeData(
-                                            trackHeight: 3,
-                                            activeTrackColor: Tones.primary,
-                                            inactiveTrackColor:
-                                                Tones.surfaceRaised,
-                                            thumbColor: Tones.primary,
-                                            overlayColor: Tones.primary
-                                                .withValues(alpha: 0.15),
-                                            thumbShape:
-                                                const RoundSliderThumbShape(
-                                                  enabledThumbRadius: 6,
-                                                ),
-                                            overlayShape:
-                                                const RoundSliderOverlayShape(
-                                                  overlayRadius: 14,
-                                                ),
-                                          ),
-                                          child: Slider(
-                                            // Position can briefly exceed duration on a
-                                            // stream; Slider asserts if it does.
-                                            value: value
-                                                .clamp(0, maxMs)
-                                                .toDouble(),
-                                            max: maxMs,
-                                            onChanged: (v) => player.seek(
-                                              Duration(milliseconds: v.round()),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  Text(
-                                    _label(duration),
-                                    style: TypeScale.caption.copyWith(
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                              child: Scrubber(
+                                player: player,
+                                duration: duration,
                               ),
                             ),
                             Padding(
@@ -653,7 +588,12 @@ class _Artwork extends StatelessWidget {
         final available = c.biggest.shortestSide.isFinite
             ? c.biggest.shortestSide
             : 320.0;
-        final side = available.clamp(0.0, 360.0);
+        // Bounded by the shorter axis so it neither explodes on a tablet
+        // nor overflows in landscape, where the Expanded parent can be about
+        // eighty points tall. The cap rises with the viewport: on a tall
+        // phone the leftover height used to become an empty band above and
+        // below the sleeve rather than more sleeve.
+        final side = available.clamp(0.0, 420.0);
         final art = ClipRRect(
           borderRadius: BorderRadius.circular(RadiusTokens.card),
           child: SizedBox(

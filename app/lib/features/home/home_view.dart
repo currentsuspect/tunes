@@ -20,6 +20,7 @@ class HomeView extends StatelessWidget {
     required this.onAlbumTap,
     required this.onPlay,
     required this.artUrlFor,
+    required this.onRefresh,
   });
 
   final TunesManifest manifest;
@@ -41,6 +42,11 @@ class HomeView extends StatelessWidget {
   final void Function(List<ManifestTrack> tracks, int index) onPlay;
   final String Function(String sha) artUrlFor;
 
+  /// Pull to refresh. Completes when the sync does, which is what the
+  /// indicator waits on -- a refresh that returns immediately and reloads in
+  /// the background makes the gesture feel like it did nothing.
+  final Future<void> Function() onRefresh;
+
   // Edge-to-edge: the screen owns the layout. Sections decide whether
   // they need horizontal padding (for legibility) or not (carousels
   // peek at the edge).
@@ -51,15 +57,25 @@ class HomeView extends StatelessWidget {
   Widget build(BuildContext context) {
     final tracks = manifest.tracks;
     if (tracks.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(_sectionPadding),
-        child: Center(
-          child: Text(
-            'No library yet — channels are configured, content appears '
-            'here as tunesd fetches it.',
-            textAlign: TextAlign.center,
-            style: TypeScale.body,
-          ),
+      // Still pullable: an empty library is the state you most want to be
+      // able to retry from, and a screen with nothing on it is the one place
+      // a gesture has to be offered rather than discovered.
+      return _Refreshable(
+        onRefresh: onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 120),
+            Padding(
+              padding: EdgeInsets.all(_sectionPadding),
+              child: Text(
+                'Your library is empty. Music appears here as the daemon '
+                'fetches it — pull down to check again.',
+                textAlign: TextAlign.center,
+                style: TypeScale.body,
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -106,101 +122,132 @@ class HomeView extends StatelessWidget {
     final fresh = releases.where((r) => r.year == '${now.year}').toList()
       ..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
 
-    return ListView(
-      padding: const EdgeInsets.only(bottom: Space.lg),
-      children: [
-        // Stats summary — full-bleed caption, padded.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            _sectionPadding,
-            Space.md,
-            _sectionPadding,
-            0,
+    return _Refreshable(
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: Space.lg),
+        children: [
+          // Stats summary — full-bleed caption, padded.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              _sectionPadding,
+              Space.md,
+              _sectionPadding,
+              0,
+            ),
+            child: Text(
+              '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
+              '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
+              '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
+              style: TypeScale.caption,
+            ),
           ),
-          child: Text(
-            '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
-            '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
-            '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
-            style: TypeScale.caption,
-          ),
-        ),
-        if (justAddedSorted.isNotEmpty)
-          _JustAddedCarousel(
-            tracks: justAddedSorted,
-            now: now,
-            onPlay: onPlay,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (onRepeat.isNotEmpty)
-          _DynamicRail(
-            title: 'On repeat',
-            subtitle: 'What you keep going back to',
-            tracks: onRepeat,
-            onPlay: onPlay,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (listenAgain.isNotEmpty)
-          _DynamicRail(
-            title: 'Listen again',
-            subtitle: 'Played properly once, not lately',
-            tracks: listenAgain,
-            onPlay: onPlay,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (missingAlbums.isNotEmpty)
-          _MissingAlbums(
-            albums: missingAlbums,
-            onArtistTap: onArtistTap,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (missing.isNotEmpty)
-          _MissingList(
-            releases: missing,
-            onAlbumTap: onAlbumTap,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-          ),
-        if (fresh.isNotEmpty)
-          _ReleasedThisYear(
-            releases: fresh,
-            manifest: manifest,
-            onAlbumTap: onAlbumTap,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-          ),
-        if (artistList.isNotEmpty)
-          _ArtistsRail(
-            artistList: artistList,
-            manifest: manifest,
-            onArtistTap: onArtistTap,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (releases.isNotEmpty)
-          _AlbumsRail(
-            releases: releases,
-            onAlbumTap: onAlbumTap,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-            peek: _carouselPeek,
-          ),
-        if (recents.isNotEmpty)
-          _RecentlyPlayed(
-            recents: recents,
-            onPlay: onPlay,
-            artUrlFor: artUrlFor,
-            sectionPadding: _sectionPadding,
-          ),
-      ],
+          if (justAddedSorted.isNotEmpty)
+            _JustAddedCarousel(
+              tracks: justAddedSorted,
+              now: now,
+              onPlay: onPlay,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (onRepeat.isNotEmpty)
+            _DynamicRail(
+              title: 'On repeat',
+              subtitle: 'What you keep going back to',
+              tracks: onRepeat,
+              onPlay: onPlay,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (listenAgain.isNotEmpty)
+            _DynamicRail(
+              title: 'Listen again',
+              subtitle: 'Played properly once, not lately',
+              tracks: listenAgain,
+              onPlay: onPlay,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (missingAlbums.isNotEmpty)
+            _MissingAlbums(
+              albums: missingAlbums,
+              onArtistTap: onArtistTap,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (missing.isNotEmpty)
+            _MissingList(
+              releases: missing,
+              onAlbumTap: onAlbumTap,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+            ),
+          if (fresh.isNotEmpty)
+            _ReleasedThisYear(
+              releases: fresh,
+              manifest: manifest,
+              onAlbumTap: onAlbumTap,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+            ),
+          if (artistList.isNotEmpty)
+            _ArtistsRail(
+              artistList: artistList,
+              manifest: manifest,
+              onArtistTap: onArtistTap,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (releases.isNotEmpty)
+            _AlbumsRail(
+              releases: releases,
+              onAlbumTap: onAlbumTap,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+              peek: _carouselPeek,
+            ),
+          if (recents.isNotEmpty)
+            _RecentlyPlayed(
+              recents: recents,
+              onPlay: onPlay,
+              artUrlFor: artUrlFor,
+              sectionPadding: _sectionPadding,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pull to refresh, in the app's own colours.
+///
+/// Always scrollable, so the gesture works even when the content is shorter
+/// than the screen -- a feed you cannot pull because it happens to be short
+/// is a feed whose refresh is a coin toss.
+class _Refreshable extends StatelessWidget {
+  const _Refreshable({required this.onRefresh, required this.child});
+
+  final Future<void> Function() onRefresh;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      color: Tones.primary,
+      backgroundColor: Tones.surfaceRaised,
+      displacement: 28,
+      strokeWidth: 2.5,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: child,
+      ),
     );
   }
 }

@@ -29,6 +29,7 @@ import 'domain/manifest.dart';
 import 'features/album/album_page.dart';
 import 'features/artist/artist_page.dart';
 import 'features/discover/discover_view.dart';
+import 'features/home/home_skeleton.dart';
 import 'features/home/home_view.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
@@ -517,6 +518,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _sync();
   }
 
+  /// Pull to refresh. Awaits the sync so the indicator stays until the work
+  /// is actually done.
+  ///
+  /// A failure keeps whatever is on screen and says so quietly. Blanking a
+  /// feed that was correct a moment ago is a worse outcome than a stale one,
+  /// and a refresh that succeeded needs no announcement at all.
+  Future<void> _refresh() async {
+    await _sync();
+    if (!mounted) return;
+    if (_lastSyncError != null && _manifest != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't refresh"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   void _onDownloadsChanged() {
     if (!mounted) return;
     final active = _downloads.jobs.entries
@@ -705,11 +725,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       const Expanded(
                         child: Text('tunes', style: TypeScale.wordmark),
                       ),
-                      IconButton(
-                        onPressed: _reload,
-                        icon: const Icon(Icons.refresh, color: Tones.textMuted),
-                        tooltip: 'Refresh library',
-                      ),
                     ],
                   ),
                 ),
@@ -826,9 +841,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (_lastSyncError != null) {
         return _buildUnreachableState();
       }
-      return const Center(
-        child: CircularProgressIndicator(color: Tones.primary),
-      );
+      // Geometry, not a spinner: the skeleton is built to the same shape as
+      // the feed, so the library replaces it without anything moving.
+      return const HomeSkeleton();
     }
     if (_manifest!.tracks.isEmpty && _lastSyncError != null) {
       return _buildUnreachableState();
@@ -876,6 +891,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         manifest: manifest,
         recents: _recents,
         missingAlbums: _missingAlbums,
+        onRefresh: _refresh,
         onRepeat: _onRepeat,
         listenAgain: _listenAgain,
         onArtistTap: (artist) => _openArtist(artist, manifest),
