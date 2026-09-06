@@ -46,6 +46,20 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   late SyncDraft _draft;
   SyncMode _mode = SyncMode.lines;
   int _selectedLine = 0;
+
+  /// Which word the next tap writes to. Null means "the next one without a
+  /// mark", which is the run-through case; picking a chip aims at that word
+  /// instead, so a single bad word can be redone without re-timing the line.
+  int? _selectedWord;
+
+  /// Subtracted from the playhead on every mark.
+  ///
+  /// A tap is always late: the sound reaches you, you react, and the audio
+  /// you heard left the decoder earlier still. The editor's readout is
+  /// honest about when the button was pressed, which is precisely why the
+  /// result plays back behind the vocal. Adjustable because reaction time is
+  /// personal and output latency is per-device.
+  Duration _tapOffset = const Duration(milliseconds: -250);
   bool _saving = false;
 
   /// Set by any action that places or moves a mark. Timing a line and then
@@ -90,21 +104,60 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 
   Duration get _now => _playhead.value;
 
+  /// The moment being recorded: where the playhead is, less the tap offset,
+  /// never before the start of the track.
+  Duration get _markAt {
+    final t = _now + _tapOffset;
+    return t.isNegative ? Duration.zero : t;
+  }
+
   void _stamp() {
     _dirty = true;
     setState(() {
       if (_mode == SyncMode.lines) {
         final i = _draft.nextUntimedLine;
         if (i == null) return;
-        _draft.lineStarts[i] = _now;
+        _draft.lineStarts[i] = _markAt;
         _selectedLine = (i + 1).clamp(0, _draft.lines.length - 1);
       } else {
-        final w = _draft.nextUntimedWord(_selectedLine);
+        final words = _draft.wordStarts[_selectedLine];
+        if (words.isEmpty) return;
+        final w = _selectedWord ?? _draft.nextUntimedWord(_selectedLine);
         if (w == null) return;
-        _draft.wordStarts[_selectedLine][w] = _now;
+        words[w] = _markAt;
+        // Walk on so a run-through keeps working, and stop at the end rather
+        // than wrapping round and overwriting the first word.
+        _selectedWord = w + 1 < words.length ? w + 1 : null;
       }
     });
     _scrollToCursor();
+  }
+
+  /// Puts the playhead just before a word so it can be heard and re-timed.
+  /// Aiming at a word by eye is guesswork; this is the difference between
+  /// correcting a mark and inventing one.
+  void _auditionWord(int index) {
+    const leadIn = Duration(milliseconds: 700);
+    final at =
+        _draft.wordStarts[_selectedLine][index] ??
+        _draft.lineStarts[_selectedLine];
+    setState(() => _selectedWord = index);
+    if (at == null) return;
+    widget.player.seek(at > leadIn ? at - leadIn : Duration.zero);
+    if (!widget.player.playing) widget.player.play();
+  }
+
+  /// Same idea for a whole line: select it and play from just before it.
+  void _auditionLine(int index) {
+    setState(() {
+      _selectedLine = index;
+      _selectedWord = null;
+    });
+    final at = _draft.lineStarts[index];
+    if (at == null) return;
+    const leadIn = Duration(milliseconds: 700);
+    widget.player.seek(at > leadIn ? at - leadIn : Duration.zero);
+    if (!widget.player.playing) widget.player.play();
   }
 
   void _undo() {
@@ -149,6 +202,20 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   /// Moves every mark at once. Tapping along runs consistently late -- you
   /// hear the line, then you press -- so the whole take is usually a beat
   /// behind rather than any single mark being wrong.
+  /// Only affects marks made from here on; existing ones are left alone so
+  /// tuning the offset never silently rewrites work already done.
+  void _adjustTapOffset(Duration by) {
+    setState(() {
+      final next = _tapOffset + by;
+      // Beyond a second in either direction it is no longer latency.
+      _tapOffset = next < const Duration(seconds: -1)
+          ? const Duration(seconds: -1)
+          : next > const Duration(seconds: 1)
+          ? const Duration(seconds: 1)
+          : next;
+    });
+  }
+
   void _shiftAll(Duration by) {
     _dirty = true;
     setState(() => _draft.shiftAll(by));
@@ -318,13 +385,16 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
                       draft: _draft,
                       scroll: _scroll,
                       cursor: _draft.nextUntimedLine,
-                      onPick: (i) => setState(() => _selectedLine = i),
+                      onPick: _auditionLine,
                       selected: _selectedLine,
                     )
                   : _WordList(
                       draft: _draft,
                       lineIndex: _selectedLine,
-                      cursor: _draft.nextUntimedWord(_selectedLine),
+                      cursor:
+                          _selectedWord ??
+                          _draft.nextUntimedWord(_selectedLine),
+                      onPick: _auditionWord,
                     ),
             ),
             if (untimed > 0)
@@ -345,6 +415,8 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
               onUndo: _undo,
               onNudge: _nudge,
               onShiftAll: _shiftAll,
+              onTapOffset: _adjustTapOffset,
+              tapOffset: _tapOffset,
               onReplay: _replayLine,
             ),
           ],
@@ -565,11 +637,13 @@ class _WordList extends StatelessWidget {
     required this.draft,
     required this.lineIndex,
     required this.cursor,
+    required this.onPick,
   });
 
   final SyncDraft draft;
   final int lineIndex;
   final int? cursor;
+  final ValueChanged<int> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -581,35 +655,41 @@ class _WordList extends StatelessWidget {
         runSpacing: Space.sm,
         children: [
           for (var i = 0; i < words.length; i++)
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Space.sm,
-                vertical: 4,
-              ),
-              decoration: BoxDecoration(
-                color: i == cursor
-                    ? Tones.primary.withValues(alpha: 0.25)
-                    : Tones.surfaceRaised,
-                borderRadius: BorderRadius.circular(6),
-                border: i == cursor
-                    ? Border.all(color: Tones.primary, width: 1)
-                    : null,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(words[i], style: TypeScale.body),
-                  Text(
-                    draft.wordStarts[lineIndex][i] == null
-                        ? '--'
-                        : '${(draft.wordStarts[lineIndex][i]!.inMilliseconds / 1000).toStringAsFixed(2)}s',
-                    style: TypeScale.caption.copyWith(
-                      color: draft.wordStarts[lineIndex][i] == null
-                          ? Tones.textMuted
-                          : Tones.primary,
+            // Tapping a word plays from just before it. Re-timing one word by
+            // eye is guesswork; hearing it first is the whole point.
+            InkWell(
+              onTap: () => onPick(i),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: Space.sm,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: i == cursor
+                      ? Tones.primary.withValues(alpha: 0.25)
+                      : Tones.surfaceRaised,
+                  borderRadius: BorderRadius.circular(6),
+                  border: i == cursor
+                      ? Border.all(color: Tones.primary, width: 1)
+                      : null,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(words[i], style: TypeScale.body),
+                    Text(
+                      draft.wordStarts[lineIndex][i] == null
+                          ? '--'
+                          : '${(draft.wordStarts[lineIndex][i]!.inMilliseconds / 1000).toStringAsFixed(2)}s',
+                      style: TypeScale.caption.copyWith(
+                        color: draft.wordStarts[lineIndex][i] == null
+                            ? Tones.textMuted
+                            : Tones.primary,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
         ],
@@ -626,6 +706,8 @@ class _Controls extends StatelessWidget {
     required this.onUndo,
     required this.onNudge,
     required this.onShiftAll,
+    required this.onTapOffset,
+    required this.tapOffset,
     required this.onReplay,
   });
 
@@ -635,6 +717,8 @@ class _Controls extends StatelessWidget {
   final VoidCallback onUndo;
   final ValueChanged<Duration> onNudge;
   final ValueChanged<Duration> onShiftAll;
+  final ValueChanged<Duration> onTapOffset;
+  final Duration tapOffset;
   final VoidCallback onReplay;
 
   @override
@@ -650,21 +734,27 @@ class _Controls extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // Everything, not just the last mark. Fixing forty lines one at a
-            // time is not a workflow.
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                Text('Shift all', style: TypeScale.caption),
-                TextButton(
-                  onPressed: () =>
-                      onShiftAll(const Duration(milliseconds: -100)),
-                  child: const Text('earlier'),
+                // How early each new mark is placed. A tap is always late:
+                // the sound arrives, you react, and what you heard left the
+                // decoder earlier still. Shown as a number because it is the
+                // one setting worth tuning once and then trusting.
+                _Stepper(
+                  label: 'Tap',
+                  value:
+                      '${(tapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s',
+                  onLess: () => onTapOffset(const Duration(milliseconds: -50)),
+                  onMore: () => onTapOffset(const Duration(milliseconds: 50)),
                 ),
-                TextButton(
-                  onPressed: () =>
-                      onShiftAll(const Duration(milliseconds: 100)),
-                  child: const Text('later'),
+                // Everything at once, not just the last mark. Fixing forty
+                // lines one at a time is not a workflow.
+                _Stepper(
+                  label: 'Shift all',
+                  value: null,
+                  onLess: () => onShiftAll(const Duration(milliseconds: -100)),
+                  onMore: () => onShiftAll(const Duration(milliseconds: 100)),
                 ),
               ],
             ),
@@ -718,6 +808,54 @@ class _Controls extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Label, optional readout, and a minus/plus pair. Used for the two settings
+/// that need adjusting mid-flow without leaving the editor.
+class _Stepper extends StatelessWidget {
+  const _Stepper({
+    required this.label,
+    required this.value,
+    required this.onLess,
+    required this.onMore,
+  });
+
+  final String label;
+  final String? value;
+  final VoidCallback onLess;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: TypeScale.caption),
+        if (value != null) ...[
+          const SizedBox(width: 4),
+          Text(
+            value!,
+            style: TypeScale.caption.copyWith(
+              color: Tones.primary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+          onPressed: onLess,
+          icon: const Icon(Icons.remove_rounded, size: 18),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+          onPressed: onMore,
+          icon: const Icon(Icons.add_rounded, size: 18),
+        ),
+      ],
     );
   }
 }
