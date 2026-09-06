@@ -93,4 +93,124 @@ void main() {
       expect(LrcParser.format(lrc), '[65:30.00]Deep cut');
     });
   });
+
+  group('enhanced LRC (word timing)', () {
+    const enhanced =
+        '[00:12.40]<00:12.40>I <00:12.72>remember '
+        '<00:13.41>the <00:13.72>night';
+
+    test('reads a timestamp per word', () {
+      final lrc = LrcParser.parse(enhanced);
+      expect(lrc.hasWordTiming, isTrue);
+      expect(lrc.lines.single.words.map((w) => w.text).toList(), [
+        'I',
+        'remember',
+        'the',
+        'night',
+      ]);
+      expect(
+        lrc.lines.single.words[1].start,
+        const Duration(seconds: 12, milliseconds: 720),
+      );
+    });
+
+    test('rebuilds the display text from the words', () {
+      // The line must read identically whether or not it is word-synced.
+      expect(
+        LrcParser.parse(enhanced).lines.single.text,
+        'I remember the night',
+      );
+    });
+
+    test('a plain line reports no word timing', () {
+      final lrc = LrcParser.parse('[00:12.34]First line');
+      expect(lrc.hasWordTiming, isFalse);
+      expect(lrc.lines.single.words, isEmpty);
+    });
+
+    test('a word ends where the next one starts', () {
+      final lrc = LrcParser.parse(enhanced);
+      expect(
+        lrc.wordEndOf(0, 1),
+        const Duration(seconds: 13, milliseconds: 410),
+      );
+    });
+
+    test('the last word of a line ends at the next line', () {
+      final lrc = LrcParser.parse(
+        '[00:10.00]<00:10.00>one <00:11.00>two\n[00:20.00]<00:20.00>three',
+      );
+      expect(lrc.wordEndOf(0, 1), const Duration(seconds: 20));
+    });
+
+    test('the very last word uses the track end when given', () {
+      final lrc = LrcParser.parse(enhanced);
+      expect(
+        lrc.wordEndOf(0, 3, trackEnd: const Duration(seconds: 20)),
+        const Duration(seconds: 20),
+      );
+      // Without one it still has width, so the highlight is never zero-length.
+      expect(lrc.wordEndOf(0, 3), greaterThan(lrc.lines.single.words[3].start));
+    });
+
+    test('tracks which word is being sung', () {
+      final lrc = LrcParser.parse(enhanced);
+      expect(
+        LrcParser.activeWordIndex(lrc, 0, const Duration(seconds: 12)),
+        isNull,
+      );
+      expect(
+        LrcParser.activeWordIndex(
+          lrc,
+          0,
+          const Duration(seconds: 12, milliseconds: 900),
+        ),
+        1,
+      );
+      // Past the line, the last word stays lit rather than resetting.
+      expect(LrcParser.activeWordIndex(lrc, 0, const Duration(minutes: 1)), 3);
+    });
+
+    test('reports how far through a word the playhead is', () {
+      final lrc = LrcParser.parse(enhanced);
+      final mid = LrcParser.wordProgress(
+        lrc,
+        0,
+        1,
+        const Duration(seconds: 13, milliseconds: 65),
+      );
+      expect(mid, closeTo(0.5, 0.02));
+      expect(
+        LrcParser.wordProgress(lrc, 0, 1, const Duration(seconds: 12)),
+        0.0,
+      );
+      expect(
+        LrcParser.wordProgress(lrc, 0, 1, const Duration(seconds: 19)),
+        1.0,
+      );
+    });
+
+    test('round-trips through format', () {
+      expect(LrcParser.format(LrcParser.parse(enhanced)), enhanced);
+    });
+
+    test('exports as ordinary LRC without losing words', () {
+      expect(
+        LrcParser.toPlainLrc(LrcParser.parse(enhanced)),
+        '[00:12.40]I remember the night',
+      );
+    });
+
+    test('a timing mark with no word does not render its own markup', () {
+      // Recording a timestamp before typing the word left the tag itself
+      // showing as the lyric.
+      final lrc = LrcParser.parse('[00:01.00]<00:01.00>');
+      expect(lrc.lines, isEmpty);
+    });
+
+    test('word tags outside a timed line do not leak markup', () {
+      final lrc = LrcParser.parse('<00:01.00>hello');
+      expect(lrc.untimed, ['hello']);
+    });
+  });
 }

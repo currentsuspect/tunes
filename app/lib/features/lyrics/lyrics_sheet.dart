@@ -4,6 +4,8 @@ import '../../core/audio/tune_player.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
+import 'karaoke_line.dart';
+import 'lyrics_sync_page.dart';
 
 /// Bottom sheet that shows the lyrics for a track, with a tap-to-edit
 /// toggle. Reads the current lyrics blob from the track (already
@@ -78,6 +80,25 @@ class _LyricsSheetState extends State<LyricsSheet> {
     setState(() => _editing = true);
   }
 
+  /// Opens the timing editor on the current lyrics. Pushed on the root
+  /// navigator, so the sheet stays underneath and reappears with the new
+  /// timings already applied.
+  Future<void> _openSync() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LyricsSyncPage(
+          track: widget.track,
+          player: widget.player,
+          initialLyrics: _lyrics,
+          onSave: (text) async {
+            await widget.onSave(text);
+            if (mounted) setState(() => _lyrics = text);
+          },
+        ),
+      ),
+    );
+  }
+
   void _cancelEdit() {
     _controller.text = _lyrics;
     FocusScope.of(context).unfocus();
@@ -130,6 +151,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
                   saving: _saving,
                   kind: _LyricsKind.of(_lyrics),
                   onClose: () => Navigator.of(context).pop(),
+                  onSync: _lyrics.trim().isEmpty ? null : _openSync,
                   onEdit: _startEdit,
                   onCancel: _cancelEdit,
                   onSave: _save,
@@ -162,11 +184,13 @@ class _LyricsSheetState extends State<LyricsSheet> {
 enum _LyricsKind {
   none,
   plain,
-  synced;
+  synced,
+  wordSynced;
 
   static _LyricsKind of(String lyrics) {
     if (lyrics.trim().isEmpty) return none;
     final lrc = LrcParser.parse(lyrics);
+    if (lrc.hasWordTiming) return wordSynced;
     if (lrc.lines.isNotEmpty) return synced;
     if (lrc.untimed.isNotEmpty) return plain;
     return none;
@@ -176,6 +200,9 @@ enum _LyricsKind {
     none => null,
     plain => 'Plain text',
     synced => 'Synced',
+    // Says why this line is lighting up a word at a time rather than all at
+    // once, which otherwise looks like a rendering quirk.
+    wordSynced => 'Word-synced',
   };
 }
 
@@ -186,6 +213,7 @@ class _Header extends StatelessWidget {
     required this.saving,
     required this.kind,
     required this.onClose,
+    required this.onSync,
     required this.onEdit,
     required this.onCancel,
     required this.onSave,
@@ -196,6 +224,10 @@ class _Header extends StatelessWidget {
   final bool saving;
   final _LyricsKind kind;
   final VoidCallback onClose;
+
+  /// Null when there is nothing to time yet, which is the only state where
+  /// the editor would open on an empty list.
+  final VoidCallback? onSync;
   final VoidCallback onEdit;
   final VoidCallback onCancel;
   final VoidCallback onSave;
@@ -267,8 +299,19 @@ class _Header extends StatelessWidget {
               )
             else
               TextButton(onPressed: onSave, child: const Text('Save')),
-          ] else
+          ] else ...[
+            if (onSync != null)
+              IconButton(
+                onPressed: onSync,
+                tooltip: 'Sync to the track',
+                icon: const Icon(
+                  Icons.av_timer_rounded,
+                  color: Tones.textMuted,
+                  size: 20,
+                ),
+              ),
             TextButton(onPressed: onEdit, child: const Text('Edit')),
+          ],
         ],
       ),
     );
@@ -312,14 +355,18 @@ class _View extends StatefulWidget {
   State<_View> createState() => _ViewState();
 }
 
-class _ViewState extends State<_View> {
+class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   Lrc? _lrc;
   int? _activeIndex;
+  // Drives the within-word sweep. Only the active line listens to it, so the
+  // rest of the list is untouched at frame rate.
+  late final PlayheadClock _playhead;
 
   @override
   void initState() {
     super.initState();
     _parse();
+    _playhead = PlayheadClock(player: widget.player, vsync: this);
     widget.player.addListener(_onPlayerChange);
   }
 
@@ -344,6 +391,7 @@ class _ViewState extends State<_View> {
   @override
   void dispose() {
     widget.player.removeListener(_onPlayerChange);
+    _playhead.dispose();
     super.dispose();
   }
 
@@ -389,19 +437,29 @@ class _ViewState extends State<_View> {
         final isPast = i < activeIdx;
         return GestureDetector(
           onTap: () => widget.player.seek(line.timestamp),
-          child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 200),
-            style: TypeScale.title.copyWith(
-              color: isActive
-                  ? Tones.text
-                  : isPast
-                  ? Tones.textMuted.withValues(alpha: 0.6)
-                  : Tones.text.withValues(alpha: 0.85),
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              height: 1.3,
-            ),
-            child: Text(line.text),
-          ),
+          child: line.hasWordTiming
+              // Word-synced: sweep the highlight across the word being sung.
+              ? KaraokeLine(
+                  lrc: lrc,
+                  lineIndex: i,
+                  playhead: _playhead,
+                  trackEnd: widget.player.duration,
+                  isActive: isActive,
+                  isPast: isPast,
+                )
+              : AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 200),
+                  style: TypeScale.title.copyWith(
+                    color: isActive
+                        ? Tones.text
+                        : isPast
+                        ? Tones.textMuted.withValues(alpha: 0.6)
+                        : Tones.text.withValues(alpha: 0.85),
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                    height: 1.3,
+                  ),
+                  child: Text(line.text),
+                ),
         );
       },
     );
