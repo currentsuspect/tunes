@@ -1,0 +1,99 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/domain/collection_gaps.dart';
+import 'package:tunes/domain/discography.dart';
+import 'package:tunes/features/discover/discover_view.dart';
+
+MissingRelease _missing(
+  String artist,
+  String title, {
+  int artistTracks = 10,
+  int? owned,
+  int? total,
+}) => MissingRelease(
+  id: '$artist-$title',
+  title: title,
+  artist: artist,
+  type: 'Album',
+  year: '2024',
+  artistTracks: artistTracks,
+  artistOwnedReleases: owned,
+  artistTotalReleases: total,
+);
+
+void main() {
+  Future<void> pump(
+    WidgetTester tester,
+    List<MissingRelease> missing, {
+    Map<String, int> plays = const {},
+    bool offline = false,
+  }) => tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: DiscoverView(
+          gaps: collectionGaps(missing: missing, plays: plays),
+          offline: offline,
+          artUrlFor: (sha) => 'http://example.invalid/art/$sha',
+          onArtistTap: (_) {},
+          hasHistory: plays.isNotEmpty,
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('states the size of the gap in the header', (tester) async {
+    await pump(tester, [
+      _missing('Yeat', 'Lyfë'),
+      _missing('Yeat', '2093'),
+      _missing('Nemzzz', 'Verses'),
+    ]);
+    expect(find.text('Complete your collection'), findsOneWidget);
+    expect(find.textContaining('3 releases by 2 artists'), findsOneWidget);
+  });
+
+  testWidgets('shows completion only when the daemon reported it', (
+    tester,
+  ) async {
+    await pump(tester, [_missing('Yeat', 'Lyfë', owned: 5, total: 18)]);
+    expect(find.textContaining('5 of 18 releases'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('draws no progress bar when completion is unknown', (
+    tester,
+  ) async {
+    // An older daemon sends no counts. A bar at zero would claim the library
+    // holds none of this act, which is a different statement from silence.
+    await pump(tester, [_missing('Yeat', 'Lyfë')]);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    // The whole subtitle, not a fragment of it: the point is that no
+    // "0 of something" clause was invented to fill the space.
+    expect(find.text('1 missing'), findsOneWidget);
+  });
+
+  testWidgets('says plays only once something has been played', (tester) async {
+    await pump(tester, [_missing('Yeat', 'Lyfë')]);
+    expect(find.textContaining('play'), findsNothing);
+
+    await pump(tester, [_missing('Yeat', 'Lyfë')], plays: {'Yeat': 7});
+    expect(find.textContaining('7 plays'), findsOneWidget);
+    expect(
+      find.textContaining('Ordered by what you actually play'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('offline says why it is empty rather than nothing', (
+    tester,
+  ) async {
+    await pump(tester, const [], offline: true);
+    expect(find.text('Nothing to compare against'), findsOneWidget);
+  });
+
+  testWidgets('an empty list online reads as not yet, not as none', (
+    tester,
+  ) async {
+    await pump(tester, const []);
+    expect(find.text('Nothing missing yet'), findsOneWidget);
+  });
+}

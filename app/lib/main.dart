@@ -22,10 +22,12 @@ import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 import 'core/ui/profile_avatar.dart';
+import 'domain/collection_gaps.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'features/album/album_page.dart';
 import 'features/artist/artist_page.dart';
+import 'features/discover/discover_view.dart';
 import 'features/home/home_view.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
@@ -252,6 +254,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
   TunesManifest? _manifest;
+  Map<String, int> _playsByArtist = const {};
   bool _syncing = false;
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
@@ -278,8 +281,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.player.addListener(_trackRecents);
     // Recents used to live only in memory, so closing the app forgot what you
     // had been listening to. They come from the recorded history now.
-    widget.history.addListener(_loadRecents);
-    _loadRecents();
+    widget.history.addListener(_onHistoryChanged);
+    _onHistoryChanged();
     // Hydrate from the store before kicking off a sync, so the sync's
     // setState doesn't race against a stale in-memory snapshot.
     _bootstrap();
@@ -290,7 +293,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
-    widget.history.removeListener(_loadRecents);
+    widget.history.removeListener(_onHistoryChanged);
     // Only the listener: the manager itself belongs to TunesApp, which
     // outlives this shell.
     _downloads.removeListener(_onDownloadsChanged);
@@ -324,6 +327,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     ];
     if (tracks.isEmpty) return;
     setState(() => _recents = tracks);
+  }
+
+  /// A listen finished. Both the recents rail and the discover ranking read
+  /// from history, and they are refreshed together so the two views can never
+  /// disagree about what was played.
+  Future<void> _onHistoryChanged() async {
+    await _loadRecents();
+    await _loadPlays();
+  }
+
+  /// Folds the play counters into a per-act tally for the discover ranking.
+  ///
+  /// Recomputed on the same signal as recents rather than on a timer: the
+  /// only thing that changes it is a listen finishing, which is exactly when
+  /// the history notifies.
+  Future<void> _loadPlays() async {
+    final counts = await widget.history.playCounts();
+    if (!mounted) return;
+    final manifest = _manifest;
+    if (manifest == null) return;
+    final plays = playsByArtist(counts, manifest.tracks);
+    setState(() => _playsByArtist = plays);
   }
 
   void _onReachability() {
@@ -419,7 +444,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (mounted) setState(() => _manifest = fresh);
           // The first load happens before the manifest exists, so recents
           // cannot resolve their tracks until now.
-          unawaited(_loadRecents());
+          unawaited(_onHistoryChanged());
           synced = true;
         }
       } else if (fetchError != null && mounted) {
@@ -723,6 +748,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   label: 'Home',
                 ),
                 NavigationDestination(
+                  icon: Icon(
+                    Icons.travel_explore_outlined,
+                    color: Tones.textMuted,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.travel_explore_rounded,
+                    color: Tones.text,
+                  ),
+                  label: 'Discover',
+                ),
+                NavigationDestination(
                   icon: Icon(Icons.search_rounded, color: Tones.textMuted),
                   selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
                   label: 'Search',
@@ -761,7 +797,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final manifest = _manifest!;
     final tracks = manifest.tracks;
     final content = switch (_tab) {
-      1 => SearchView(
+      1 => DiscoverView(
+        gaps: collectionGaps(missing: _missingAlbums, plays: _playsByArtist),
+        offline: offline,
+        artUrlFor: _artUrlFor,
+        onArtistTap: (artist) => _openArtist(artist, manifest),
+        hasHistory: _playsByArtist.isNotEmpty,
+      ),
+      2 => SearchView(
         tracks: tracks,
         releases: manifest.releases,
         client: widget.client,
@@ -774,7 +817,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onAlbumTap: (release) => _openAlbum(release, manifest),
         onArtistTap: (artist) => _openArtist(artist, manifest),
       ),
-      2 => LibraryView(
+      3 => LibraryView(
         tracks: tracks,
         releases: manifest.releases,
         artists: manifest.artists,

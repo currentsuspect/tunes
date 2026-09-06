@@ -54,6 +54,17 @@ export interface MissingRelease extends DiscographyGroup {
   forArtist: string;
   /** How many of that act's tracks are held, which is the ranking signal. */
   artistTracks: number;
+  /**
+   * How far through that act's catalogue the library is: releases held, out of
+   * releases that exist.
+   *
+   * Counted over exactly the same set the suggestions are drawn from -- albums
+   * and EPs, never singles -- so held plus missing equals the total and the
+   * arithmetic on screen is checkable. A denominator that quietly included two
+   * hundred singles would make every collection look abandoned.
+   */
+  artistOwnedReleases: number;
+  artistTotalReleases: number;
 }
 
 /**
@@ -132,6 +143,8 @@ export function missingFromCollection(
     const d = discographies.get(normName(artist.name));
     if (!d) continue;
     if (!d.groups.some(isOwned)) continue;
+    const catalogue = d.groups.filter((g) => types.has((g.type ?? "").toLowerCase()));
+    const ownedReleases = catalogue.filter(isOwned).length;
     for (const g of d.groups) {
       if (isOwned(g)) continue;
       if (!types.has((g.type ?? "").toLowerCase())) continue;
@@ -139,7 +152,13 @@ export function missingFromCollection(
       // with more tracks held, which the ranking above visits first.
       if (seen.has(g.id)) continue;
       seen.add(g.id);
-      out.push({ ...g, forArtist: artist.name, artistTracks: artist.tracks });
+      out.push({
+        ...g,
+        forArtist: artist.name,
+        artistTracks: artist.tracks,
+        artistOwnedReleases: ownedReleases,
+        artistTotalReleases: catalogue.length,
+      });
     }
   }
   out.sort(

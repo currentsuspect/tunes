@@ -167,6 +167,8 @@ class MissingRelease {
     required this.year,
     required this.artistTracks,
     this.artSha,
+    this.artistOwnedReleases,
+    this.artistTotalReleases,
   });
 
   final String id;
@@ -188,6 +190,12 @@ class MissingRelease {
   /// the wrong one.
   final String? artSha;
 
+  /// How far through this act's catalogue the library is. Null when the daemon
+  /// predates the field, which is why nothing shows a completion figure it did
+  /// not receive rather than computing a plausible-looking one.
+  final int? artistOwnedReleases;
+  final int? artistTotalReleases;
+
   factory MissingRelease.fromJson(Map<String, dynamic> json) {
     return MissingRelease(
       id: (json['id'] as String?) ?? '',
@@ -199,6 +207,8 @@ class MissingRelease {
           (json['date'] as String?)?.split('-').first,
       artistTracks: (json['artistTracks'] as num?)?.toInt() ?? 0,
       artSha: json['artSha'] as String?,
+      artistOwnedReleases: (json['artistOwnedReleases'] as num?)?.toInt(),
+      artistTotalReleases: (json['artistTotalReleases'] as num?)?.toInt(),
     );
   }
 }

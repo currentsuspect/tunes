@@ -242,4 +242,48 @@ describe("edition qualifiers", () => {
     );
     expect(out.map((g) => g.title)).toEqual(["Lyfë"]);
   });
+
+  it("reports how far through the catalogue the library is", () => {
+    const out = missingFromCollection(
+      [{ name: "Travis Scott", tracks: 17 }],
+      discographies([
+        "travis scott",
+        disco("Travis Scott", [
+          group("g1", "ASTROWORLD", "Album", "2018-08-03"),
+          group("g2", "Rodeo", "Album", "2015-09-04"),
+          group("g3", "UTOPIA", "Album", "2023-07-28"),
+          group("g4", "Days Before Rodeo", "EP", "2014-08-18"),
+        ]),
+      ]),
+      [{ title: "ASTROWORLD", groupId: null }]
+    );
+    expect(out[0]?.artistOwnedReleases).toBe(1);
+    expect(out[0]?.artistTotalReleases).toBe(4);
+    // Held plus missing is the whole catalogue: the arithmetic on screen has
+    // to add up, or the completion figure is decoration.
+    expect(out[0]!.artistOwnedReleases + out.length).toBe(
+      out[0]!.artistTotalReleases
+    );
+  });
+
+  it("counts completion over albums and EPs only, never singles", () => {
+    // A discography is mostly singles. Counting them would put every
+    // collection at four percent and say nothing about anything.
+    const out = missingFromCollection(
+      [{ name: "Nemzzz", tracks: 17 }],
+      discographies([
+        "nemzzz",
+        disco("Nemzzz", [
+          group("g1", "Do Not Disturb", "Album"),
+          group("g2", "Bricks", "Single"),
+          group("g3", "Rain", "Single"),
+          group("g4", "Verses", "EP"),
+        ]),
+      ]),
+      [{ title: "Do Not Disturb", groupId: null }]
+    );
+    expect(out.map((g) => g.title)).toEqual(["Verses"]);
+    expect(out[0]?.artistOwnedReleases).toBe(1);
+    expect(out[0]?.artistTotalReleases).toBe(2);
+  });
 });
