@@ -484,8 +484,10 @@ void main() {
 
     // Force a second sync by pulling the feed down, which is the only way to
     // ask for one now that the header button is gone.
+    // Fling the feed itself. The library line moved into the static header,
+    // and pulling something that does not scroll refreshes nothing.
     await tester.fling(
-      find.text('2 tracks · 1 artist · 2 releases'),
+      find.byType(RefreshIndicator),
       const Offset(0, 320),
       1000,
     );
@@ -1076,14 +1078,22 @@ void main() {
     // The avatar now opens Settings; the old read-only sheet's diagnostics
     // live under its Library section.
     expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('Daemon'), findsOneWidget);
-    expect(find.text('http://fake:4780'), findsOneWidget);
     // Every control has to do something, so each one is asserted present
     // rather than the screen merely opening.
     expect(find.text('Gapless playback'), findsOneWidget);
     expect(find.text('Stop when the app closes'), findsOneWidget);
-    expect(find.text('Tap offset'), findsOneWidget);
     expect(find.text('Display name'), findsOneWidget);
+
+    // Scrolled to rather than assumed on screen: the list is longer than the
+    // viewport, and a lazy sliver never builds what it has not reached.
+    for (final label in ['Tap offset', 'Daemon', 'http://fake:4780']) {
+      await tester.scrollUntilVisible(
+        find.text(label),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text(label), findsOneWidget);
+    }
   });
 
   testWidgets('mini bar is minimal: art, title, play only', (tester) async {

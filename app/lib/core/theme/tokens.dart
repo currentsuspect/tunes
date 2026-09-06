@@ -27,6 +27,19 @@ abstract final class TypeScale {
     color: Tones.text,
   );
 
+  /// Section headings -- "Just added", "On repeat", "Complete your
+  /// collection". These were set at [title], the same size as the album name
+  /// on a card beneath them, so a section and its contents carried equal
+  /// weight and the page read as one long list of equals.
+  static const heading = TextStyle(
+    fontSize: 22,
+    height: 1.2,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.2,
+    color: Tones.text,
+  );
+
+  /// The name of a thing: a track, an album, a row.
   static const title = TextStyle(
     fontSize: 17,
     height: 1.25,
@@ -41,7 +54,7 @@ abstract final class TypeScale {
   );
 
   static const caption = TextStyle(
-    fontSize: 11,
+    fontSize: 12,
     height: 1.3,
     letterSpacing: 0.4,
     color: Tones.textMuted,

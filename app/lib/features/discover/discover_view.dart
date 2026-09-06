@@ -42,7 +42,7 @@ class DiscoverView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Complete your collection', style: TypeScale.title),
+              const Text('Complete your collection', style: TypeScale.heading),
               const SizedBox(height: Space.xs),
               Text(
                 '$releases ${releases == 1 ? 'release' : 'releases'} by '

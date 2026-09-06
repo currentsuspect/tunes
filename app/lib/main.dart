@@ -518,6 +518,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _sync();
   }
 
+  /// The library in one line.
+  ///
+  /// Artists are counted the way the library screen groups them -- by act,
+  /// with guests counted as their own entry -- so the header and the artist
+  /// list never disagree about how many there are.
+  static String _libraryLine(TunesManifest m) {
+    final acts = <String>{};
+    for (final track in m.tracks) {
+      acts.add(track.artistKey);
+      acts.addAll(track.featured.where((g) => g != track.artistKey));
+    }
+    final t = m.tracks.length;
+    final a = acts.length;
+    final r = m.releases.length;
+    return '$t ${t == 1 ? 'track' : 'tracks'} · '
+        '$a ${a == 1 ? 'artist' : 'artists'} · '
+        '$r ${r == 1 ? 'release' : 'releases'}';
+  }
+
   /// Pull to refresh. Awaits the sync so the indicator stays until the work
   /// is actually done.
   ///
@@ -722,8 +741,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         ),
                       ),
                       const SizedBox(width: Space.md),
-                      const Expanded(
-                        child: Text('tunes', style: TypeScale.wordmark),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('tunes', style: TypeScale.wordmark),
+                            // The library's size belongs to the wordmark, not
+                            // to the feed. It used to scroll away with the
+                            // first rail, which made it read as a caption on
+                            // "Just added" rather than a description of the
+                            // library.
+                            //
+                            // Home only: on Search or Discover it would be a
+                            // number about somewhere else.
+                            if (_tab == 0 && _manifest != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  _libraryLine(_manifest!),
+                                  style: TypeScale.caption,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -769,69 +810,79 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           },
         ),
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          MiniPlayerBar(
-            player: widget.player,
-            onTap: _openNowPlaying,
-            artUrlFor: _artUrlFor,
-          ),
-          NavigationBarTheme(
-            data: NavigationBarThemeData(
-              height: 64,
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-              indicatorColor: Colors.transparent,
-              backgroundColor: Tones.surface,
-              surfaceTintColor: Colors.transparent,
-              labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                final selected = states.contains(WidgetState.selected);
-                return TypeScale.caption.copyWith(
-                  color: selected ? Tones.text : Tones.textMuted,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                );
-              }),
+      // The player sits above the navigation rather than beside it: it is a
+      // layer over the app, and the nav is the app's own furniture. The
+      // separation is a hairline and a surface change, not a shadow -- this
+      // interface has no other shadows and one would read as a mistake.
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Tones.surface,
+          border: Border(top: BorderSide(color: Tones.hairline)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MiniPlayerBar(
+              player: widget.player,
+              onTap: _openNowPlaying,
+              artUrlFor: _artUrlFor,
             ),
-            child: NavigationBar(
-              selectedIndex: _tab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined, color: Tones.textMuted),
-                  selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.travel_explore_outlined,
-                    color: Tones.textMuted,
+            NavigationBarTheme(
+              data: NavigationBarThemeData(
+                height: 64,
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                indicatorColor: Colors.transparent,
+                backgroundColor: Tones.surface,
+                surfaceTintColor: Colors.transparent,
+                labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return TypeScale.caption.copyWith(
+                    color: selected ? Tones.text : Tones.textMuted,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  );
+                }),
+              ),
+              child: NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: (i) => setState(() => _tab = i),
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined, color: Tones.textMuted),
+                    selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
+                    label: 'Home',
                   ),
-                  selectedIcon: Icon(
-                    Icons.travel_explore_rounded,
-                    color: Tones.text,
+                  NavigationDestination(
+                    icon: Icon(
+                      Icons.travel_explore_outlined,
+                      color: Tones.textMuted,
+                    ),
+                    selectedIcon: Icon(
+                      Icons.travel_explore_rounded,
+                      color: Tones.text,
+                    ),
+                    label: 'Discover',
                   ),
-                  label: 'Discover',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.search_rounded, color: Tones.textMuted),
-                  selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
-                  label: 'Search',
-                ),
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.library_music_outlined,
-                    color: Tones.textMuted,
+                  NavigationDestination(
+                    icon: Icon(Icons.search_rounded, color: Tones.textMuted),
+                    selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
+                    label: 'Search',
                   ),
-                  selectedIcon: Icon(
-                    Icons.library_music_rounded,
-                    color: Tones.text,
+                  NavigationDestination(
+                    icon: Icon(
+                      Icons.library_music_outlined,
+                      color: Tones.textMuted,
+                    ),
+                    selectedIcon: Icon(
+                      Icons.library_music_rounded,
+                      color: Tones.text,
+                    ),
+                    label: 'Library',
                   ),
-                  label: 'Library',
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

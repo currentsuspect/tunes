@@ -62,7 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
       backgroundColor: Tones.surface,
       appBar: AppBar(
         backgroundColor: Tones.surface,
-        title: const Text('Settings', style: TypeScale.title),
+        title: const Text('Settings', style: TypeScale.heading),
       ),
       body: ListenableBuilder(
         listenable: s,

@@ -129,21 +129,6 @@ class HomeView extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: Space.lg),
         children: [
-          // Stats summary — full-bleed caption, padded.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              _sectionPadding,
-              Space.md,
-              _sectionPadding,
-              0,
-            ),
-            child: Text(
-              '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} · '
-              '${artists.length} ${artists.length == 1 ? 'artist' : 'artists'} · '
-              '${releases.length} ${releases.length == 1 ? 'release' : 'releases'}',
-              style: TypeScale.caption,
-            ),
-          ),
           if (justAddedSorted.isNotEmpty)
             _JustAddedCarousel(
               tracks: justAddedSorted,
@@ -262,7 +247,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.fromLTRB(padding, Space.lg, padding, Space.sm),
-      child: Text(title, style: TypeScale.title),
+      child: Text(title, style: TypeScale.heading),
     );
   }
 }
@@ -310,7 +295,7 @@ class _DynamicRail extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: TypeScale.title),
+                    Text(title, style: TypeScale.heading),
                     Text(subtitle, style: TypeScale.caption),
                   ],
                 ),

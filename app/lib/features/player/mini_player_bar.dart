@@ -48,10 +48,10 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
         final current = widget.player.current;
         if (current == null) return const SizedBox.shrink();
         return Container(
-          decoration: const BoxDecoration(
-            color: Tones.surface,
-            border: Border(top: BorderSide(color: Tones.hairline)),
-          ),
+          // No border of its own: the bar and the navigation share one
+          // surface now, and the top edge is drawn once by the container
+          // that holds both. Two hairlines a pixel apart read as a seam.
+          decoration: const BoxDecoration(color: Tones.surface),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
