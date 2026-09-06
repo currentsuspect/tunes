@@ -17,7 +17,7 @@ import '../lyrics/lyrics_sheet.dart';
 import '../queue/queue_sheet.dart';
 import 'now_playing_details.dart';
 
-class NowPlayingPage extends StatelessWidget {
+class NowPlayingPage extends StatefulWidget {
   const NowPlayingPage({
     super.key,
     required this.player,
@@ -41,10 +41,38 @@ class NowPlayingPage extends StatelessWidget {
   final ManifestStore manifestStore;
   final QueueStore? queueStore;
 
+  @override
+  State<NowPlayingPage> createState() => _NowPlayingPageState();
+}
+
+class _NowPlayingPageState extends State<NowPlayingPage> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Pulls the drawer up, or puts it back.
+  ///
+  /// The details already live below the widget.player in the same scroll view, so
+  /// this animates the view rather than pushing a route: the widget.player stays
+  /// exactly where it was and the sheet arrives over it.
+  void _toggleDrawer() {
+    if (!_scroll.hasClients) return;
+    final open = _scroll.offset > 8;
+    _scroll.animateTo(
+      open ? 0 : _scroll.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   void _openQueue(BuildContext context) {
-    final qs = queueStore;
+    final qs = widget.queueStore;
     if (qs == null) return;
-    QueueSheet.show(context, queueStore: qs, player: player);
+    QueueSheet.show(context, queueStore: qs, player: widget.player);
   }
 
   void _openArtist(BuildContext context, String artist) {
@@ -52,15 +80,15 @@ class NowPlayingPage extends StatelessWidget {
       MaterialPageRoute<void>(
         builder: (_) => ArtistPage(
           artist: artist,
-          manifest: manifest,
-          player: player,
-          store: store,
-          downloading: downloading,
-          onDownload: onDownload,
-          offline: offline,
-          artUrlFor: artUrlFor,
-          manifestStore: manifestStore,
-          queueStore: queueStore,
+          manifest: widget.manifest,
+          player: widget.player,
+          store: widget.store,
+          downloading: widget.downloading,
+          onDownload: widget.onDownload,
+          offline: widget.offline,
+          artUrlFor: widget.artUrlFor,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
         ),
       ),
     );
@@ -70,9 +98,9 @@ class NowPlayingPage extends StatelessWidget {
     LyricsSheet.show(
       context,
       track: track,
-      player: player,
+      player: widget.player,
       onSave: (text) async {
-        await manifestStore.setEdit(track.sha, 'lyrics', text);
+        await widget.manifestStore.setEdit(track.sha, 'lyrics', text);
       },
     );
   }
@@ -80,7 +108,7 @@ class NowPlayingPage extends StatelessWidget {
   void _openAlbum(BuildContext context, ManifestTrack track) {
     ManifestRelease? release;
     if (track.releaseId != null) {
-      for (final r in manifest.releases) {
+      for (final r in widget.manifest.releases) {
         if (r.id == track.releaseId) {
           release = r;
           break;
@@ -88,7 +116,7 @@ class NowPlayingPage extends StatelessWidget {
       }
     }
     if (release == null) {
-      for (final r in manifest.releases) {
+      for (final r in widget.manifest.releases) {
         if (r.artist == track.artistDisplay && r.title == track.album) {
           release = r;
           break;
@@ -101,15 +129,15 @@ class NowPlayingPage extends StatelessWidget {
       MaterialPageRoute<void>(
         builder: (_) => AlbumPage(
           release: resolved,
-          manifest: manifest,
-          player: player,
-          store: store,
-          downloading: downloading,
-          onDownload: onDownload,
-          offline: offline,
-          artUrlFor: artUrlFor,
-          manifestStore: manifestStore,
-          queueStore: queueStore,
+          manifest: widget.manifest,
+          player: widget.player,
+          store: widget.store,
+          downloading: widget.downloading,
+          onDownload: widget.onDownload,
+          offline: widget.offline,
+          artUrlFor: widget.artUrlFor,
+          manifestStore: widget.manifestStore,
+          queueStore: widget.queueStore,
         ),
       ),
     );
@@ -182,26 +210,27 @@ class NowPlayingPage extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: player,
+          listenable: widget.player,
           builder: (context, _) {
-            final current = player.current;
+            final current = widget.player.current;
             if (current == null) {
               return const Center(
                 child: Text('Nothing playing', style: TypeScale.body),
               );
             }
-            final duration = player.duration.inMilliseconds > 0
-                ? player.duration
+            final duration = widget.player.duration.inMilliseconds > 0
+                ? widget.player.duration
                 : Duration(milliseconds: current.durationMs ?? 0);
-            final downloaded = store.pathFor(current.sha) != null;
+            final downloaded = widget.store.pathFor(current.sha) != null;
 
             return SafeArea(
-              // The player keeps a whole viewport to itself so nothing about
+              // The widget.player keeps a whole viewport to itself so nothing about
               // it changes; the details are a scroll away rather than a
               // squeeze. A fixed height also keeps the Expanded artwork
               // working, which it would not inside an unbounded scroll view.
               child: LayoutBuilder(
                 builder: (context, viewport) => SingleChildScrollView(
+                  controller: _scroll,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -255,15 +284,16 @@ class NowPlayingPage extends StatelessWidget {
                                             MaterialPageRoute<void>(
                                               builder: (_) => ArtistPage(
                                                 artist: current.artistDisplay,
-                                                manifest: manifest,
-                                                player: player,
-                                                store: store,
-                                                downloading: downloading,
-                                                onDownload: onDownload,
-                                                offline: offline,
-                                                artUrlFor: artUrlFor,
-                                                manifestStore: manifestStore,
-                                                queueStore: queueStore,
+                                                manifest: widget.manifest,
+                                                player: widget.player,
+                                                store: widget.store,
+                                                downloading: widget.downloading,
+                                                onDownload: widget.onDownload,
+                                                offline: widget.offline,
+                                                artUrlFor: widget.artUrlFor,
+                                                manifestStore:
+                                                    widget.manifestStore,
+                                                queueStore: widget.queueStore,
                                               ),
                                             ),
                                           );
@@ -273,13 +303,13 @@ class NowPlayingPage extends StatelessWidget {
                                           break;
                                         case 'download':
                                           if (downloaded) {
-                                            store.remove(current.sha);
+                                            widget.store.remove(current.sha);
                                           } else {
-                                            onDownload(current);
+                                            widget.onDownload(current);
                                           }
                                           break;
                                         case 'stop':
-                                          player.stop();
+                                          widget.player.stop();
                                           break;
                                         case 'info':
                                           _showTrackInfo(context, current);
@@ -288,13 +318,14 @@ class NowPlayingPage extends StatelessWidget {
                                           LyricsSheet.show(
                                             context,
                                             track: current,
-                                            player: player,
+                                            player: widget.player,
                                             onSave: (text) async {
-                                              await manifestStore.setEdit(
-                                                current.sha,
-                                                'lyrics',
-                                                text,
-                                              );
+                                              await widget.manifestStore
+                                                  .setEdit(
+                                                    current.sha,
+                                                    'lyrics',
+                                                    text,
+                                                  );
                                             },
                                           );
                                           break;
@@ -380,8 +411,8 @@ class NowPlayingPage extends StatelessWidget {
                                     Flexible(
                                       child: _Artwork(
                                         track: current,
-                                        artUrlFor: artUrlFor,
-                                        playing: player.playing,
+                                        artUrlFor: widget.artUrlFor,
+                                        playing: widget.player.playing,
                                       ),
                                     ),
                                     const SizedBox(height: Space.lg),
@@ -417,7 +448,7 @@ class NowPlayingPage extends StatelessWidget {
                                 horizontal: Space.lg,
                               ),
                               child: Scrubber(
-                                player: player,
+                                player: widget.player,
                                 duration: duration,
                               ),
                             ),
@@ -436,7 +467,7 @@ class NowPlayingPage extends StatelessWidget {
                                   LikeButton(sha: current.sha, size: 26),
                                   const SizedBox(width: Space.sm),
                                   IconButton(
-                                    onPressed: player.previous,
+                                    onPressed: widget.player.previous,
                                     iconSize: 36,
                                     icon: const Icon(
                                       Icons.skip_previous_rounded,
@@ -446,9 +477,9 @@ class NowPlayingPage extends StatelessWidget {
                                   ),
                                   const SizedBox(width: Space.md),
                                   InkWell(
-                                    onTap: player.playing
-                                        ? player.pause
-                                        : player.play,
+                                    onTap: widget.player.playing
+                                        ? widget.player.pause
+                                        : widget.player.play,
                                     borderRadius: BorderRadius.circular(40),
                                     child: Container(
                                       width: 72,
@@ -458,7 +489,7 @@ class NowPlayingPage extends StatelessWidget {
                                         shape: BoxShape.circle,
                                       ),
                                       child: Icon(
-                                        player.playing
+                                        widget.player.playing
                                             ? Icons.pause_rounded
                                             : Icons.play_arrow_rounded,
                                         size: 40,
@@ -468,7 +499,7 @@ class NowPlayingPage extends StatelessWidget {
                                   ),
                                   const SizedBox(width: Space.md),
                                   IconButton(
-                                    onPressed: player.next,
+                                    onPressed: widget.player.next,
                                     iconSize: 36,
                                     icon: const Icon(
                                       Icons.skip_next_rounded,
@@ -490,45 +521,68 @@ class NowPlayingPage extends StatelessWidget {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  _ShuffleButton(player: player),
-                                  _RepeatButton(player: player),
+                                  _ShuffleButton(player: widget.player),
+                                  _RepeatButton(player: widget.player),
                                 ],
                               ),
                             ),
                             // Says there is something below, which a scroll view on a
                             // screen that exactly fills the viewport otherwise hides.
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: Space.sm),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.keyboard_arrow_up_rounded,
-                                    size: 18,
-                                    color: Tones.textMuted.withValues(
-                                      alpha: 0.7,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Lyrics and credits',
-                                    style: TypeScale.caption.copyWith(
-                                      color: Tones.textMuted.withValues(
-                                        alpha: 0.7,
+                            // A handle, not a footer. It used to be a small
+                            // chevron over a caption at the very bottom of
+                            // the screen, which reads as a label for the
+                            // page rather than something to pull.
+                            InkWell(
+                              onTap: _toggleDrawer,
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  top: Space.xs,
+                                  bottom: Space.sm,
+                                ),
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 4,
+                                      decoration: BoxDecoration(
+                                        color: Tones.hairline,
+                                        borderRadius: BorderRadius.circular(2),
                                       ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: Space.xs),
+                                    Text(
+                                      'Lyrics and credits',
+                                      style: TypeScale.caption.copyWith(
+                                        color: Tones.textMuted.withValues(
+                                          alpha: 0.85,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      NowPlayingDetails(
-                        track: current,
-                        manifest: manifest,
-                        artUrlFor: artUrlFor,
-                        onOpenArtist: (a) => _openArtist(context, a),
-                        onOpenAlbum: () => _openAlbum(context, current),
-                        onOpenLyrics: () => _openLyrics(context, current),
+                      // Raised surface with a rounded top edge, so what
+                      // arrives from below reads as a sheet over the player
+                      // rather than more page.
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(RadiusTokens.card),
+                        ),
+                        child: ColoredBox(
+                          color: Tones.surface,
+                          child: NowPlayingDetails(
+                            track: current,
+                            manifest: widget.manifest,
+                            artUrlFor: widget.artUrlFor,
+                            onOpenArtist: (a) => _openArtist(context, a),
+                            onOpenAlbum: () => _openAlbum(context, current),
+                            onOpenLyrics: () => _openLyrics(context, current),
+                          ),
+                        ),
                       ),
                     ],
                   ),
