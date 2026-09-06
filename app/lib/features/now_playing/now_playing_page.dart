@@ -357,6 +357,12 @@ class NowPlayingPage extends StatelessWidget {
                                 ],
                               ),
                             ),
+                            // Sleeve and words are one centred unit. They
+                            // used to be separate children of this column,
+                            // with an Expanded between them that handed all
+                            // the slack to the gap -- so the title floated a
+                            // long way under the record it names. The slack
+                            // now sits outside the pair, above and below.
                             Expanded(
                               child: Padding(
                                 // lg, not xl: the sleeve is the subject of
@@ -367,46 +373,43 @@ class NowPlayingPage extends StatelessWidget {
                                   horizontal: Space.lg,
                                   vertical: Space.sm,
                                 ),
-                                child: Center(
-                                  child: _Artwork(
-                                    track: current,
-                                    artUrlFor: artUrlFor,
-                                    playing: player.playing,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: Space.lg,
-                              ),
-                              child: Column(
-                                children: [
-                                  Text(
-                                    current.title,
-                                    style: TypeScale.wordmark,
-                                    textAlign: TextAlign.center,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: Space.sm),
-                                  Text(
-                                    current.artistDisplay,
-                                    style: TypeScale.title,
-                                    textAlign: TextAlign.center,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (current.albumLabel != null)
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: _Artwork(
+                                        track: current,
+                                        artUrlFor: artUrlFor,
+                                        playing: player.playing,
+                                      ),
+                                    ),
+                                    const SizedBox(height: Space.lg),
                                     Text(
-                                      current.albumLabel!,
-                                      style: TypeScale.body,
+                                      current.title,
+                                      style: TypeScale.wordmark,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: Space.sm),
+                                    Text(
+                                      current.artistDisplay,
+                                      style: TypeScale.title,
                                       textAlign: TextAlign.center,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                  const SizedBox(height: Space.md),
-                                ],
+                                    if (current.albumLabel != null)
+                                      Text(
+                                        current.albumLabel!,
+                                        style: TypeScale.body,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                             Padding(

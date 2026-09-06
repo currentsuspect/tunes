@@ -92,7 +92,7 @@ class StorageUsage {
 /// Rounds up to one decimal at MB and above and drops the decimal at KB: a
 /// storage figure accurate to the byte is a figure nobody can compare.
 String formatBytes(int bytes) {
-  if (bytes <= 0) return '0 MB';
+  if (bytes <= 0) return '0 KB';
   const mb = 1024 * 1024;
   if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
   return '${(bytes / 1024).round()} KB';

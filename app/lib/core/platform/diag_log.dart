@@ -7,6 +7,10 @@ class DiagLog {
 
   static File? _file;
 
+  /// Where the log actually is, so the developer section can report its size
+  /// rather than print a zero it never measured.
+  static String? get path => _file?.path;
+
   static Future<void> init() async {
     try {
       final dir = await getApplicationCacheDirectory();

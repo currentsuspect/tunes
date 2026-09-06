@@ -6,6 +6,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/play_history.dart';
 import '../../core/data/storage_usage.dart';
+import '../../core/platform/diag_log.dart';
 import '../../core/data/avatar.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
@@ -79,6 +80,7 @@ class _SettingsPageState extends State<SettingsPage> {
       manifestPath: widget.supportDir == null
           ? null
           : '${widget.supportDir!.path}/manifest.json',
+      logPath: DiagLog.path,
     );
     if (mounted) setState(() => _usage = usage);
   }
@@ -345,7 +347,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               _Row(
                 label: 'Log file',
-                value: _usage == null ? '—' : formatBytes(_usage!.logBytes),
+                value: _usage == null
+                    ? '—'
+                    : (DiagLog.path == null
+                          ? 'not initialised'
+                          : formatBytes(_usage!.logBytes)),
               ),
               _Action(
                 label: 'Re-measure storage',
