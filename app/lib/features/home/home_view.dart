@@ -127,6 +127,7 @@ class HomeView extends StatelessWidget {
           _MissingAlbums(
             albums: missingAlbums,
             onArtistTap: onArtistTap,
+            artUrlFor: artUrlFor,
             sectionPadding: _sectionPadding,
             peek: _carouselPeek,
           ),
@@ -299,12 +300,14 @@ class _MissingAlbums extends StatelessWidget {
   const _MissingAlbums({
     required this.albums,
     required this.onArtistTap,
+    required this.artUrlFor,
     required this.sectionPadding,
     required this.peek,
   });
 
   final List<MissingRelease> albums;
   final void Function(String artist) onArtistTap;
+  final String Function(String sha) artUrlFor;
   final double sectionPadding;
   final double peek;
 
@@ -336,17 +339,8 @@ class _MissingAlbums extends StatelessWidget {
                       Opacity(
                         // Reads as "not here yet" beside the fully-opaque
                         // covers of everything the library actually holds.
-                        opacity: 0.55,
-                        child: GeneratedArtwork(
-                          title: a.title,
-                          artist: a.artist,
-                          size: 132,
-                          borderRadius: RadiusTokens.card,
-                          // The act is named in the caption and repeats down
-                          // the whole rail; the album is what distinguishes
-                          // one card from the next.
-                          label: initialsFor(a.title),
-                        ),
+                        opacity: 0.72,
+                        child: _MissingCover(album: a, artUrlFor: artUrlFor),
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
@@ -369,6 +363,47 @@ class _MissingAlbums extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The sleeve for an album we do not have.
+///
+/// The daemon fetches these from Deezer on its enrichment cycle, so a null
+/// [MissingRelease.artSha] is ordinary rather than an error -- it means the
+/// cover has not been fetched yet, or no confident match was found. Falling
+/// back to the generated tile keeps the rail the same shape either way, so
+/// covers arriving later do not reflow the page.
+class _MissingCover extends StatelessWidget {
+  const _MissingCover({required this.album, required this.artUrlFor});
+
+  final MissingRelease album;
+  final String Function(String sha) artUrlFor;
+
+  @override
+  Widget build(BuildContext context) {
+    final generated = GeneratedArtwork(
+      title: album.title,
+      artist: album.artist,
+      size: 132,
+      borderRadius: RadiusTokens.card,
+      // The act is named in the caption and repeats down the whole rail; the
+      // album is what distinguishes one card from the next.
+      label: initialsFor(album.title),
+    );
+    final sha = album.artSha;
+    if (sha == null) return generated;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(RadiusTokens.card),
+      child: SizedBox(
+        width: 132,
+        height: 132,
+        child: Image.network(
+          artUrlFor(sha),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => generated,
+        ),
+      ),
     );
   }
 }

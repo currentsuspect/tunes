@@ -166,6 +166,7 @@ class MissingRelease {
     required this.type,
     required this.year,
     required this.artistTracks,
+    this.artSha,
   });
 
   final String id;
@@ -181,6 +182,12 @@ class MissingRelease {
   /// app shows it so a suggestion carries its own justification.
   final int artistTracks;
 
+  /// The real sleeve, once the daemon has fetched one from Deezer. Null is
+  /// ordinary and not an error: covers arrive on the enrichment cycle, and a
+  /// record we could not confidently match keeps none rather than borrowing
+  /// the wrong one.
+  final String? artSha;
+
   factory MissingRelease.fromJson(Map<String, dynamic> json) {
     return MissingRelease(
       id: (json['id'] as String?) ?? '',
@@ -191,6 +198,7 @@ class MissingRelease {
           (json['year'] as String?) ??
           (json['date'] as String?)?.split('-').first,
       artistTracks: (json['artistTracks'] as num?)?.toInt() ?? 0,
+      artSha: json['artSha'] as String?,
     );
   }
 }

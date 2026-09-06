@@ -5,6 +5,7 @@ import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV3 } from "./manifest.js";
+import { releaseArtKey } from "./manifest.js";
 import type {
   ArtistDiscography,
   DiscographyGroup,
@@ -55,7 +56,12 @@ export class ManifestServer {
       | null = null,
     private readonly fetchDiscography:
       | ((name: string) => Promise<ArtistDiscography | null>)
-      | null = null
+      | null = null,
+    /// Release-level cover art, keyed by `releaseArtKey(act, album)`. The
+    /// same map the daemon fills for releases we hold, reused for the ones we
+    /// only know about — a cover is a cover regardless of whether the audio
+    /// is here.
+    private readonly getReleaseArt: () => Map<string, string> = () => new Map()
   ) {
     this.externalCache = new Map();
   }
@@ -227,12 +233,20 @@ export class ManifestServer {
             if (act === "") continue;
             tracksPerArtist.set(act, (tracksPerArtist.get(act) ?? 0) + 1);
           }
-          const groups = missingFromCollection(
+          const found = missingFromCollection(
             [...tracksPerArtist].map(([name, tracks]) => ({ name, tracks })),
             this.getDiscographies(),
             manifest.releases,
             { limit }
           );
+          // Attach a cover when the daemon has already fetched one. Absent is
+          // normal -- the fetch happens on the enrichment cycle, not here, so
+          // that answering this route never waits on Deezer.
+          const art = this.getReleaseArt();
+          const groups = found.map((g) => ({
+            ...g,
+            artSha: art.get(releaseArtKey(g.forArtist, g.title)) ?? null,
+          }));
           res.writeHead(200, {
             "content-type": "application/json; charset=utf-8",
           });

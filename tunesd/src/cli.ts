@@ -3,7 +3,11 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
-import { loadDiscographies, persistDiscographies } from "./discography.js";
+import {
+  loadDiscographies,
+  missingFromCollection,
+  persistDiscographies,
+} from "./discography.js";
 import { parseCredits, releaseArtistOf, sameArtistName } from "./credits.js";
 import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import { enrichBackoffMs, enrichRetryDue } from "./enrich.js";
@@ -319,6 +323,11 @@ async function main(): Promise<void> {
       await rename(tmp, artistMetaFile);
     };
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    // Covers fetched per cycle for albums we do not have. The rail shows a
+    // handful at a time, so there is nothing to gain from fetching a whole
+    // catalogue at once, and the negative cache means a run that finds
+    // nothing does not repeat for a week.
+    const MISSING_ART_PER_CYCLE = 12;
     const artistsFile = join(env.dataDir, "artists.json");
     const artists = new Map<string, string>();
     try {
@@ -1045,6 +1054,88 @@ async function main(): Promise<void> {
       };
       await refreshDiscographies();
 
+      // Covers for records we do not have. Without them the suggestion rail
+      // is a wall of generated tiles; a real sleeve is what makes it read as
+      // "go and get this". Stored in the same release-art map, keyed the same
+      // way, so a cover fetched here is already in place if the album later
+      // arrives.
+      const refreshMissingArtwork = async (): Promise<void> => {
+        const manifest = await manifestBuilder();
+        const perArtist = new Map<string, number>();
+        for (const t of manifest.tracks) {
+          const act = (t.primaryArtist || t.artist || "").trim();
+          if (act !== "") perArtist.set(act, (perArtist.get(act) ?? 0) + 1);
+        }
+        const wanted = missingFromCollection(
+          [...perArtist].map(([name, tracks]) => ({ name, tracks })),
+          discographies,
+          manifest.releases,
+          { limit: MISSING_ART_PER_CYCLE * 5 }
+        );
+        let changed = false;
+        let reported = false;
+        let fetched = 0;
+        for (const g of wanted) {
+          // Bounded per cycle: this is a nice-to-have rail, and the whole
+          // catalogue of every act would be hundreds of lookups at once.
+          if (fetched >= MISSING_ART_PER_CYCLE) break;
+          const key = releaseArtKey(g.forArtist, g.title);
+          if (releaseArt.has(key)) continue;
+          const missedAt = releaseArtMisses.get(key);
+          if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) {
+            continue;
+          }
+          try {
+            const candidates = await deezer.searchAlbumCandidates(
+              g.forArtist,
+              g.title
+            );
+            // Both names must match. A cover is a claim about which record
+            // this is, and the wrong sleeve is worse than none -- more so
+            // here, where the cover is the only thing identifying an album
+            // the owner has never seen.
+            const match = candidates.find(
+              (c) =>
+                sameArtistName(c.artist, g.forArtist) &&
+                normName(c.title) === normName(g.title)
+            );
+            if (match?.coverUrl == null) {
+              releaseArtMisses.set(key, new Date().toISOString());
+              changed = true;
+              continue;
+            }
+            const res = await fetch(match.coverUrl, {
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (!res.ok) continue;
+            const bytes = new Uint8Array(await res.arrayBuffer());
+            if (bytes.length < 1000) continue;
+            const { sha } = await storeCoverBytes(env.dataDir, bytes);
+            releaseArt.set(key, sha);
+            releaseArtMisses.delete(key);
+            changed = true;
+            fetched += 1;
+            log.info({
+              event: "MISSING_ART",
+              source: "deezer",
+              release: `${g.forArtist} — ${g.title}`,
+              artSha: sha.slice(0, 8),
+            });
+          } catch (e) {
+            if (!(e instanceof DeezerUnavailable)) throw e;
+            // Transport down: stop, and record nothing. A miss cached now
+            // would read as "this album has no cover" for a week.
+            if (!reported) {
+              log.warn({ event: "DEEZER_UNAVAILABLE", err: String(e) });
+              reported = true;
+            }
+            break;
+          }
+        }
+        if (changed) await persistReleaseArt();
+      };
+      await refreshMissingArtwork();
+
       } finally {
         enrichPassRunning = false;
       }
@@ -1132,7 +1223,8 @@ async function main(): Promise<void> {
           discographies.set(normName(name), entry);
           await persistDiscographies(discographyFile, discographies);
           return entry;
-        }
+        },
+        () => releaseArt
       );
       await server.start();
       void runEnrichPass().catch((e) =>

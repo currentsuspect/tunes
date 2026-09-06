@@ -1531,4 +1531,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Missing from your collection'), findsNothing);
   });
+
+  testWidgets('a missing album shows its real cover when one was fetched', (
+    tester,
+  ) async {
+    // The daemon fetches sleeves from Deezer for records we do not have; a
+    // null artSha is ordinary and must fall back rather than break the rail.
+    final client = _FakeClient(
+      () async => _manifestOf(_library()),
+      onMissing: () async => const [
+        MissingRelease(
+          id: 'g1',
+          title: 'UTOPIA',
+          artist: 'Travis Scott',
+          type: 'Album',
+          year: '2023',
+          artistTracks: 17,
+          artSha: 'c0ffee',
+        ),
+        MissingRelease(
+          id: 'g2',
+          title: 'Rodeo',
+          artist: 'Travis Scott',
+          type: 'Album',
+          year: '2015',
+          artistTracks: 17,
+        ),
+      ],
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+    await tester.pumpAndSettle();
+    expect(find.text('UTOPIA'), findsOneWidget);
+    expect(find.text('Rodeo'), findsOneWidget);
+    // The one without a cover falls back to the generated tile, labelled by
+    // the album so a rail of one act does not repeat the same initial.
+    expect(find.text('R'), findsOneWidget);
+  });
 }
