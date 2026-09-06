@@ -10,6 +10,7 @@ import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
 import '../album/album_page.dart';
 import '../lyrics/lyrics_sheet.dart';
+import 'now_playing_details.dart';
 import '../queue/queue_sheet.dart';
 
 class NowPlayingPage extends StatelessWidget {
@@ -46,6 +47,36 @@ class NowPlayingPage extends StatelessWidget {
     final qs = queueStore;
     if (qs == null) return;
     QueueSheet.show(context, queueStore: qs, player: player);
+  }
+
+  void _openArtist(BuildContext context, String artist) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArtistPage(
+          artist: artist,
+          manifest: manifest,
+          player: player,
+          store: store,
+          downloading: downloading,
+          onDownload: onDownload,
+          offline: offline,
+          artUrlFor: artUrlFor,
+          manifestStore: manifestStore,
+          queueStore: queueStore,
+        ),
+      ),
+    );
+  }
+
+  void _openLyrics(BuildContext context, ManifestTrack track) {
+    LyricsSheet.show(
+      context,
+      track: track,
+      player: player,
+      onSave: (text) async {
+        await manifestStore.setEdit(track.sha, 'lyrics', text);
+      },
+    );
   }
 
   void _openAlbum(BuildContext context, ManifestTrack track) {
@@ -171,310 +202,390 @@ class NowPlayingPage extends StatelessWidget {
             final downloaded = store.pathFor(current.sha) != null;
 
             return SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.xs,
-                      Space.sm,
-                      Space.xs,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(
-                            Icons.keyboard_arrow_down_rounded,
-                            color: Tones.textMuted,
-                          ),
-                        ),
-                        const Expanded(
-                          child: Text(
-                            'Now Playing',
-                            textAlign: TextAlign.center,
-                            style: TypeScale.caption,
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          icon: const Icon(
-                            Icons.more_horiz_rounded,
-                            color: Tones.textMuted,
-                          ),
-                          color: Tones.surface,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              RadiusTokens.control,
-                            ),
-                          ),
-                          onSelected: (action) {
-                            switch (action) {
-                              case 'queue':
-                                _openQueue(context);
-                                break;
-                              case 'artist':
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => ArtistPage(
-                                      artist: current.artistDisplay,
-                                      manifest: manifest,
-                                      player: player,
-                                      store: store,
-                                      downloading: downloading,
-                                      onDownload: onDownload,
-                                      offline: offline,
-                                      artUrlFor: artUrlFor,
-                                      manifestStore: manifestStore,
-                                      queueStore: queueStore,
+              // The player keeps a whole viewport to itself so nothing about
+              // it changes; the details are a scroll away rather than a
+              // squeeze. A fixed height also keeps the Expanded artwork
+              // working, which it would not inside an unbounded scroll view.
+              child: LayoutBuilder(
+                builder: (context, viewport) => SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        height: viewport.maxHeight,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                Space.xs,
+                                Space.sm,
+                                Space.xs,
+                                0,
+                              ),
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop(),
+                                    icon: const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Tones.textMuted,
                                     ),
                                   ),
-                                );
-                                break;
-                              case 'album':
-                                _openAlbum(context, current);
-                                break;
-                              case 'download':
-                                if (downloaded) {
-                                  store.remove(current.sha);
-                                } else {
-                                  onDownload(current);
-                                }
-                                break;
-                              case 'stop':
-                                player.stop();
-                                break;
-                              case 'info':
-                                _showTrackInfo(context, current);
-                                break;
-                              case 'lyrics':
-                                LyricsSheet.show(
-                                  context,
-                                  track: current,
-                                  player: player,
-                                  onSave: (text) async {
-                                    await manifestStore.setEdit(
-                                      current.sha,
-                                      'lyrics',
-                                      text,
-                                    );
-                                  },
-                                );
-                                break;
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'queue',
-                              child: Text('Queue', style: TypeScale.body),
-                            ),
-                            const PopupMenuItem(
-                              value: 'artist',
-                              child: Text(
-                                'Go to artist',
-                                style: TypeScale.body,
+                                  const Expanded(
+                                    child: Text(
+                                      'Now Playing',
+                                      textAlign: TextAlign.center,
+                                      style: TypeScale.caption,
+                                    ),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    icon: const Icon(
+                                      Icons.more_horiz_rounded,
+                                      color: Tones.textMuted,
+                                    ),
+                                    color: Tones.surface,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(
+                                        RadiusTokens.control,
+                                      ),
+                                    ),
+                                    onSelected: (action) {
+                                      switch (action) {
+                                        case 'queue':
+                                          _openQueue(context);
+                                          break;
+                                        case 'artist':
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => ArtistPage(
+                                                artist: current.artistDisplay,
+                                                manifest: manifest,
+                                                player: player,
+                                                store: store,
+                                                downloading: downloading,
+                                                onDownload: onDownload,
+                                                offline: offline,
+                                                artUrlFor: artUrlFor,
+                                                manifestStore: manifestStore,
+                                                queueStore: queueStore,
+                                              ),
+                                            ),
+                                          );
+                                          break;
+                                        case 'album':
+                                          _openAlbum(context, current);
+                                          break;
+                                        case 'download':
+                                          if (downloaded) {
+                                            store.remove(current.sha);
+                                          } else {
+                                            onDownload(current);
+                                          }
+                                          break;
+                                        case 'stop':
+                                          player.stop();
+                                          break;
+                                        case 'info':
+                                          _showTrackInfo(context, current);
+                                          break;
+                                        case 'lyrics':
+                                          LyricsSheet.show(
+                                            context,
+                                            track: current,
+                                            player: player,
+                                            onSave: (text) async {
+                                              await manifestStore.setEdit(
+                                                current.sha,
+                                                'lyrics',
+                                                text,
+                                              );
+                                            },
+                                          );
+                                          break;
+                                      }
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'queue',
+                                        child: Text(
+                                          'Queue',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'artist',
+                                        child: Text(
+                                          'Go to artist',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'album',
+                                        child: Text(
+                                          'Go to album',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'download',
+                                        child: Text(
+                                          downloaded
+                                              ? 'Remove download'
+                                              : 'Download',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'stop',
+                                        child: Text(
+                                          'Stop',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'info',
+                                        child: Text(
+                                          'Track information',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'lyrics',
+                                        child: Text(
+                                          'Lyrics',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
-                            const PopupMenuItem(
-                              value: 'album',
-                              child: Text('Go to album', style: TypeScale.body),
-                            ),
-                            PopupMenuItem(
-                              value: 'download',
-                              child: Text(
-                                downloaded ? 'Remove download' : 'Download',
-                                style: TypeScale.body,
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: Space.xl,
+                                ),
+                                child: Center(
+                                  child: _Artwork(
+                                    track: current,
+                                    artUrlFor: artUrlFor,
+                                    playing: player.playing,
+                                  ),
+                                ),
                               ),
                             ),
-                            const PopupMenuItem(
-                              value: 'stop',
-                              child: Text('Stop', style: TypeScale.body),
-                            ),
-                            const PopupMenuItem(
-                              value: 'info',
-                              child: Text(
-                                'Track information',
-                                style: TypeScale.body,
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: Space.lg,
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    current.title,
+                                    style: TypeScale.wordmark,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: Space.sm),
+                                  Text(
+                                    current.artistDisplay,
+                                    style: TypeScale.title,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (current.albumLabel != null)
+                                    Text(
+                                      current.albumLabel!,
+                                      style: TypeScale.body,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  const SizedBox(height: Space.lg),
+                                ],
                               ),
                             ),
-                            const PopupMenuItem(
-                              value: 'lyrics',
-                              child: Text('Lyrics', style: TypeScale.body),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: Space.lg,
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    _label(position),
+                                    style: TypeScale.caption.copyWith(
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Builder(
+                                      builder: (context) {
+                                        // A bare Slider inherits a rail colour that is
+                                        // invisible on this background, so at 0:00 the
+                                        // thumb looked like a dot floating between two
+                                        // timestamps with no track at all.
+                                        // `clamp` is declared on num and returns num, so
+                                        // the toDouble() has to come after it.
+                                        final maxMs = duration.inMilliseconds
+                                            .clamp(1, double.infinity)
+                                            .toDouble();
+                                        return SliderTheme(
+                                          data: SliderThemeData(
+                                            trackHeight: 3,
+                                            activeTrackColor: Tones.primary,
+                                            inactiveTrackColor:
+                                                Tones.surfaceRaised,
+                                            thumbColor: Tones.primary,
+                                            overlayColor: Tones.primary
+                                                .withValues(alpha: 0.15),
+                                            thumbShape:
+                                                const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 6,
+                                                ),
+                                            overlayShape:
+                                                const RoundSliderOverlayShape(
+                                                  overlayRadius: 14,
+                                                ),
+                                          ),
+                                          child: Slider(
+                                            // Position can briefly exceed duration on a
+                                            // stream; Slider asserts if it does.
+                                            value: value
+                                                .clamp(0, maxMs)
+                                                .toDouble(),
+                                            max: maxMs,
+                                            onChanged: (v) => player.seek(
+                                              Duration(milliseconds: v.round()),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  Text(
+                                    _label(duration),
+                                    style: TypeScale.caption.copyWith(
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                top: Space.sm,
+                                bottom: Space.sm,
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  IconButton(
+                                    onPressed: player.previous,
+                                    iconSize: 36,
+                                    icon: const Icon(
+                                      Icons.skip_previous_rounded,
+                                      color: Tones.text,
+                                    ),
+                                    tooltip: 'Previous',
+                                  ),
+                                  const SizedBox(width: Space.md),
+                                  InkWell(
+                                    onTap: player.playing
+                                        ? player.pause
+                                        : player.play,
+                                    borderRadius: BorderRadius.circular(40),
+                                    child: Container(
+                                      width: 72,
+                                      height: 72,
+                                      decoration: BoxDecoration(
+                                        color: Tones.primary,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        player.playing
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        size: 40,
+                                        color: Tones.onPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: Space.md),
+                                  IconButton(
+                                    onPressed: player.next,
+                                    iconSize: 36,
+                                    icon: const Icon(
+                                      Icons.skip_next_rounded,
+                                      color: Tones.text,
+                                    ),
+                                    tooltip: 'Next',
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                Space.xl,
+                                0,
+                                Space.xl,
+                                Space.xs,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  _ShuffleButton(player: player),
+                                  _RepeatButton(player: player),
+                                ],
+                              ),
+                            ),
+                            // Says there is something below, which a scroll view on a
+                            // screen that exactly fills the viewport otherwise hides.
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: Space.sm),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.keyboard_arrow_up_rounded,
+                                    size: 18,
+                                    color: Tones.textMuted.withValues(
+                                      alpha: 0.7,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Lyrics and credits',
+                                    style: TypeScale.caption.copyWith(
+                                      color: Tones.textMuted.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: Space.xl),
-                      child: Center(
-                        child: _Artwork(
-                          track: current,
-                          artUrlFor: artUrlFor,
-                          playing: player.playing,
-                        ),
                       ),
-                    ),
+                      NowPlayingDetails(
+                        track: current,
+                        manifest: manifest,
+                        artUrlFor: artUrlFor,
+                        onOpenArtist: (a) => _openArtist(context, a),
+                        onOpenAlbum: () => _openAlbum(context, current),
+                        onOpenLyrics: () => _openLyrics(context, current),
+                      ),
+                    ],
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-                    child: Column(
-                      children: [
-                        Text(
-                          current.title,
-                          style: TypeScale.wordmark,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: Space.sm),
-                        Text(
-                          current.artistDisplay,
-                          style: TypeScale.title,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (current.albumLabel != null)
-                          Text(
-                            current.albumLabel!,
-                            style: TypeScale.body,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        const SizedBox(height: Space.lg),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-                    child: Row(
-                      children: [
-                        Text(
-                          _label(position),
-                          style: TypeScale.caption.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        Expanded(
-                          child: Builder(
-                            builder: (context) {
-                              // A bare Slider inherits a rail colour that is
-                              // invisible on this background, so at 0:00 the
-                              // thumb looked like a dot floating between two
-                              // timestamps with no track at all.
-                              // `clamp` is declared on num and returns num, so
-                              // the toDouble() has to come after it.
-                              final maxMs = duration.inMilliseconds
-                                  .clamp(1, double.infinity)
-                                  .toDouble();
-                              return SliderTheme(
-                                data: SliderThemeData(
-                                  trackHeight: 3,
-                                  activeTrackColor: Tones.primary,
-                                  inactiveTrackColor: Tones.surfaceRaised,
-                                  thumbColor: Tones.primary,
-                                  overlayColor: Tones.primary.withValues(
-                                    alpha: 0.15,
-                                  ),
-                                  thumbShape: const RoundSliderThumbShape(
-                                    enabledThumbRadius: 6,
-                                  ),
-                                  overlayShape: const RoundSliderOverlayShape(
-                                    overlayRadius: 14,
-                                  ),
-                                ),
-                                child: Slider(
-                                  // Position can briefly exceed duration on a
-                                  // stream; Slider asserts if it does.
-                                  value: value.clamp(0, maxMs).toDouble(),
-                                  max: maxMs,
-                                  onChanged: (v) => player.seek(
-                                    Duration(milliseconds: v.round()),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        Text(
-                          _label(duration),
-                          style: TypeScale.caption.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      top: Space.sm,
-                      bottom: Space.sm,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: player.previous,
-                          iconSize: 36,
-                          icon: const Icon(
-                            Icons.skip_previous_rounded,
-                            color: Tones.text,
-                          ),
-                          tooltip: 'Previous',
-                        ),
-                        const SizedBox(width: Space.md),
-                        InkWell(
-                          onTap: player.playing ? player.pause : player.play,
-                          borderRadius: BorderRadius.circular(40),
-                          child: Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              color: Tones.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              player.playing
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                              size: 40,
-                              color: Tones.onPrimary,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: Space.md),
-                        IconButton(
-                          onPressed: player.next,
-                          iconSize: 36,
-                          icon: const Icon(
-                            Icons.skip_next_rounded,
-                            color: Tones.text,
-                          ),
-                          tooltip: 'Next',
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.xl,
-                      0,
-                      Space.xl,
-                      Space.lg,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _ShuffleButton(player: player),
-                        _RepeatButton(player: player),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
             );
           },
