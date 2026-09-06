@@ -14,6 +14,7 @@ import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/queue_store.dart';
+import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
@@ -27,7 +28,7 @@ import 'features/home/home_view.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
 import 'features/player/mini_player_bar.dart';
-import 'features/profile/profile_sheet.dart';
+import 'features/profile/settings_page.dart';
 import 'features/search/search_view.dart';
 
 const _gitCommit = String.fromEnvironment('GIT_COMMIT', defaultValue: 'local');
@@ -54,6 +55,10 @@ Future<void> main() async {
   final db = TunesDatabase();
   final manifestStore = ManifestStore(db);
   final queueStore = QueueStore(db);
+  // Loaded before the first frame so every screen can read a setting during
+  // build. A setting that has to be awaited mid-build is one that flickers.
+  final settings = SettingsStore(db);
+  await settings.load();
   final client = TunesClient(_tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
@@ -77,7 +82,11 @@ Future<void> main() async {
     audioServiceReady = true;
     try {
       await AudioService.init(
-        builder: () => TuneAudioHandler(player, artBase: _tunesdUrl),
+        builder: () => TuneAudioHandler(
+          player,
+          artBase: _tunesdUrl,
+          stopOnTaskRemoved: () => settings.stopOnClose,
+        ),
         config: const AudioServiceConfig(
           androidNotificationChannelId:
               'com.currentsuspect.tunes.channel.audio',
@@ -103,6 +112,11 @@ Future<void> main() async {
     }
   }
 
+  // The player is built lazily on first play, so the stored choice has to be
+  // handed to it up front rather than applied to an instance that does not
+  // exist yet.
+  unawaited(player.setGapless(settings.gapless));
+
   player.onFirstPlay = ensureAudioService;
   // Not awaited: it only has to be in place before the first track, and the
   // library should not wait on the audio session to draw.
@@ -117,6 +131,7 @@ Future<void> main() async {
       reachability: reachability,
       manifestStore: manifestStore,
       queueStore: queueStore,
+      settings: settings,
     ),
   );
 }
@@ -130,6 +145,7 @@ class TunesApp extends StatefulWidget {
     required this.reachability,
     required this.manifestStore,
     required this.queueStore,
+    required this.settings,
   });
 
   final TunesClient client;
@@ -138,6 +154,7 @@ class TunesApp extends StatefulWidget {
   final Reachability reachability;
   final ManifestStore manifestStore;
   final QueueStore queueStore;
+  final SettingsStore settings;
 
   @override
   State<TunesApp> createState() => _TunesAppState();
@@ -167,20 +184,24 @@ class _TunesAppState extends State<TunesApp> {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    return DownloadScope(
-      manager: _downloads,
-      child: MaterialApp(
-        title: 'tunes',
-        debugShowCheckedModeBanner: false,
-        theme: buildTunesTheme(mq),
-        home: AppShell(
-          client: widget.client,
-          player: widget.player,
-          store: widget.store,
-          reachability: widget.reachability,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-          downloads: _downloads,
+    return SettingsScope(
+      settings: widget.settings,
+      child: DownloadScope(
+        manager: _downloads,
+        child: MaterialApp(
+          title: 'tunes',
+          debugShowCheckedModeBanner: false,
+          theme: buildTunesTheme(mq),
+          home: AppShell(
+            client: widget.client,
+            player: widget.player,
+            store: widget.store,
+            reachability: widget.reachability,
+            manifestStore: widget.manifestStore,
+            queueStore: widget.queueStore,
+            settings: widget.settings,
+            downloads: _downloads,
+          ),
         ),
       ),
     );
@@ -196,6 +217,7 @@ class AppShell extends StatefulWidget {
     required this.reachability,
     required this.manifestStore,
     required this.queueStore,
+    required this.settings,
     required this.downloads,
   });
 
@@ -205,6 +227,7 @@ class AppShell extends StatefulWidget {
   final Reachability reachability;
   final ManifestStore manifestStore;
   final QueueStore queueStore;
+  final SettingsStore settings;
 
   /// Owned by [TunesApp], which publishes it above the Navigator so pushed
   /// routes can reach it too.
@@ -417,16 +440,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   String _artUrlFor(String sha) => '${widget.client.baseUrl}/art/$sha';
 
+  /// The header avatar now goes straight to settings. The old sheet was a
+  /// read-only diagnostics panel, and its contents live under Library there.
   void _openProfile(int trackCount) {
-    showProfileSheet(
-      context,
-      endpoint: widget.client.baseUrl,
-      offline: widget.reachability.offline,
-      commit: _gitCommit,
-      buildNumber: _buildNumber,
-      channel: _channel,
-      downloadCount: widget.store.shas.length,
-      trackCount: trackCount,
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(
+          settings: widget.settings,
+          player: widget.player,
+          endpoint: widget.client.baseUrl,
+          offline: widget.reachability.offline,
+          commit: _gitCommit,
+          buildNumber: _buildNumber,
+          channel: _channel,
+          trackCount: trackCount,
+          downloadCount: widget.store.shas.length,
+        ),
+      ),
     );
   }
 

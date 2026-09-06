@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/sync_draft.dart';
 import '../../core/theme/tokens.dart';
@@ -60,6 +63,10 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   /// result plays back behind the vocal. Adjustable because reaction time is
   /// personal and output latency is per-device.
   Duration _tapOffset = const Duration(milliseconds: -250);
+
+  /// Read from settings on first build and written back on change, so the
+  /// value tuned in one session is the value the next one starts from.
+  SettingsStore? _settings;
   bool _saving = false;
 
   /// Set by any action that places or moves a mark. Timing a line and then
@@ -242,6 +249,9 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
           ? const Duration(seconds: 1)
           : next;
     });
+    // Persisted so it survives leaving the editor; tuning it every session
+    // would defeat the point of it being adjustable at all.
+    unawaited(_settings?.setLyricsTapOffset(_tapOffset) ?? Future.value());
   }
 
   void _shiftAll(Duration by) {
@@ -326,6 +336,16 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       return false;
     }
     return choice == 'discard';
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final settings = SettingsScope.maybeOf(context);
+    if (settings != null && _settings == null) {
+      _settings = settings;
+      _tapOffset = settings.lyricsTapOffset;
+    }
   }
 
   @override

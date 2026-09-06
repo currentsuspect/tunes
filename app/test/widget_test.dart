@@ -10,6 +10,7 @@ import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/queue_store.dart';
+import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
@@ -394,6 +395,7 @@ void main() {
   late TunesDatabase db;
   late ManifestStore manifestStore;
   late QueueStore queueStore;
+  late SettingsStore settings;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('tunes-test-');
@@ -402,6 +404,8 @@ void main() {
     db = TunesDatabase.forTesting(NativeDatabase.memory());
     manifestStore = ManifestStore(db);
     queueStore = _TestQueueStore(db);
+    settings = SettingsStore(db);
+    await settings.load();
   });
 
   tearDown(() async {
@@ -425,6 +429,7 @@ void main() {
         reachability: reachability ?? Reachability(),
         manifestStore: manifestStore,
         queueStore: queueStore,
+        settings: settings,
       ),
     );
     await tester.pumpAndSettle();
@@ -1039,7 +1044,7 @@ void main() {
     expect(find.text('Travis Scott · 2'), findsOneWidget);
   });
 
-  testWidgets('profile sheet opens from the avatar', (tester) async {
+  testWidgets('settings open from the avatar', (tester) async {
     await pumpApp(
       tester,
       _FakeClient(() async => _manifestOf(_library())),
@@ -1049,9 +1054,17 @@ void main() {
     await tester.tap(find.byIcon(Icons.person_rounded));
     await tester.pumpAndSettle();
 
+    // The avatar now opens Settings; the old read-only sheet's diagnostics
+    // live under its Library section.
+    expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Daemon'), findsOneWidget);
     expect(find.text('http://fake:4780'), findsOneWidget);
-    expect(find.text('Library'), findsWidgets);
+    // Every control has to do something, so each one is asserted present
+    // rather than the screen merely opening.
+    expect(find.text('Gapless playback'), findsOneWidget);
+    expect(find.text('Stop when the app closes'), findsOneWidget);
+    expect(find.text('Tap offset'), findsOneWidget);
+    expect(find.text('Display name'), findsOneWidget);
   });
 
   testWidgets('mini bar is minimal: art, title, play only', (tester) async {

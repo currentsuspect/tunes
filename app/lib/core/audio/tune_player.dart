@@ -29,6 +29,12 @@ abstract class TunePlayer extends ChangeNotifier {
   void stop();
   void setRepeat(PlaybackRepeat mode);
   void setShuffle(bool on);
+
+  /// Join tracks without the gap the decoder would otherwise leave.
+  ///
+  /// A no-op on players that cannot do it, so callers do not have to ask
+  /// what backend they are talking to.
+  Future<void> setGapless(bool on) async {}
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -46,6 +52,11 @@ class MediaKitTunePlayer extends TunePlayer {
   bool _firstPlayDone = false;
 
   Player? _player;
+
+  /// Applied to the mpv instance on creation as well, since the player is
+  /// built lazily on first play and a setting chosen before then would
+  /// otherwise be forgotten.
+  bool _gapless = false;
   List<ManifestTrack> _queue = const [];
   int _index = -1;
   bool _playing = false;
@@ -107,7 +118,9 @@ class MediaKitTunePlayer extends TunePlayer {
     onQueuePlayed?.call(ordered);
     notifyListeners();
 
+    final created = _player == null;
     final player = _player ??= Player();
+    if (created) unawaited(_applyGapless(player));
     unawaited(
       player.open(
         Playlist(
@@ -250,6 +263,30 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player != null) _applyPlaylistMode(player);
     notifyListeners();
+  }
+
+  @override
+  Future<void> setGapless(bool on) async {
+    _gapless = on;
+    final player = _player;
+    if (player != null) await _applyGapless(player);
+  }
+
+  /// mpv's own default is `weak`: it only joins tracks whose formats already
+  /// match, which across a mixed library means almost never. `yes` forces it.
+  ///
+  /// Reached dynamically because `NativePlayer`, which owns `setProperty`, is
+  /// not exported from media_kit's public entry point -- and importing its
+  /// `src/` path would tie us to a file that is free to move. The call is
+  /// guarded, so a backend without the method simply does not get gapless.
+  Future<void> _applyGapless(Player player) async {
+    try {
+      final platform = player.platform as dynamic;
+      await platform.setProperty('gapless-audio', _gapless ? 'yes' : 'weak');
+    } catch (_) {
+      // An mpv that will not take the property is no reason to stop playing.
+      // The gap is a nicety; the audio is not.
+    }
   }
 
   @override

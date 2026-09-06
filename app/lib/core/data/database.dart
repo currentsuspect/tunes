@@ -7,6 +7,19 @@ import 'package:path_provider/path_provider.dart';
 
 part 'database.g.dart';
 
+/// Key/value app settings.
+///
+/// A table rather than a preferences plugin: the database is already open
+/// before the first frame, so settings are available without a second async
+/// store to wait on, and they survive with the rest of the local state.
+class Settings extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
 class Tracks extends Table {
   TextColumn get sha => text()();
   IntColumn get size => integer().withDefault(const Constant(0))();
@@ -118,7 +131,15 @@ class SyncState extends Table {
 }
 
 @DriftDatabase(
-  tables: [Tracks, Releases, Artists, SyncState, TrackEdits, QueueEntries],
+  tables: [
+    Tracks,
+    Releases,
+    Artists,
+    SyncState,
+    TrackEdits,
+    QueueEntries,
+    Settings,
+  ],
 )
 class TunesDatabase extends _$TunesDatabase {
   TunesDatabase() : super(_openDefault());
@@ -129,7 +150,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -170,6 +191,12 @@ class TunesDatabase extends _$TunesDatabase {
         // rows get null / '[]' and are corrected on the next manifest sync.
         await m.addColumn(tracks, tracks.primaryArtist);
         await m.addColumn(tracks, tracks.featuredJson);
+      }
+      if (from < 6) {
+        // v5 -> v6: settings. New table only; nothing existing is touched, and
+        // an absent key means "the default", so an upgraded install starts
+        // with the same behaviour it had.
+        await m.createTable(settings);
       }
     },
   );

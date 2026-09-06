@@ -4,13 +4,17 @@ import 'package:flutter/foundation.dart';
 import 'tune_player.dart';
 
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
-  TuneAudioHandler(this.player, {this.artBase = ''}) {
+  TuneAudioHandler(this.player, {this.artBase = '', this.stopOnTaskRemoved}) {
     player.addListener(_sync);
     _sync();
   }
 
   final TunePlayer player;
   final String artBase;
+
+  /// Read at the moment the app is closed rather than captured at startup, so
+  /// changing the setting takes effect without a restart.
+  final bool Function()? stopOnTaskRemoved;
 
   void _sync() {
     final controls = [
@@ -112,7 +116,7 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   /// makes closing the app mean what it looks like it means.
   @override
   Future<void> onTaskRemoved() async {
-    await stop();
+    if (stopOnTaskRemoved?.call() ?? true) await stop();
     await super.onTaskRemoved();
   }
 
