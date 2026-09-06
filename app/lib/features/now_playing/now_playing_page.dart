@@ -108,7 +108,7 @@ class NowPlayingPage extends StatelessWidget {
                 _InfoRow(label: 'Artist', value: track.artistDisplay),
                 if (track.featured.isNotEmpty)
                   _InfoRow(label: 'Featured', value: track.featured.join(', ')),
-                _InfoRow(label: 'Album', value: track.album),
+                _InfoRow(label: 'Album', value: track.albumOrNull ?? '—'),
                 _InfoRow(label: 'Quality', value: track.qualityLabel),
                 _InfoRow(
                   label: 'Sample rate',
@@ -337,13 +337,14 @@ class NowPlayingPage extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
-                          current.album,
-                          style: TypeScale.body,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        if (current.albumLabel != null)
+                          Text(
+                            current.albumLabel!,
+                            style: TypeScale.body,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         const SizedBox(height: Space.lg),
                       ],
                     ),

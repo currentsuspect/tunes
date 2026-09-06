@@ -107,7 +107,7 @@ class TrackRow extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${track.artistDisplay} — ${track.album}',
+                            track.artistAlbumLine,
                             style: TypeScale.body,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

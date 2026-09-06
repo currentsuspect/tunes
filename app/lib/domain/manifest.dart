@@ -74,6 +74,45 @@ class ManifestTrack {
   /// in the artist list instead.
   String get artistDisplay => artistKey;
 
+  /// The album tag, or null when we never resolved one.
+  ///
+  /// [ManifestTrack.fromJson] fills an absent album with the string
+  /// `'unknown album'`. That is a parsing detail, and a surface that prints
+  /// it is showing a listener our placeholder rather than saying it does not
+  /// know. Detail views should render their usual em dash for null instead.
+  String? get albumOrNull {
+    final a = album.trim();
+    if (a.isEmpty) return null;
+    if (a.toLowerCase() == 'unknown album') return null;
+    return album;
+  }
+
+  /// The album line for a surface that already shows the title next to it,
+  /// or null when it would only repeat.
+  ///
+  /// Singles are named after their only track, so Now Playing was printing
+  /// the same words twice in a row under the artwork. Callers render nothing
+  /// when this is null rather than reserving a blank line, so the block stays
+  /// vertically centred either way.
+  String? get albumLabel {
+    final a = albumOrNull;
+    if (a == null) return null;
+    if (a.trim().toLowerCase() == title.trim().toLowerCase()) return null;
+    return a;
+  }
+
+  /// The one-line "who and where from" caption under a track title.
+  ///
+  /// Four screens were each building this by hand, and they had already
+  /// drifted: two used the raw `artist` tag, so a collaboration showed up as
+  /// `Yeat;Don Toliver` -- Vorbis multi-value syntax leaking to the listener.
+  /// Keeping it here means the next surface inherits the rule rather than
+  /// deriving it a fifth time.
+  String get artistAlbumLine {
+    final a = albumLabel;
+    return a == null ? artistDisplay : '$artistDisplay — $a';
+  }
+
   /// Grouping key for the artist list. Falls back to the raw credit for
   /// tracks synced before the daemon started sending primaryArtist.
   String get artistKey {

@@ -1438,4 +1438,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Offline — playing downloads only'), findsNothing);
   });
+
+  testWidgets(
+    'a release holding more tracks than its total drops the fraction',
+    (tester) async {
+      // The live library has a 35-track release whose enriched total says 22.
+      // "35/22 tracks - complete" asserts a completeness we cannot vouch for,
+      // so the page counts what is actually here instead.
+      final tracks = [
+        _track('One', 'flac', 950000, sha: 'a' * 64, releaseId: 'rel-over'),
+        _track('Two', 'flac', 950000, sha: 'b' * 64, releaseId: 'rel-over'),
+        _track('Three', 'flac', 950000, sha: 'c' * 64, releaseId: 'rel-over'),
+      ];
+      final manifest = TunesManifest(
+        tracks: tracks,
+        releases: [
+          ManifestRelease(
+            id: 'rel-over',
+            title: 'OVERSTUFFED',
+            artist: 'Artist',
+            year: '2026',
+            artSha: null,
+            type: 'album',
+            totalTracks: 2,
+            trackShas: ['a' * 64, 'b' * 64, 'c' * 64],
+          ),
+        ],
+      );
+      await pumpApp(
+        tester,
+        _FakeClient(() async => manifest),
+        FakeTunePlayer(),
+      );
+      await tester.tap(find.text('OVERSTUFFED').first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('3 tracks'), findsOneWidget);
+      expect(find.textContaining('3/2'), findsNothing);
+      expect(find.textContaining('complete'), findsNothing);
+    },
+  );
 }

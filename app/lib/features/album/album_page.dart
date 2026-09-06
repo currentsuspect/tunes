@@ -244,8 +244,15 @@ class AlbumPage extends StatelessWidget {
 String _trackCountLabel(ManifestRelease release) {
   final owned = release.trackShas.length;
   final total = release.totalTracks;
-  if (total == null) return '$owned ${owned == 1 ? 'track' : 'tracks'}';
-  if (owned >= total) return '$owned/$total tracks · complete';
+  final plain = '$owned ${owned == 1 ? 'track' : 'tracks'}';
+  if (total == null) return plain;
+  // Holding more of a release than it is supposed to contain means the
+  // enriched total describes a different edition than the files do -- one
+  // library release has 35 tracks against a total of 22. Printing "35/22"
+  // asserts a completeness we cannot vouch for, so fall back to counting
+  // what is actually here.
+  if (owned > total) return plain;
+  if (owned == total) return '$owned/$total tracks · complete';
   return '$owned/$total tracks · ${total - owned} missing';
 }
 

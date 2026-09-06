@@ -42,7 +42,7 @@ class ManualFindSheet extends StatelessWidget {
             Text(track.title, style: TypeScale.title),
             const SizedBox(height: Space.xs),
             Text(
-              '${track.artist} — ${track.album}',
+              track.artistAlbumLine,
               style: TypeScale.body,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
