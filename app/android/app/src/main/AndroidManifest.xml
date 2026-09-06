@@ -9,6 +9,13 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+        <!-- Statically references the notification icon so the release build
+             keeps its name. audio_service looks it up at runtime by name, and
+             a name nothing references is collapsed away, which made the
+             notification invalid and crashed the app on play. -->
+        <meta-data
+            android:name="com.currentsuspect.tunes.notification_icon"
+            android:resource="@drawable/ic_stat_music"/>
         <service
             android:name="com.ryanheise.audioservice.AudioService"
             android:foregroundServiceType="mediaPlayback"
