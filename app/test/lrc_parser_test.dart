@@ -213,4 +213,89 @@ void main() {
       expect(lrc.untimed, ['hello']);
     });
   });
+
+  group('bracket-inline word timing', () {
+    // The second Enhanced LRC dialect: word times written as [mm:ss.ff]
+    // between the words instead of <mm:ss.ff> before them. Plenty of
+    // downloaded .lrc files use it.
+    //
+    // These were all one bug. Every tag was read as a line start time, so a
+    // four-word line became four lines each showing only the text after the
+    // LAST tag -- the words arrived visibly truncated, and the timings that
+    // were there went unused.
+    const inline =
+        '[00:12.00]Welcome [00:12.40]to [00:12.90]the [00:13.30]show';
+
+    test('a line of timed words is one line, not one line per word', () {
+      final lrc = LrcParser.parse(inline);
+      expect(lrc.lines, hasLength(1));
+    });
+
+    test('keeps every word, not just the last', () {
+      final lrc = LrcParser.parse(inline);
+      expect(lrc.lines[0].text, 'Welcome to the show');
+      expect(lrc.lines[0].words.map((w) => w.text), [
+        'Welcome',
+        'to',
+        'the',
+        'show',
+      ]);
+    });
+
+    test('each word keeps its own timestamp', () {
+      final lrc = LrcParser.parse(inline);
+      expect(lrc.lines[0].words[0].start, const Duration(seconds: 12));
+      expect(
+        lrc.lines[0].words[1].start,
+        const Duration(seconds: 12, milliseconds: 400),
+      );
+      expect(
+        lrc.lines[0].words[3].start,
+        const Duration(seconds: 13, milliseconds: 300),
+      );
+    });
+
+    test('the line starts when its first word does', () {
+      final lrc = LrcParser.parse(inline);
+      expect(lrc.lines[0].timestamp, const Duration(seconds: 12));
+    });
+
+    test('counts as word timing, so the view sweeps it', () {
+      expect(LrcParser.parse(inline).hasWordTiming, isTrue);
+    });
+
+    test('repeated start times are still repeated start times', () {
+      // The case that makes this a discrimination problem rather than a
+      // parse: same brackets, opposite meaning. Tags packed against each
+      // other with no text between them are two starts for one line.
+      final lrc = LrcParser.parse('[00:10.00][00:20.00]Chorus');
+      expect(lrc.lines, hasLength(2));
+      expect(lrc.lines[0].text, 'Chorus');
+      expect(lrc.lines[1].text, 'Chorus');
+      expect(lrc.lines[0].hasWordTiming, isFalse);
+    });
+
+    test('a line may carry repeated starts AND inline words', () {
+      final lrc = LrcParser.parse('[00:05.00][00:09.00]Big [00:09.50]Poe');
+      expect(lrc.lines, hasLength(1));
+      expect(lrc.lines[0].text, 'Big Poe');
+      // The leading header is the line start; the tags with words after them
+      // stamp the words.
+      expect(lrc.lines[0].timestamp, const Duration(seconds: 5));
+      expect(lrc.lines[0].words, hasLength(2));
+    });
+
+    test('a plain timed line is untouched', () {
+      final lrc = LrcParser.parse('[00:12.34]First line');
+      expect(lrc.lines, hasLength(1));
+      expect(lrc.lines[0].text, 'First line');
+      expect(lrc.lines[0].hasWordTiming, isFalse);
+    });
+
+    test('mixing both dialects on one line renders no markup', () {
+      final lrc = LrcParser.parse('[00:12.00]Big [00:12.50]<00:12.50>Poe');
+      expect(lrc.lines[0].text, isNot(contains('<')));
+      expect(lrc.lines[0].text, 'Big Poe');
+    });
+  });
 }

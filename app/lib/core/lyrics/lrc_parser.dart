@@ -123,7 +123,6 @@ class LrcParser {
         continue;
       }
       // Timed line: [mm:ss(.ss)?]text
-      // Allow multiple timestamps per line (some lyrics repeat headers).
       final tags = [..._lineTag.allMatches(line)];
       if (tags.isEmpty) {
         // Plain text without a timestamp — keep for non-timed display.
@@ -133,21 +132,91 @@ class LrcParser {
         if (bare.isNotEmpty) untimed.add(bare);
         continue;
       }
-      final body = line.substring(tags.last.end);
-      final words = _parseWords(body);
-      // Strip word tags from the fallback too. Without it a line whose tags
-      // carried no words -- a timing mark recorded before the word was typed
-      // -- rendered its own markup as the lyric.
-      final text = words.isEmpty
-          ? body.replaceAll(_wordTag, '').trim()
-          : words.map((w) => w.text).join(' ');
-      if (text.isEmpty) continue;
-      for (final t in tags) {
+
+      // Two different things are spelled with the same brackets, and telling
+      // them apart is the whole job here:
+      //
+      //   [00:12.00][01:30.00]Chorus            one line, two start times
+      //   [00:12.00]Big [00:12.50]Poe           one line, two WORD times
+      //
+      // The discriminator is whether text sits *between* consecutive tags.
+      // Reading every tag as a start time -- which is what this did -- turned
+      // the second form into one line per tag, each showing only the text
+      // after the last tag. A four-word line became four copies of its last
+      // word, which is how word-timed lyrics arrived visibly truncated.
+      final inlineFrom = _firstInlineTagIndex(line, tags);
+
+      if (inlineFrom == null) {
+        // Every tag is a start time for the same text (or there is only one).
+        final body = line.substring(tags.last.end);
+        final words = _parseWords(body);
+        // Strip word tags from the fallback too. Without it a line whose tags
+        // carried no words -- a timing mark recorded before the word was typed
+        // -- rendered its own markup as the lyric.
+        final text = words.isEmpty
+            ? body.replaceAll(_wordTag, '').trim()
+            : words.map((w) => w.text).join(' ');
+        if (text.isEmpty) continue;
+        for (final t in tags) {
+          lines.add(
+            LrcLine(timestamp: _durationOf(t), text: text, words: words),
+          );
+        }
+        continue;
+      }
+
+      // Bracket-inline word timing. Tags before [inlineFrom] are true repeated
+      // start times; from there on each tag stamps the text that follows it.
+      final headers = tags.sublist(0, inlineFrom);
+      final wordTags = tags.sublist(inlineFrom);
+      final words = <LrcWord>[];
+      for (var i = 0; i < wordTags.length; i++) {
+        final from = wordTags[i].end;
+        final to = i + 1 < wordTags.length
+            ? wordTags[i + 1].start
+            : line.length;
+        // A word may still carry angle tags if a file mixes both dialects;
+        // strip them rather than rendering the markup.
+        final text = line.substring(from, to).replaceAll(_wordTag, '').trim();
+        if (text.isEmpty) continue;
+        words.add(LrcWord(text: text, start: _durationOf(wordTags[i])));
+      }
+      if (words.isEmpty) continue;
+      final text = words.map((w) => w.text).join(' ');
+      // With no leading header the first word's tag is also the line's start,
+      // which is the ordinary shape of this dialect.
+      final starts = headers.isEmpty ? [wordTags.first] : headers;
+      for (final t in starts) {
         lines.add(LrcLine(timestamp: _durationOf(t), text: text, words: words));
       }
     }
     lines.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return Lrc(metadata: metadata, lines: lines, untimed: untimed);
+  }
+
+  /// Index of the first `[mm:ss]` tag that stamps a *word* rather than the
+  /// line, or null when every tag is a line start time.
+  ///
+  /// A tag stamps a word when non-whitespace text follows it before the next
+  /// tag. Leading tags packed against each other are repeated start times for
+  /// one line and stay that way, so `[00:12.00][01:30.00]Chorus` keeps
+  /// producing two lines while `[00:12.00]Big [00:12.50]Poe` produces one line
+  /// of two timed words.
+  ///
+  /// Deliberately positional rather than "does the line look enhanced": a file
+  /// may open with repeated headers and then use inline word tags on the same
+  /// line, and both halves have to survive.
+  static int? _firstInlineTagIndex(String line, List<RegExpMatch> tags) {
+    for (var i = 0; i < tags.length; i++) {
+      final from = tags[i].end;
+      final to = i + 1 < tags.length ? tags[i + 1].start : line.length;
+      // The final tag having text after it is the plain `[00:12.00]lyric`
+      // case, which is not inline word timing -- it is one line. Only a tag
+      // with text before a FOLLOWING tag proves the inline dialect.
+      if (i + 1 >= tags.length) break;
+      if (line.substring(from, to).trim().isNotEmpty) return i;
+    }
+    return null;
   }
 
   /// Pulls `<mm:ss.ff>word` pairs out of a line body. Returns empty when the
