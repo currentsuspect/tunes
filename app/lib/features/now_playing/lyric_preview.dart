@@ -16,6 +16,15 @@ import '../lyrics/lyric_follow.dart';
 /// The active line re-resolves every player tick, so within-line (word)
 /// progression highlights live whenever the parser exposes word timing;
 /// the surrounding window only changes when the active *line* changes.
+/// Room for the active line to wrap to two lines before anything shrinks.
+/// Named because three places have to agree: the box, the empty-state
+/// placeholder that stands in for it, and the viewport that holds both.
+const double _kActiveLineHeight = 44;
+
+/// prev (20) + gap (4) + active (44) + gap (4) + next (20), plus a little
+/// breathing room so the window is not flush against the transport above it.
+const double _kPreviewHeight = 104;
+
 class LyricPreview extends StatefulWidget {
   const LyricPreview({
     super.key,
@@ -99,7 +108,10 @@ class _LyricPreviewState extends State<LyricPreview> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onOpen,
-        child: SizedBox(height: 88, child: Center(child: content)),
+        child: SizedBox(
+          height: _kPreviewHeight,
+          child: Center(child: content),
+        ),
       ),
     );
   }
@@ -157,12 +169,18 @@ class _LyricPreviewState extends State<LyricPreview> {
     if (text.isEmpty) return const SizedBox(height: 20);
     return SizedBox(
       height: 20,
-      child: Text(
-        text,
-        style: TypeScale.body.copyWith(color: Tones.textMuted),
-        textAlign: TextAlign.center,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      // Shrink rather than ellipsise. A neighbouring line is context -- it says
+      // what just went and what comes next -- and "Number two (Hahahaha), only
+      // speak in…" answers neither question. Real lyric lines are routinely
+      // wider than a phone, so clipping them was the common case, not the edge.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          text,
+          style: TypeScale.body.copyWith(color: Tones.textMuted),
+          textAlign: TextAlign.center,
+          maxLines: 1,
+        ),
       ),
     );
   }
@@ -172,10 +190,14 @@ class _LyricPreviewState extends State<LyricPreview> {
   /// plain active style on line-synced lyrics.
   Widget _activeLine(Lrc lrc, int? active) {
     if (active == null || active < 0 || active >= lrc.lines.length) {
-      return const SizedBox(height: 26);
+      return const SizedBox(height: _kActiveLineHeight);
     }
+    // Two lines, and shrink-to-fit beyond that. This is the line being sung, so
+    // it is the one that must never be truncated: an ellipsis here removes the
+    // words the listener is looking at. Most lyric lines fit one line at this
+    // size; the long ones wrap, and only a genuinely enormous line scales down.
     return SizedBox(
-      height: 26,
+      height: _kActiveLineHeight,
       child: Center(
         child: ListenableBuilder(
           listenable: widget.player,
@@ -183,24 +205,23 @@ class _LyricPreviewState extends State<LyricPreview> {
             final position = widget.player.position;
             final parts = lyricWordParts(lrc, active);
             final wordIndex = lyricActiveWordIndex(lrc, active, position);
-            if (parts == null || wordIndex == null) {
-              return Text(
-                lrc.lines[active].text,
-                style: TypeScale.title.copyWith(fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              );
-            }
-            return Text.rich(
-              TextSpan(
-                children: _wordSpans(parts, wordIndex),
-                style: TypeScale.title.copyWith(fontWeight: FontWeight.w600),
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            );
+            final style = TypeScale.title.copyWith(fontWeight: FontWeight.w600);
+            final Widget line = (parts == null || wordIndex == null)
+                ? Text(
+                    lrc.lines[active].text,
+                    style: style,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                  )
+                : Text.rich(
+                    TextSpan(
+                      children: _wordSpans(parts, wordIndex),
+                      style: style,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                  );
+            return FittedBox(fit: BoxFit.scaleDown, child: line);
           },
         ),
       ),

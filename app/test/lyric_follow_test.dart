@@ -250,6 +250,57 @@ void main() {
   });
 
   group('LyricPreview widget', () {
+    testWidgets('a long lyric line is not clipped to one ellipsised line', (
+      tester,
+    ) async {
+      // Real line-synced lyrics are routinely wider than a phone --
+      // "Number two (Hahahaha), only speak in glory (Yeah)" is an ordinary
+      // line, not a pathological one. The preview used to give every row
+      // maxLines: 1 with an ellipsis, so the line being sung arrived cut off.
+      //
+      // Truncation is a paint-time property, so this asserts the mechanism
+      // that prevents it rather than rasterising: the active line may wrap,
+      // and every row can shrink to fit instead of clipping.
+      const long =
+          '[00:00.00]Number two (Hahahaha), only speak in glory (Yeah)\n'
+          '[00:30.00]Leave your baggage at home (None of that deep shit)';
+      final player = _FakePlayer();
+      player.setPosition(Duration.zero);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              child: LyricPreview(lyrics: long, player: player, onOpen: () {}),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final active = tester.widget<Text>(
+        find.text('Number two (Hahahaha), only speak in glory (Yeah)'),
+      );
+      expect(
+        active.maxLines,
+        greaterThan(1),
+        reason: 'the line being sung must be allowed to wrap',
+      );
+      expect(
+        active.overflow,
+        isNot(TextOverflow.ellipsis),
+        reason: 'the line being sung must never be ellipsised',
+      );
+      expect(
+        find.ancestor(
+          of: find.text('Number two (Hahahaha), only speak in glory (Yeah)'),
+          matching: find.byType(FittedBox),
+        ),
+        findsOneWidget,
+        reason: 'an over-long line shrinks to fit rather than clipping',
+      );
+    });
+
     testWidgets('follows the active line as playback advances', (tester) async {
       final player = _FakePlayer();
       player.setPosition(Duration.zero);
