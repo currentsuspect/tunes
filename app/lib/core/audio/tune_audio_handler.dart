@@ -9,7 +9,7 @@ import 'tune_player.dart';
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   TuneAudioHandler(
     this.player, {
-    this.artBase = '',
+    this.artBase,
     this.stopOnTaskRemoved,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
@@ -25,7 +25,15 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   static const _tileChannel = MethodChannel('tunes/tile');
 
   final TunePlayer player;
-  final String artBase;
+
+  /// Where notification artwork is fetched from, read at the moment it is
+  /// needed rather than captured at startup — same reason as
+  /// [stopOnTaskRemoved]. Captured, it kept pointing at whichever server the
+  /// app launched against, so changing the server left the notification
+  /// loading covers from a machine no longer in reach.
+  final String Function()? artBase;
+
+  String get _artBase => artBase?.call() ?? '';
 
   /// Read at the moment the app is closed rather than captured at startup, so
   /// changing the setting takes effect without a restart.
@@ -151,7 +159,7 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
       artist: current.artist,
       album: current.album,
       artUri: current.artSha != null
-          ? Uri.parse('$artBase/art/${current.artSha}')
+          ? Uri.parse('$_artBase/art/${current.artSha}')
           : null,
       duration: current.durationMs != null
           ? Duration(milliseconds: current.durationMs!)

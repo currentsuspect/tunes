@@ -101,7 +101,12 @@ Future<void> main() async {
     trackUriFor: (track) {
       final path = store.pathFor(track.sha);
       if (path != null && File(path).existsSync()) return path;
-      return '$_tunesdUrl/track/${track.sha}';
+      // The configured server, not the compiled-in one. This read the constant
+      // while the manifest came from the client, so setting a server produced
+      // a full library whose every track streamed from an address that was
+      // only reachable on the original network: the app looked completely
+      // healthy and played nothing.
+      return '${client.baseUrl}/track/${track.sha}';
     },
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
@@ -119,7 +124,9 @@ Future<void> main() async {
       await AudioService.init(
         builder: () => TuneAudioHandler(
           player,
-          artBase: _tunesdUrl,
+          // A closure, so notification artwork follows the server too rather
+          // than being pinned to whatever it was at launch.
+          artBase: () => client.baseUrl,
           stopOnTaskRemoved: () => settings.stopOnClose,
         ),
         config: const AudioServiceConfig(
@@ -726,7 +733,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             Text('No library yet', style: TypeScale.title),
             const SizedBox(height: Space.sm),
             Text(
-              'tunesd is not answering at $_tunesdUrl.\n'
+              // The server actually being asked. Naming the compiled-in one
+              // sent anybody who had changed it looking at the wrong machine.
+              'tunesd is not answering at ${widget.client.baseUrl}.\n'
               'Start the daemon on the box, then refresh.',
               textAlign: TextAlign.center,
               style: TypeScale.body,
