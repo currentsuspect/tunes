@@ -463,12 +463,6 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  // Sits with the transport rather than up by
-                                  // the title: liking is something you do
-                                  // while a track is playing, with the same
-                                  // thumb that just pressed play.
-                                  LikeButton(sha: current.sha, size: 26),
-                                  const SizedBox(width: Space.sm),
                                   IconButton(
                                     onPressed: widget.player.previous,
                                     iconSize: 36,
@@ -513,18 +507,24 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 ],
                               ),
                             ),
+                            // One cluster, centred under the transport,
+                            // rather than two icons shoved to opposite
+                            // edges with a void between them. Shuffle and
+                            // repeat belong together -- they are the two
+                            // switches that change how the queue behaves --
+                            // and the heart sits with them because it is a
+                            // toggle too, not a way of moving through a
+                            // track. The play button keeps the centre line
+                            // to itself.
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                Space.xl,
-                                0,
-                                Space.xl,
-                                Space.xs,
-                              ),
+                              padding: const EdgeInsets.only(bottom: Space.xs),
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   _ShuffleButton(player: widget.player),
+                                  const SizedBox(width: Space.lg),
+                                  LikeButton(sha: current.sha, size: 24),
+                                  const SizedBox(width: Space.lg),
                                   _RepeatButton(player: widget.player),
                                 ],
                               ),
