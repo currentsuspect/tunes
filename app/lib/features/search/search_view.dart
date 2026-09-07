@@ -101,6 +101,18 @@ class _SearchViewState extends State<SearchView> {
     final fromServer = _server != null;
     final local = q.isEmpty ? const <ManifestTrack>[] : _localResults(q);
     final results = fromServer ? _server!.tracks : local;
+    // Everything the screen could draw, from either source. The empty state
+    // used to be gated on `!fromServer`, so the moment the daemon answered
+    // with nothing the guard went false, the list rendered its sections --
+    // every one of them conditional on having data -- and what was left was
+    // a blank screen with no explanation on it at all.
+    final hasResults =
+        results.isNotEmpty ||
+        (fromServer &&
+            (_server!.releases.isNotEmpty ||
+                _server!.artists.isNotEmpty ||
+                _server!.externalReleases.isNotEmpty ||
+                _server!.externalArtists.isNotEmpty));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,14 +155,18 @@ class _SearchViewState extends State<SearchView> {
                   onArtistTap: widget.onArtistTap,
                   onAlbumTap: widget.onAlbumTap,
                 )
-              : results.isEmpty && !fromServer
-              ? const EmptyState(
+              : !hasResults
+              ? EmptyState(
                   icon: Icons.search_off_rounded,
                   title: 'Nothing found',
-                  body:
-                      'Try another artist, album, or track. Search also '
-                      'looks beyond your library, so a name you know is '
-                      'worth trying in full.',
+                  // Says how far it looked: "nothing found" from a search
+                  // that only checked the device means something different
+                  // from one that asked the daemon too.
+                  body: fromServer
+                      ? 'Nothing here or beyond your library matches '
+                            '"${_query.trim()}".'
+                      : 'Nothing in your library matches "${_query.trim()}". '
+                            'Still looking further afield.',
                 )
               : ListView(
                   padding: const EdgeInsets.symmetric(
