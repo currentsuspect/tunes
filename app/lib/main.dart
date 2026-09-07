@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'core/audio/audio_focus.dart';
+import 'core/audio/queue_restore.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
@@ -162,6 +163,17 @@ Future<void> main() async {
   // Watches the player from here on, so a listen is recorded whether it was
   // started from the library, a notification, or a headset button.
   final history = PlayHistory(db, player);
+
+  // Remember which track is current, so the next launch can put the listener
+  // back on it rather than at the top of the queue. Written on change only:
+  // the player notifies four times a second, and this is a disk write.
+  String? lastSeenSha;
+  player.addListener(() {
+    final sha = player.current?.sha;
+    if (sha == lastSeenSha) return;
+    lastSeenSha = sha;
+    unawaited(settings.setLastPlayedSha(sha));
+  });
 
   player.onFirstPlay = ensureAudioService;
   // Not awaited: it only has to be in place before the first track, and the
@@ -454,8 +466,50 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     try {
       final manifest = await _manifestFromStore();
       if (mounted) setState(() => _manifest = manifest);
+      await _restoreQueue(manifest);
     } catch (_) {
       // cold start with empty db is fine; _sync will fill it.
+    }
+  }
+
+  /// Whether the saved queue has already been put back. Once only: after this,
+  /// the queue in the player is the live one, and re-reading the database would
+  /// overwrite whatever the listener has since chosen.
+  bool _queueRestored = false;
+
+  /// Puts back what was playing when the app was last closed.
+  ///
+  /// The queue was already being written on every play and never read, so
+  /// closing the app lost the listener's place entirely — and with no current
+  /// track there is no mini-player, so the app came back looking like nothing
+  /// had ever been played.
+  ///
+  /// Runs after the manifest because a stored queue is a list of shas and
+  /// nothing else; the titles and artwork come from the library. Restored
+  /// paused, never playing: an app that starts making noise because it was
+  /// opened is worse than one that forgets.
+  Future<void> _restoreQueue(TunesManifest manifest) async {
+    if (_queueRestored) return;
+    // Something is already playing -- the app was reopened rather than
+    // restarted, or playback began before the manifest landed. Leave it.
+    if (widget.player.current != null) {
+      _queueRestored = true;
+      return;
+    }
+    try {
+      // load() already resolves each sha against the library, applies user
+      // edits, orders by position and drops anything the library no longer
+      // has — so there is nothing to re-derive here.
+      final saved = await widget.queueStore.load();
+      final tracks = [for (final item in saved) item.track];
+      if (tracks.isEmpty) return;
+      _queueRestored = true;
+      widget.player.restoreQueue(
+        tracks,
+        restoreIndexFor(tracks, widget.settings.lastPlayedSha),
+      );
+    } catch (_) {
+      // A queue that cannot be restored is not worth failing a launch over.
     }
   }
 

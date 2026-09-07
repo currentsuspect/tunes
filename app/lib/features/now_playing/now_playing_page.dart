@@ -77,8 +77,18 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     QueueSheet.show(context, queueStore: qs, player: widget.player);
   }
 
+  /// Leaving the player for an artist or an album *replaces* it.
+  ///
+  /// Pushing on top left the player underneath, so Back from the artist landed
+  /// back on the full player — a screen the listener had already left. By the
+  /// time you have tapped through to an artist you have mentally put the player
+  /// down; Back should continue outward, to where you were before you opened
+  /// it, not return you to it.
+  ///
+  /// The mini-player keeps playback reachable throughout, so nothing is lost by
+  /// dropping the full screen: it is one tap away again.
   void _openArtist(BuildContext context, String artist) {
-    Navigator.of(context).push(
+    Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
         builder: (_) => ArtistPage(
           artist: artist,
@@ -127,7 +137,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     }
     final resolved = release;
     if (resolved == null) return;
-    Navigator.of(context).push(
+    // Replaces the player for the same reason as _openArtist.
+    Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
         builder: (_) => AlbumPage(
           release: resolved,
@@ -282,22 +293,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           _openQueue(context);
                                           break;
                                         case 'artist':
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute<void>(
-                                              builder: (_) => ArtistPage(
-                                                artist: current.artistDisplay,
-                                                manifest: widget.manifest,
-                                                player: widget.player,
-                                                store: widget.store,
-                                                downloading: widget.downloading,
-                                                onDownload: widget.onDownload,
-                                                offline: widget.offline,
-                                                artUrlFor: widget.artUrlFor,
-                                                manifestStore:
-                                                    widget.manifestStore,
-                                                queueStore: widget.queueStore,
-                                              ),
-                                            ),
+                                          // The same opener the sleeve uses.
+                                          // This was a second copy of the same
+                                          // navigation, so the two routes could
+                                          // — and did — behave differently.
+                                          _openArtist(
+                                            context,
+                                            current.artistDisplay,
                                           );
                                           break;
                                         case 'album':

@@ -23,6 +23,7 @@ class SettingsStore extends ChangeNotifier {
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _serverUrl = 'server.url';
+  static const _lastPlayedSha = 'playback.lastPlayedSha';
 
   Future<void> load() async {
     final rows = await _db.select(_db.settings).get();
@@ -93,6 +94,20 @@ class SettingsStore extends ChangeNotifier {
   /// one piece of motion in the app that runs continuously.
   bool get animatedArtwork => _bool(_animatedArtwork, fallback: true);
   Future<void> setAnimatedArtwork(bool v) => _put(_animatedArtwork, '$v');
+
+  /// The track that was playing when the app was last closed.
+  ///
+  /// Stored by sha rather than by queue position, because the library can
+  /// change while the app is shut: a position would silently come back
+  /// pointing at a different song.
+  String? get lastPlayedSha {
+    final v = _cache[_lastPlayedSha];
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  Future<void> setLastPlayedSha(String? sha) => sha == null || sha.isEmpty
+      ? _clear(_lastPlayedSha)
+      : _put(_lastPlayedSha, sha);
 
   // --- server --------------------------------------------------------------
 

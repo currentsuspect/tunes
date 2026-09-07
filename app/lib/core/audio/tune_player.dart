@@ -36,6 +36,13 @@ abstract class TunePlayer extends ChangeNotifier {
   /// A no-op on players that cannot do it, so callers do not have to ask
   /// what backend they are talking to.
   Future<void> setGapless(bool on) async {}
+
+  /// Loads a queue without playing it, so a relaunch can put the listener back
+  /// where they were.
+  ///
+  /// Concrete rather than abstract: restoring is optional behaviour, and the
+  /// test fakes throughout the suite have no playlist to restore into.
+  void restoreQueue(List<ManifestTrack> tracks, int startIndex) {}
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -96,6 +103,46 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   bool get shuffle => _shuffle;
+
+  @override
+  /// Loads a queue without playing it.
+  ///
+  /// The queue was already written to the database on every play and never
+  /// read back, so closing the app lost what was playing: on relaunch the
+  /// player held nothing and the mini-player — which only exists when there is
+  /// a current track — simply was not there. The listener's place in an album
+  /// disappeared because nothing ever asked for it.
+  ///
+  /// Deliberately paused, and deliberately silent about it: no notification,
+  /// no audio-service init, no onQueuePlayed write-back. Restoring is not
+  /// playing, and an app that resumes audio on its own launch is worse than
+  /// one that forgets.
+  void restoreQueue(List<ManifestTrack> tracks, int startIndex) {
+    if (tracks.isEmpty) return;
+    final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
+    _queue = List<ManifestTrack>.of(tracks);
+    _index = safeStart;
+    _playing = false;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _lastNotifiedPosition = Duration.zero;
+    notifyListeners();
+
+    final created = _player == null;
+    final player = _player ??= Player();
+    if (created) unawaited(_applyGapless(player));
+    unawaited(
+      player.open(
+        Playlist(
+          _queue.map((t) => Media(trackUriFor(t))).toList(),
+          index: _index,
+        ),
+        play: false,
+      ),
+    );
+    _applyPlaylistMode(player);
+    _attachStreams(player);
+  }
 
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
