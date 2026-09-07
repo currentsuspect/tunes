@@ -88,6 +88,12 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
     final next = PlaybackState(
       controls: controls,
       systemActions: systemActions,
+      // Which of those controls MediaStyle draws in the collapsed
+      // notification -- previous, play/pause, next. Without this the platform
+      // is told to show none, and a notification with four perfectly good
+      // actions on it renders as artwork and two lines of text. It is the
+      // whole reason the transport never appeared.
+      androidCompactActionIndices: const [0, 1, 2],
       playing: player.playing,
       processingState: player.current == null
           ? AudioProcessingState.idle
