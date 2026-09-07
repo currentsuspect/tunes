@@ -57,4 +57,48 @@ void main() {
   test('an empty queue has no position', () {
     expect(restoreIndexFor(const [], 'a' * 64), 0);
   });
+
+  group('resumePosition', () {
+    const song = Duration(minutes: 4);
+
+    test('resumes where playback stopped', () {
+      expect(
+        resumePosition(const Duration(minutes: 2), song),
+        const Duration(minutes: 2),
+      );
+    });
+
+    test('ignores a position barely into the track', () {
+      // Being dropped eight seconds in reads as a glitch, not a courtesy.
+      expect(resumePosition(const Duration(seconds: 8), song), Duration.zero);
+    });
+
+    test('starts over when the track was effectively finished', () {
+      // Resuming into the last few seconds of something already heard is
+      // worse than starting it again.
+      expect(
+        resumePosition(const Duration(minutes: 3, seconds: 50), song),
+        Duration.zero,
+      );
+    });
+
+    test('starts over when the stored position is past the end', () {
+      // The file was re-encoded, or the sha now points at something shorter.
+      expect(resumePosition(const Duration(minutes: 9), song), Duration.zero);
+    });
+
+    test('applies no end rule when the duration is unknown', () {
+      // Guessing an end would mean refusing to resume long podcasts and live
+      // sets, which are exactly the things worth resuming.
+      expect(
+        resumePosition(const Duration(minutes: 40), null),
+        const Duration(minutes: 40),
+      );
+    });
+
+    test('zero and negative stay at the start', () {
+      expect(resumePosition(Duration.zero, song), Duration.zero);
+      expect(resumePosition(const Duration(seconds: -5), song), Duration.zero);
+    });
+  });
 }

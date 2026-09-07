@@ -42,7 +42,11 @@ abstract class TunePlayer extends ChangeNotifier {
   ///
   /// Concrete rather than abstract: restoring is optional behaviour, and the
   /// test fakes throughout the suite have no playlist to restore into.
-  void restoreQueue(List<ManifestTrack> tracks, int startIndex) {}
+  void restoreQueue(
+    List<ManifestTrack> tracks,
+    int startIndex, {
+    Duration at = Duration.zero,
+  }) {}
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -117,15 +121,21 @@ class MediaKitTunePlayer extends TunePlayer {
   /// no audio-service init, no onQueuePlayed write-back. Restoring is not
   /// playing, and an app that resumes audio on its own launch is worse than
   /// one that forgets.
-  void restoreQueue(List<ManifestTrack> tracks, int startIndex) {
+  void restoreQueue(
+    List<ManifestTrack> tracks,
+    int startIndex, {
+    Duration at = Duration.zero,
+  }) {
     if (tracks.isEmpty) return;
     final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
     _queue = List<ManifestTrack>.of(tracks);
     _index = safeStart;
     _playing = false;
-    _position = Duration.zero;
+    // Reported straight away so the mini-player shows the right elapsed time
+    // rather than 0:00 until the seek lands.
+    _position = at;
     _duration = Duration.zero;
-    _lastNotifiedPosition = Duration.zero;
+    _lastNotifiedPosition = at;
     notifyListeners();
 
     final created = _player == null;
@@ -140,6 +150,12 @@ class MediaKitTunePlayer extends TunePlayer {
         play: false,
       ),
     );
+    // Seek after opening rather than before: there is nothing to seek within
+    // until the media is loaded. If the player is not ready to take it the
+    // seek is dropped and playback starts at zero, which is exactly the
+    // behaviour this replaces -- so the failure mode is the old behaviour
+    // rather than a broken one.
+    if (at > Duration.zero) unawaited(player.seek(at));
     _applyPlaylistMode(player);
     _attachStreams(player);
   }

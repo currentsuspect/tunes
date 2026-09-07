@@ -24,6 +24,7 @@ class SettingsStore extends ChangeNotifier {
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _serverUrl = 'server.url';
   static const _lastPlayedSha = 'playback.lastPlayedSha';
+  static const _lastPositionMs = 'playback.lastPositionMs';
 
   Future<void> load() async {
     final rows = await _db.select(_db.settings).get();
@@ -108,6 +109,19 @@ class SettingsStore extends ChangeNotifier {
   Future<void> setLastPlayedSha(String? sha) => sha == null || sha.isEmpty
       ? _clear(_lastPlayedSha)
       : _put(_lastPlayedSha, sha);
+
+  /// How far into [lastPlayedSha] playback had reached.
+  ///
+  /// Zero rather than null when unknown, because "start from the beginning" is
+  /// the correct behaviour for an unknown position and callers should not each
+  /// have to decide that.
+  Duration get lastPosition {
+    final ms = int.tryParse(_cache[_lastPositionMs] ?? '');
+    return Duration(milliseconds: (ms == null || ms < 0) ? 0 : ms);
+  }
+
+  Future<void> setLastPosition(Duration position) =>
+      _put(_lastPositionMs, '${position.inMilliseconds}');
 
   // --- server --------------------------------------------------------------
 

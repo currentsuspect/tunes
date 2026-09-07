@@ -168,11 +168,26 @@ Future<void> main() async {
   // back on it rather than at the top of the queue. Written on change only:
   // the player notifies four times a second, and this is a disk write.
   String? lastSeenSha;
+  var lastSavedPosition = Duration.zero;
   player.addListener(() {
     final sha = player.current?.sha;
-    if (sha == lastSeenSha) return;
-    lastSeenSha = sha;
-    unawaited(settings.setLastPlayedSha(sha));
+    if (sha != lastSeenSha) {
+      lastSeenSha = sha;
+      lastSavedPosition = Duration.zero;
+      unawaited(settings.setLastPlayedSha(sha));
+    }
+    // Where in the track, so a relaunch resumes rather than restarting.
+    //
+    // Every five seconds of movement, not every notification: the player
+    // reports four times a second and this is a disk write. Five seconds is
+    // the most listening a crash can cost, which is less than the time it
+    // takes to notice.
+    final pos = player.position;
+    final moved = (pos - lastSavedPosition).abs();
+    if (moved >= const Duration(seconds: 5)) {
+      lastSavedPosition = pos;
+      unawaited(settings.setLastPosition(pos));
+    }
   });
 
   player.onFirstPlay = ensureAudioService;
@@ -504,9 +519,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final tracks = [for (final item in saved) item.track];
       if (tracks.isEmpty) return;
       _queueRestored = true;
+      final index = restoreIndexFor(tracks, widget.settings.lastPlayedSha);
       widget.player.restoreQueue(
         tracks,
-        restoreIndexFor(tracks, widget.settings.lastPlayedSha),
+        index,
+        // Only resume mid-track when that is genuinely useful: not eight
+        // seconds in, and not in the outro of something already finished.
+        at: resumePosition(
+          widget.settings.lastPosition,
+          tracks[index].durationMs == null
+              ? null
+              : Duration(milliseconds: tracks[index].durationMs!),
+        ),
       );
     } catch (_) {
       // A queue that cannot be restored is not worth failing a launch over.
