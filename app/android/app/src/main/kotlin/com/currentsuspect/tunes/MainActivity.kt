@@ -1,6 +1,5 @@
 package com.currentsuspect.tunes
 
-import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -13,29 +12,25 @@ class MainActivity : FlutterActivity() {
         return engine
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val probe = object : Runnable {
-            var n = 0
-            val delays = longArrayOf(1000, 3000, 6000, 10000, 20000, 30000)
-            override fun run() {
-                val v = android.provider.Settings.System.getInt(
-                    contentResolver,
-                    android.provider.Settings.System.ACCELEROMETER_ROTATION,
-                    -1
-                )
-                android.util.Log.i("tunes-orient", "t=${delays.getOrElse(n.coerceAtMost(delays.size - 1)) { 0 }}ms rot=$v")
-                n += 1
-                if (n < delays.size) {
-                    window.decorView.postDelayed(this, delays[n] - delays[n - 1])
-                }
-            }
-        }
-        window.decorView.postDelayed(probe, 1000)
-    }
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Lets the app tell the Quick Settings tile what is playing, so the
+        // tile is right before it is looked at rather than after it is
+        // tapped. Fire and forget -- the tile may not even be added.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/tile")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "publish" -> {
+                        PlaybackTileService.publish(
+                            applicationContext,
+                            call.argument<Boolean>("playing") ?: false,
+                            call.argument<String>("title"),
+                        )
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/notifications")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

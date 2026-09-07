@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'tune_player.dart';
 
@@ -18,6 +21,8 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   /// and a test that advances playback without advancing time would be
   /// measuring a drift that never happens on a device.
   final DateTime Function() _clock;
+
+  static const _tileChannel = MethodChannel('tunes/tile');
 
   final TunePlayer player;
   final String artBase;
@@ -63,6 +68,25 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
     return (next.updatePosition - expected).abs() > _drift;
   }
 
+  /// Tells the Quick Settings tile what to draw.
+  ///
+  /// Best effort by design: the tile may not be added to Quick Settings at
+  /// all, and the channel is absent on every platform but Android. Neither is
+  /// a failure worth surfacing, and neither may take playback with it.
+  void _publishTile() {
+    final current = player.current;
+    unawaited(
+      _tileChannel
+          .invokeMethod<void>('publish', {
+            'playing': player.playing,
+            'title': current == null
+                ? null
+                : '${current.title} — ${current.artist}',
+          })
+          .catchError((_) {}),
+    );
+  }
+
   static bool _sameItem(MediaItem? a, MediaItem? b) {
     if (a == null || b == null) return a == b;
     return a.id == b.id &&
@@ -106,6 +130,9 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
       _pushed = next;
       _pushedAt = _clock();
       playbackState.add(next);
+      // Same moment, same throttle: the Quick Settings tile is told what is
+      // playing only when the notification is, so it costs nothing extra.
+      _publishTile();
     }
 
     final current = player.current;

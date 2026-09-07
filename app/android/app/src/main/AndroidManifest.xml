@@ -31,6 +31,20 @@
                 <action android:name="android.media.browse.MediaBrowserService"/>
             </intent-filter>
         </service>
+        <!-- Play/pause from Quick Settings, reachable from the lock screen
+             and from inside any other app. Drawn from our own Tile object,
+             so there is nothing in between to reinterpret it the way this
+             ROM reinterprets a media notification. -->
+        <service
+            android:name=".PlaybackTileService"
+            android:icon="@drawable/ic_tile_play"
+            android:label="tunes"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE"/>
+            </intent-filter>
+        </service>
         <receiver
             android:name="com.ryanheise.audioservice.MediaButtonReceiver"
             android:exported="true">
