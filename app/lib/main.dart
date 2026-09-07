@@ -922,13 +922,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Inside the root route on purpose: a PopScope above the Navigator has no
     // enclosing route to register with and never fires.
     return PopScope(
-      // Never blocks the pop -- this only needs to run alongside it. Refusing
-      // and re-popping would fight the system animation, and would strand
-      // anyone who has turned stopOnClose off.
-      canPop: true,
+      // canPop: false, and the exit is performed by hand below.
+      //
+      // The obvious version -- canPop: true and do the work in the callback --
+      // does nothing, which was measured on device before this replaced it. At
+      // the ROOT route Flutter never pops anything: there is no route beneath,
+      // so the framework hands the back press to the platform and Android
+      // finishes the Activity. No pop happens, so the callback never fires
+      // with didPop true, and playback carried on exactly as before.
+      //
+      // Refusing the pop is what puts this code in the path at all. The exit
+      // then has to be asked for explicitly.
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) return;
+        if (didPop) return;
         if (widget.settings.stopOnClose) widget.player.stop();
+        // Leave regardless of the setting: refusing to pop is a mechanism for
+        // getting here, not a decision about whether the app should close.
+        // Swallowing it would trap someone who has turned stopOnClose off.
+        SystemNavigator.pop();
       },
       child: Scaffold(
         body: SafeArea(
