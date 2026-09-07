@@ -22,6 +22,7 @@ import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
+import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
 import { MtprotoClient } from "./telegram/mtproto.js";
@@ -1207,6 +1208,28 @@ async function main(): Promise<void> {
       process.on("SIGINT", () => shutdown("SIGINT"));
       process.on("SIGTERM", () => shutdown("SIGTERM"));
       log.info({ event: "TUNESD_START", channels: channels.map((c) => c.id) });
+
+      // App updates. Null without a token, and the server simply reports "no
+      // update" — a daemon that only serves music is unaffected.
+      const updates = env.updateToken
+        ? new UpdateFeed(
+            env.updateRepo,
+            env.updateToken,
+            join(env.dataDir, "updates"),
+            log,
+          )
+        : null;
+      if (updates) {
+        // Not awaited: the library must not wait on GitHub to start serving.
+        void updates.poll();
+        const updateTimer = setInterval(
+          () => void updates.poll(),
+          env.updatePollMs,
+        );
+        // Otherwise the interval keeps the process alive through a shutdown
+        // that has already finished everything else.
+        updateTimer.unref();
+      }
       const server = new ManifestServer(
         store,
         join(env.dataDir, "covers"),
@@ -1225,7 +1248,8 @@ async function main(): Promise<void> {
           return entry;
         },
         () => releaseArt,
-        env.host
+        env.host,
+        updates
       );
       await server.start();
       void runEnrichPass().catch((e) =>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the update FileProvider is allowed to share.
+
+  Only the app's own cache directory, and only that: the provider exists to
+  hand one downloaded APK to the system installer, and a broader path would
+  let any component holding the authority read anywhere the app can.
+-->
+<paths>
+    <cache-path name="updates" path="updates/"/>
+</paths>

@@ -6,6 +6,7 @@ import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
+import type { UpdateFeed } from "./updates.js";
 import type {
   ArtistDiscography,
   DiscographyGroup,
@@ -65,7 +66,10 @@ export class ManifestServer {
     /// Interface to bind. Last and defaulted so no existing caller changes:
     /// 0.0.0.0 is what this always did. See TunesdEnv.host for why narrowing
     /// it is sometimes the point.
-    private readonly host: string = "0.0.0.0"
+    private readonly host: string = "0.0.0.0",
+    /// App updates, or null when no token is configured. Optional so a daemon
+    /// that only serves music is unchanged.
+    private readonly updates: UpdateFeed | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -94,6 +98,35 @@ export class ManifestServer {
           const manifest = await this.getManifest();
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(manifest));
+          return;
+        }
+
+        // What the newest app build is, so a phone can tell whether it is
+        // behind without a GitHub account. 204 when there is nothing to
+        // report — no token configured, or the first poll has not landed —
+        // which the app reads as "no update" rather than as an error.
+        if (url.pathname === "/update") {
+          const info = this.updates?.latest() ?? null;
+          if (!info) {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(info));
+          return;
+        }
+
+        // The APK itself. Range-served like audio, so a download resumes
+        // rather than restarting -- these are 100 MB over a phone connection.
+        if (url.pathname === "/update/apk") {
+          const path = this.updates?.apk() ?? null;
+          if (!path) {
+            res.writeHead(404, { "content-type": "text/plain" });
+            res.end("no update");
+            return;
+          }
+          await this.serveRange(res, req, path, null);
           return;
         }
 

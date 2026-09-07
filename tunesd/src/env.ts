@@ -26,6 +26,20 @@ export interface TunesdEnv {
   ///     TUNESD_HOST=100.100.235.90   # this node's Tailscale address
   ///     TUNESD_HOST=127.0.0.1        # local only
   host: string;
+
+  /// Repository to read app releases from, `owner/name`.
+  updateRepo: string;
+
+  /// Token for that repository. Null disables update serving entirely.
+  ///
+  /// It lives here rather than in the app because the repository is private:
+  /// a token inside an APK is a token anyone can extract from it. The daemon
+  /// asks GitHub, caches the APK, and serves it to phones unauthenticated —
+  /// the same footing as the music.
+  updateToken: string | null;
+
+  /// How often to ask GitHub for a newer release.
+  updatePollMs: number;
 }
 
 function loadEnvFile(p: string): void {
@@ -73,5 +87,11 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): TunesdEnv {
     fetch: { ...defaultFetchDiscipline, ...overrides },
     port: Number(env["TUNESD_PORT"] ?? 4780),
     host: env["TUNESD_HOST"] ?? "0.0.0.0",
+    updateRepo: env["TUNESD_UPDATE_REPO"] ?? "currentsuspect/tunes",
+    updateToken: env["TUNESD_UPDATE_TOKEN"] || null,
+    // Fifteen minutes. Releases arrive minutes after a merge and nobody is
+    // waiting on the notification, so this trades nothing for a poll rate
+    // that will not draw rate-limit attention.
+    updatePollMs: Number(env["TUNESD_UPDATE_POLL_MS"] ?? 15 * 60_000),
   };
 }

@@ -9,6 +9,9 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
+import 'core/net/update_check.dart';
+import 'core/net/update_installer.dart';
+import 'features/updates/update_banner.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
@@ -487,6 +490,64 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  // --- updates -------------------------------------------------------------
+
+  AvailableUpdate? _update;
+  bool _updateDismissed = false;
+  bool _needsInstallPermission = false;
+  double? _updateProgress;
+  late final UpdateInstaller _installer = UpdateInstaller(
+    // Must sit under the path res/xml/update_paths.xml exposes, or the
+    // installer is handed a URI the FileProvider refuses to resolve.
+    cacheDir: Directory('${widget.store.dir.path}/updates'),
+  );
+
+  /// Asks the daemon whether a newer build exists.
+  ///
+  /// The daemon answers, not GitHub: the repository is private and a token
+  /// inside an APK is a token anyone can read out of it.
+  ///
+  /// Never throws and never blocks anything: an app that fails to start
+  /// because it could not check for updates has its priorities backwards.
+  Future<void> _checkForUpdate() async {
+    try {
+      final available = await widget.client.fetchUpdate();
+      if (!mounted) return;
+      if (!shouldOfferUpdate(_buildNumber, available)) return;
+      final canInstall = await _installer.canInstall();
+      if (!mounted) return;
+      setState(() {
+        _update = available;
+        // Asked before offering the download rather than after: the permission
+        // is grantable only from Settings on Android 8+, and discovering that
+        // after 100 MB is the wrong order.
+        _needsInstallPermission = !canInstall;
+      });
+    } catch (_) {
+      // No update is the correct answer when the question could not be asked.
+    }
+  }
+
+  Future<void> _startUpdate() async {
+    final update = _update;
+    if (update == null) return;
+    try {
+      await _installer.downloadAndInstall(
+        widget.client.updateApkUrl,
+        update.build,
+        onProgress: (p) {
+          if (mounted) setState(() => _updateProgress = p);
+        },
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _updateProgress = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Update download failed')));
+    }
+  }
+
   /// Whether the saved queue has already been put back. Once only: after this,
   /// the queue in the player is the live one, and re-reading the database would
   /// overwrite whatever the listener has since chosen.
@@ -540,6 +601,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _bootstrap() async {
     await _hydrateFromStore();
     if (mounted) await _sync();
+    // Last, and not awaited by anything. The library is what the app is for;
+    // an update notice is worth exactly as much attention as is left over.
+    if (mounted) unawaited(_checkForUpdate());
   }
 
   Future<TunesManifest> _manifestFromStore() async {
@@ -849,6 +913,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Above everything, and only when there is something to say.
+                // A strip rather than a dialog: nobody opened a music app to
+                // be told about software.
+                if (_update != null && !_updateDismissed)
+                  UpdateBanner(
+                    update: _update!,
+                    progress: _updateProgress,
+                    needsPermission: _needsInstallPermission,
+                    onGrantPermission: () async {
+                      await _installer.openInstallSettings();
+                      // Re-checked on return rather than assumed: the person
+                      // may have looked at the settings page and backed out.
+                      final ok = await _installer.canInstall();
+                      if (mounted) {
+                        setState(() => _needsInstallPermission = !ok);
+                      }
+                    },
+                    onInstall: _startUpdate,
+                    onDismiss: () => setState(() => _updateDismissed = true),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     Space.lg,

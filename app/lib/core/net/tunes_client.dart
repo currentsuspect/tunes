@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../domain/discography.dart';
+import 'update_check.dart';
 import '../../domain/manifest.dart';
 
 class ChangesResponse {
@@ -226,6 +227,35 @@ class TunesClient {
       client.close(force: true);
     }
   }
+
+  /// What the daemon says the newest app build is, or null when there is
+  /// nothing to report.
+  ///
+  /// The daemon answers this, not GitHub: the repository is private, and a
+  /// token shipped inside an APK is a token anyone can read out of it. 204 is
+  /// the ordinary "no update configured or none yet" answer and is not an
+  /// error.
+  ///
+  /// Never throws. An update check that can interrupt the app is worse than no
+  /// update check — nobody opened the app to be told about updates.
+  Future<AvailableUpdate?> fetchUpdate() async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.getUrl(Uri.parse('$baseUrl/update'));
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      final body = await res.transform(utf8.decoder).join();
+      return AvailableUpdate.fromJson(jsonDecode(body) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Where the APK lives. Downloaded with the existing range-capable path, so
+  /// a 100 MB transfer over a phone connection resumes rather than restarting.
+  String get updateApkUrl => '$baseUrl/update/apk';
 
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);

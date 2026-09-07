@@ -31,8 +31,17 @@ jobs:
 
   app:
     runs-on: ubuntu-latest
+    # Needed to publish the release below. Scoped to this job rather than the
+    # workflow so the other jobs keep the read-only default.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gh release --notes reads the commit subject, which needs the commit
+          # itself; the default shallow fetch has it, but not its message on
+          # every provider path. One extra commit is cheap insurance.
+          fetch-depth: 2
 
       - uses: actions/setup-java@v4
         with:
@@ -84,3 +93,29 @@ jobs:
           name: tunes-apk
           path: app/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
+
+      # A release as well as an artifact, because they are for different
+      # readers. The artifact is for a human with a GitHub account: it expires
+      # in 30 days and needs auth to fetch. The release is what tunesd polls so
+      # phones can be told an update exists — it does not expire, and
+      # /releases/latest is a stable shape to read.
+      #
+      # Only on main, and only for a real push: a pull request producing
+      # releases would announce unmerged work to every device.
+      #
+      # The tag is the run number, which is what the app carries as
+      # BUILD_NUMBER, so "is there something newer" is an integer comparison
+      # and not a version-string parse.
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: app
+        run: |
+          set -euo pipefail
+          gh release create "build-${{ github.run_number }}" \
+            build/app/outputs/flutter-apk/app-release.apk \
+            --title "Build ${{ github.run_number }}" \
+            --notes "$(git log -1 --pretty=%s ${{ github.sha }})
+
+          Commit: ${{ github.sha }}"

@@ -17,6 +17,7 @@ import 'package:tunes/core/data/queue_store.dart';
 import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
+import 'package:tunes/core/net/update_check.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
@@ -124,6 +125,15 @@ class _FakeClient implements TunesClient {
   /// getter-only override no longer satisfies the interface.
   @override
   String baseUrl = 'http://fake:4780';
+
+  /// No update, which is what the daemon says when none is configured. These
+  /// tests are about the library, and an update banner appearing in them would
+  /// be noise from a subsystem they are not exercising.
+  @override
+  Future<AvailableUpdate?> fetchUpdate() async => null;
+
+  @override
+  String get updateApkUrl => '$baseUrl/update/apk';
 
   @override
   Future<TunesManifest> fetchManifest() => result();

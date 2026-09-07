@@ -55,5 +55,79 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // Hands a downloaded APK to the system installer.
+        //
+        // The app never installs anything itself and could not if it wanted
+        // to: Android shows its own confirmation and the user taps Install.
+        // All this does is open that dialog on a file the app has already
+        // fetched from the daemon.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/updates")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "install" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("no_path", "install needs a path", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            installApk(path)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            // Reported rather than swallowed: unlike the tile,
+                            // somebody is waiting on this and has just agreed
+                            // to a download. Silence would read as the button
+                            // doing nothing.
+                            result.error("install_failed", e.message, null)
+                        }
+                    }
+                    "canInstall" -> {
+                        result.success(
+                            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                                packageManager.canRequestPackageInstalls()
+                            } else {
+                                true
+                            },
+                        )
+                    }
+                    // Opens the settings page where the permission is granted.
+                    // Android 8+ makes this per-app and only grantable there;
+                    // there is no runtime prompt for it.
+                    "openInstallSettings" -> {
+                        if (android.os.Build.VERSION.SDK_INT >= 26) {
+                            startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings
+                                        .ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    android.net.Uri.parse("package:$packageName"),
+                                ),
+                            )
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun installApk(path: String) {
+        val file = java.io.File(path)
+        if (!file.exists()) throw java.io.FileNotFoundException(path)
+        // A content:// URI, not file://. Since Android 7 handing a file:// URI
+        // to another app throws FileUriExposedException, and the installer is
+        // another app.
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.updates",
+            file,
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            // The installer runs in its own process and needs read access to a
+            // URI belonging to this app's provider.
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 }
