@@ -4,10 +4,20 @@ import 'package:flutter/foundation.dart';
 import 'tune_player.dart';
 
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
-  TuneAudioHandler(this.player, {this.artBase = '', this.stopOnTaskRemoved}) {
+  TuneAudioHandler(
+    this.player, {
+    this.artBase = '',
+    this.stopOnTaskRemoved,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now {
     player.addListener(_sync);
     _sync();
   }
+
+  /// Injectable because the throttle below is a statement about wall clock,
+  /// and a test that advances playback without advancing time would be
+  /// measuring a drift that never happens on a device.
+  final DateTime Function() _clock;
 
   final TunePlayer player;
   final String artBase;
@@ -15,6 +25,53 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Read at the moment the app is closed rather than captured at startup, so
   /// changing the setting takes effect without a restart.
   final bool Function()? stopOnTaskRemoved;
+
+  /// The last state actually handed to audio_service, and when.
+  ///
+  /// Kept so [_sync] can tell a real change from the four-times-a-second
+  /// position report that prompted it.
+  PlaybackState? _pushed;
+  late DateTime _pushedAt = _clock();
+  MediaItem? _pushedItem;
+
+  /// How far playback may drift from what the system would work out for
+  /// itself before it is worth correcting. Two seconds is longer than any
+  /// rounding and shorter than any seek.
+  static const _drift = Duration(seconds: 2);
+
+  /// Whether this state says anything the last one did not.
+  ///
+  /// The notification carries a position, but it is not a number the system
+  /// re-reads -- it is given `updatePosition` and a speed and extrapolates
+  /// the rest itself. Pushing a new one every tick tells it nothing it did
+  /// not already know, and costs a full notification post each time.
+  bool _worthPushing(PlaybackState next) {
+    final prev = _pushed;
+    if (prev == null) return true;
+    if (prev.playing != next.playing) return true;
+    if (prev.processingState != next.processingState) return true;
+    if (prev.controls.length != next.controls.length) return true;
+    for (var i = 0; i < prev.controls.length; i++) {
+      if (prev.controls[i].action != next.controls[i].action) return true;
+    }
+    // A seek, a stall, or a track change: reality has left the line the
+    // system was drawing, so it needs a new fix.
+    final elapsed = _clock().difference(_pushedAt);
+    final expected = prev.playing
+        ? prev.updatePosition + elapsed
+        : prev.updatePosition;
+    return (next.updatePosition - expected).abs() > _drift;
+  }
+
+  static bool _sameItem(MediaItem? a, MediaItem? b) {
+    if (a == null || b == null) return a == b;
+    return a.id == b.id &&
+        a.title == b.title &&
+        a.artist == b.artist &&
+        a.album == b.album &&
+        a.artUri == b.artUri &&
+        a.duration == b.duration;
+  }
 
   void _sync() {
     final controls = [
@@ -28,39 +85,52 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
       MediaAction.seekForward,
       MediaAction.seekBackward,
     };
-    playbackState.add(
-      PlaybackState(
-        controls: controls,
-        systemActions: systemActions,
-        playing: player.playing,
-        processingState: player.current == null
-            ? AudioProcessingState.idle
-            : AudioProcessingState.ready,
-        updatePosition: player.position,
-        bufferedPosition: player.duration,
-        speed: 1.0,
-      ),
+    final next = PlaybackState(
+      controls: controls,
+      systemActions: systemActions,
+      playing: player.playing,
+      processingState: player.current == null
+          ? AudioProcessingState.idle
+          : AudioProcessingState.ready,
+      updatePosition: player.position,
+      bufferedPosition: player.duration,
+      speed: 1.0,
     );
+    if (_worthPushing(next)) {
+      _pushed = next;
+      _pushedAt = _clock();
+      playbackState.add(next);
+    }
 
     final current = player.current;
     if (current == null) {
-      if (mediaItem.valueOrNull?.id != null) mediaItem.add(null);
+      // Clear the cache with it, so the same track played again is announced
+      // rather than suppressed as unchanged.
+      if (mediaItem.valueOrNull?.id != null) {
+        _pushedItem = null;
+        mediaItem.add(null);
+      }
       return;
     }
-    mediaItem.add(
-      MediaItem(
-        id: current.sha,
-        title: current.title,
-        artist: current.artist,
-        album: current.album,
-        artUri: current.artSha != null
-            ? Uri.parse('$artBase/art/${current.artSha}')
-            : null,
-        duration: current.durationMs != null
-            ? Duration(milliseconds: current.durationMs!)
-            : null,
-      ),
+    final item = MediaItem(
+      id: current.sha,
+      title: current.title,
+      artist: current.artist,
+      album: current.album,
+      artUri: current.artSha != null
+          ? Uri.parse('$artBase/art/${current.artSha}')
+          : null,
+      duration: current.durationMs != null
+          ? Duration(milliseconds: current.durationMs!)
+          : null,
     );
+    // Only when the track actually changes. Re-announcing the same item is
+    // the most expensive thing here: it rebuilds the notification and sends
+    // the platform off to fetch the artwork again.
+    if (!_sameItem(_pushedItem, item)) {
+      _pushedItem = item;
+      mediaItem.add(item);
+    }
 
     final queueItems = player.queue
         .map(

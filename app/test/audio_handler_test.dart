@@ -19,7 +19,25 @@ class _FakePlayer extends TunePlayer {
 
   @override
   Duration get position => _position;
-  final Duration _position = Duration.zero;
+  Duration _position = Duration.zero;
+
+  /// Advances playback the way the real player reports it: a small step,
+  /// four times a second, each one notifying listeners.
+  void tick([Duration by = const Duration(milliseconds: 250)]) {
+    _position += by;
+    notifyListeners();
+  }
+
+  /// A jump, as a seek or a stall produces.
+  void jumpTo(Duration to) {
+    _position = to;
+    notifyListeners();
+  }
+
+  void setPlaying(bool v) {
+    _playing = v;
+    notifyListeners();
+  }
 
   @override
   Duration get duration => _duration;
@@ -159,5 +177,77 @@ void main() {
       withArt.mediaItem.valueOrNull?.artUri?.toString(),
       'http://box:4780/art/${'a' * 64}',
     );
+  });
+
+  group('notification updates', () {
+    test('a position tick does not repost the notification', () async {
+      // The system is given a position and a speed and extrapolates the rest
+      // itself, so a new state every quarter second tells it nothing -- and
+      // costs a notification post each time. The app was making 75,000 of
+      // them a day and had been demoted by the ranker for it.
+      // Time advances with playback, as it does on a device: the position
+      // the system extrapolates and the position reported stay together, so
+      // there is nothing to correct.
+      var now = DateTime(2026);
+      final p = _FakePlayer();
+      final h = TuneAudioHandler(p, clock: () => now);
+      p.playQueue([_track('One'), _track('Two')], 0);
+      var posts = 0;
+      final sub = h.playbackState.skip(1).listen((_) => posts += 1);
+
+      for (var i = 0; i < 40; i++) {
+        now = now.add(const Duration(milliseconds: 250));
+        p.tick();
+      }
+      await Future<void>.delayed(Duration.zero);
+
+      expect(posts, 0);
+      await sub.cancel();
+    });
+
+    test('play and pause do repost', () async {
+      player.playQueue([_track('One')], 0);
+      var posts = 0;
+      final sub = handler.playbackState.skip(1).listen((_) => posts += 1);
+
+      player.setPlaying(false);
+      player.setPlaying(true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(posts, 2);
+      await sub.cancel();
+    });
+
+    test('a seek reposts, because the extrapolation is now wrong', () async {
+      player.playQueue([_track('One')], 0);
+      var posts = 0;
+      final sub = handler.playbackState.skip(1).listen((_) => posts += 1);
+
+      player.jumpTo(const Duration(minutes: 1));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(posts, 1);
+      await sub.cancel();
+    });
+
+    test('the same track is not announced twice', () async {
+      // Re-announcing a media item rebuilds the notification and sends the
+      // platform to fetch the artwork again.
+      var now = DateTime(2026);
+      final p = _FakePlayer();
+      final h = TuneAudioHandler(p, clock: () => now);
+      p.playQueue([_track('One')], 0);
+      var items = 0;
+      final sub = h.mediaItem.skip(1).listen((_) => items += 1);
+
+      for (var i = 0; i < 20; i++) {
+        now = now.add(const Duration(milliseconds: 250));
+        p.tick();
+      }
+      await Future<void>.delayed(Duration.zero);
+
+      expect(items, 0);
+      await sub.cancel();
+    });
   });
 }
