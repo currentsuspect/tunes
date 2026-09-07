@@ -904,217 +904,255 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Widget _buildShell(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: widget.reachability,
-          builder: (context, _) {
-            final offline = widget.reachability.offline;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Above everything, and only when there is something to say.
-                // A strip rather than a dialog: nobody opened a music app to
-                // be told about software.
-                if (_update != null && !_updateDismissed)
-                  UpdateBanner(
-                    update: _update!,
-                    progress: _updateProgress,
-                    needsPermission: _needsInstallPermission,
-                    onGrantPermission: () async {
-                      await _installer.openInstallSettings();
-                      // Re-checked on return rather than assumed: the person
-                      // may have looked at the settings page and backed out.
-                      final ok = await _installer.canInstall();
-                      if (mounted) {
-                        setState(() => _needsInstallPermission = !ok);
-                      }
-                    },
-                    onInstall: _startUpdate,
-                    onDismiss: () => setState(() => _updateDismissed = true),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    Space.lg,
-                    Space.lg,
-                    0,
-                  ),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          final count = _manifest?.tracks.length ?? 0;
-                          _openProfile(count);
-                        },
-                        // Listens to settings directly: choosing a picture in
-                        // the screen this opens should change the thing you
-                        // came back to, without a restart.
-                        child: ListenableBuilder(
-                          listenable: widget.settings,
-                          builder: (context, _) => ProfileAvatar(
-                            name: widget.settings.displayName,
-                            path: widget.settings.avatarPath,
-                            size: 38,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: Space.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('tunes', style: TypeScale.wordmark),
-                            // The library's size belongs to the wordmark, not
-                            // to the feed. It used to scroll away with the
-                            // first rail, which made it read as a caption on
-                            // "Just added" rather than a description of the
-                            // library.
-                            //
-                            // Home only: on Search or Discover it would be a
-                            // number about somewhere else.
-                            if (_tab == 0 && _manifest != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  _libraryLine(_manifest!),
-                                  style: TypeScale.caption,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (offline) ...[
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.fromLTRB(
+    // Backing out of the last screen means leaving the app, and leaving should
+    // behave the same way whether you backed out or swiped it away.
+    //
+    // It did not. stopOnTaskRemoved covers the swipe only, so Back left the
+    // audio_service foreground service running: the process stayed alive with
+    // mpv still playing while the Activity -- and with it the mini-player,
+    // which is Activity UI -- was destroyed. Music playing, with no control
+    // anywhere in the app.
+    //
+    // Reopening then built a fresh engine and ran main() again, so a SECOND
+    // player was created beside the one still going. Confirmed on device: two
+    // AudioPlaybackConfigurations in one process, piid:10239 started and
+    // piid:10247 stopped. The stopped one is what the mini-player showed,
+    // which is why the app came back paused while music kept playing.
+    //
+    // Inside the root route on purpose: a PopScope above the Navigator has no
+    // enclosing route to register with and never fires.
+    return PopScope(
+      // Never blocks the pop -- this only needs to run alongside it. Refusing
+      // and re-popping would fight the system animation, and would strand
+      // anyone who has turned stopOnClose off.
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) return;
+        if (widget.settings.stopOnClose) widget.player.stop();
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: ListenableBuilder(
+            listenable: widget.reachability,
+            builder: (context, _) {
+              final offline = widget.reachability.offline;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Above everything, and only when there is something to say.
+                  // A strip rather than a dialog: nobody opened a music app to
+                  // be told about software.
+                  if (_update != null && !_updateDismissed)
+                    UpdateBanner(
+                      update: _update!,
+                      progress: _updateProgress,
+                      needsPermission: _needsInstallPermission,
+                      onGrantPermission: () async {
+                        await _installer.openInstallSettings();
+                        // Re-checked on return rather than assumed: the person
+                        // may have looked at the settings page and backed out.
+                        final ok = await _installer.canInstall();
+                        if (mounted) {
+                          setState(() => _needsInstallPermission = !ok);
+                        }
+                      },
+                      onInstall: _startUpdate,
+                      onDismiss: () => setState(() => _updateDismissed = true),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
                       Space.lg,
-                      Space.md,
+                      Space.lg,
                       Space.lg,
                       0,
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: Space.md,
-                      vertical: Space.sm,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Tones.surfaceRaised,
-                      borderRadius: BorderRadius.circular(RadiusTokens.control),
-                    ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(
-                          Icons.cloud_off_rounded,
-                          size: 16,
-                          color: Tones.textMuted,
+                        GestureDetector(
+                          onTap: () {
+                            final count = _manifest?.tracks.length ?? 0;
+                            _openProfile(count);
+                          },
+                          // Listens to settings directly: choosing a picture in
+                          // the screen this opens should change the thing you
+                          // came back to, without a restart.
+                          child: ListenableBuilder(
+                            listenable: widget.settings,
+                            builder: (context, _) => ProfileAvatar(
+                              name: widget.settings.displayName,
+                              path: widget.settings.avatarPath,
+                              size: 38,
+                            ),
+                          ),
                         ),
-                        SizedBox(width: Space.sm),
+                        const SizedBox(width: Space.md),
                         Expanded(
-                          child: Text(
-                            'Offline — playing downloads only',
-                            style: TypeScale.body,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text('tunes', style: TypeScale.wordmark),
+                              // The library's size belongs to the wordmark, not
+                              // to the feed. It used to scroll away with the
+                              // first rail, which made it read as a caption on
+                              // "Just added" rather than a description of the
+                              // library.
+                              //
+                              // Home only: on Search or Discover it would be a
+                              // number about somewhere else.
+                              if (_tab == 0 && _manifest != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    _libraryLine(_manifest!),
+                                    style: TypeScale.caption,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
-                Expanded(child: _buildContent(offline)),
-              ],
-            );
-          },
-        ),
-      ),
-      // The player sits above the navigation rather than beside it: it is a
-      // layer over the app, and the nav is the app's own furniture. The
-      // separation is a hairline and a surface change, not a shadow -- this
-      // interface has no other shadows and one would read as a mistake.
-      bottomNavigationBar: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Tones.surface,
-          border: Border(top: BorderSide(color: Tones.hairline)),
-        ),
-        // Bottom only: the top edge of this bar is the app's own, and the
-        // gesture strip is what would otherwise sit over the labels.
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              MiniPlayerBar(
-                player: widget.player,
-                onTap: _openNowPlaying,
-                artUrlFor: _artUrlFor,
-              ),
-              NavigationBarTheme(
-                data: NavigationBarThemeData(
-                  // Grows with the system font scale, capped: at the largest
-                  // settings a fixed 64 clips the labels, and an uncapped bar
-                  // eats the screen those labels are there to navigate.
-                  height:
-                      64 *
-                      MediaQuery.textScalerOf(context)
-                          .scale(1.0)
-                          .clamp(1.0, 1.4),
-                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                  indicatorColor: Colors.transparent,
-                  backgroundColor: Tones.surface,
-                  surfaceTintColor: Colors.transparent,
-                  labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                    final selected = states.contains(WidgetState.selected);
-                    return TypeScale.caption.copyWith(
-                      color: selected ? Tones.text : Tones.textMuted,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    );
-                  }),
-                ),
-                child: NavigationBar(
-                  selectedIndex: _tab,
-                  onDestinationSelected: (i) => setState(() => _tab = i),
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined, color: Tones.textMuted),
-                      selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
-                      label: 'Home',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(
-                        Icons.travel_explore_outlined,
-                        color: Tones.textMuted,
+                  if (offline) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.fromLTRB(
+                        Space.lg,
+                        Space.md,
+                        Space.lg,
+                        0,
                       ),
-                      selectedIcon: Icon(
-                        Icons.travel_explore_rounded,
-                        color: Tones.text,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: Space.md,
+                        vertical: Space.sm,
                       ),
-                      label: 'Discover',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.search_rounded, color: Tones.textMuted),
-                      selectedIcon: Icon(
-                        Icons.search_rounded,
-                        color: Tones.text,
+                      decoration: BoxDecoration(
+                        color: Tones.surfaceRaised,
+                        borderRadius: BorderRadius.circular(
+                          RadiusTokens.control,
+                        ),
                       ),
-                      label: 'Search',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(
-                        Icons.library_music_outlined,
-                        color: Tones.textMuted,
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_off_rounded,
+                            size: 16,
+                            color: Tones.textMuted,
+                          ),
+                          SizedBox(width: Space.sm),
+                          Expanded(
+                            child: Text(
+                              'Offline — playing downloads only',
+                              style: TypeScale.body,
+                            ),
+                          ),
+                        ],
                       ),
-                      selectedIcon: Icon(
-                        Icons.library_music_rounded,
-                        color: Tones.text,
-                      ),
-                      label: 'Library',
                     ),
                   ],
+                  Expanded(child: _buildContent(offline)),
+                ],
+              );
+            },
+          ),
+        ),
+        // The player sits above the navigation rather than beside it: it is a
+        // layer over the app, and the nav is the app's own furniture. The
+        // separation is a hairline and a surface change, not a shadow -- this
+        // interface has no other shadows and one would read as a mistake.
+        bottomNavigationBar: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Tones.surface,
+            border: Border(top: BorderSide(color: Tones.hairline)),
+          ),
+          // Bottom only: the top edge of this bar is the app's own, and the
+          // gesture strip is what would otherwise sit over the labels.
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MiniPlayerBar(
+                  player: widget.player,
+                  onTap: _openNowPlaying,
+                  artUrlFor: _artUrlFor,
                 ),
-              ),
-            ],
+                NavigationBarTheme(
+                  data: NavigationBarThemeData(
+                    // Grows with the system font scale, capped: at the largest
+                    // settings a fixed 64 clips the labels, and an uncapped bar
+                    // eats the screen those labels are there to navigate.
+                    height:
+                        64 *
+                        MediaQuery.textScalerOf(context)
+                            .scale(1.0)
+                            .clamp(1.0, 1.4),
+                    labelBehavior:
+                        NavigationDestinationLabelBehavior.alwaysShow,
+                    indicatorColor: Colors.transparent,
+                    backgroundColor: Tones.surface,
+                    surfaceTintColor: Colors.transparent,
+                    labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                      final selected = states.contains(WidgetState.selected);
+                      return TypeScale.caption.copyWith(
+                        color: selected ? Tones.text : Tones.textMuted,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      );
+                    }),
+                  ),
+                  child: NavigationBar(
+                    selectedIndex: _tab,
+                    onDestinationSelected: (i) => setState(() => _tab = i),
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.home_outlined, color: Tones.textMuted),
+                        selectedIcon: Icon(
+                          Icons.home_rounded,
+                          color: Tones.text,
+                        ),
+                        label: 'Home',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(
+                          Icons.travel_explore_outlined,
+                          color: Tones.textMuted,
+                        ),
+                        selectedIcon: Icon(
+                          Icons.travel_explore_rounded,
+                          color: Tones.text,
+                        ),
+                        label: 'Discover',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(
+                          Icons.search_rounded,
+                          color: Tones.textMuted,
+                        ),
+                        selectedIcon: Icon(
+                          Icons.search_rounded,
+                          color: Tones.text,
+                        ),
+                        label: 'Search',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(
+                          Icons.library_music_outlined,
+                          color: Tones.textMuted,
+                        ),
+                        selectedIcon: Icon(
+                          Icons.library_music_rounded,
+                          color: Tones.text,
+                        ),
+                        label: 'Library',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
