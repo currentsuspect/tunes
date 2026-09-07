@@ -235,6 +235,39 @@ class _LibraryViewState extends State<LibraryView> {
   /// Rebuilt whenever the store changes, so a playlist created from a track
   /// menu on another screen is here when you arrive rather than after a
   /// restart.
+  Future<void> _createPlaylist(PlaylistStore store) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Tones.surfaceRaised,
+        title: const Text('New playlist', style: TypeScale.title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TypeScale.body,
+          decoration: const InputDecoration(
+            hintText: 'Name it',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null) return;
+    await store.create(name);
+  }
+
   Widget _buildPlaylists() {
     final store = PlaylistScope.maybeOf(context);
     if (store == null) return const SizedBox.shrink();
@@ -256,7 +289,7 @@ class _LibraryViewState extends State<LibraryView> {
           // screen is never empty.
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: Space.sm),
-            itemCount: lists.length + 1,
+            itemCount: lists.length + 2,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               if (index == 0) {
@@ -282,7 +315,17 @@ class _LibraryViewState extends State<LibraryView> {
                   ).push(MaterialPageRoute<void>(builder: (_) => _likedPage())),
                 );
               }
-              final p = lists[index - 1];
+              if (index == 1) {
+                // A screen called Playlists with no way to make one sends
+                // you off to find a track first. Creating an empty list and
+                // filling it later is how most of them actually start.
+                return ListTile(
+                  leading: const Icon(Icons.add_rounded, color: Tones.primary),
+                  title: const Text('New playlist', style: TypeScale.title),
+                  onTap: () => _createPlaylist(store),
+                );
+              }
+              final p = lists[index - 2];
               return ListTile(
                 leading: const Icon(
                   Icons.queue_music_rounded,

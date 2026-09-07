@@ -5,6 +5,7 @@ import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 
 class MiniPlayerBar extends StatefulWidget {
@@ -254,7 +255,14 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                       : null,
                   size: 44,
                   borderRadius: 8,
-                  fallback: const _MiniArtPlaceholder(),
+                  // The same generated tile the list rows use. A blank
+                  // square in the one bar that is always on screen made
+                  // tracks without a cover look like a failed load.
+                  fallback: GeneratedArtwork.fromTrack(
+                    track,
+                    size: 44,
+                    borderRadius: 8,
+                  ),
                 ),
               ),
             ),
@@ -293,24 +301,6 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _MiniArtPlaceholder extends StatelessWidget {
-  const _MiniArtPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      color: Tones.surfaceRaised,
-      child: const Icon(
-        Icons.music_note_rounded,
-        size: 18,
-        color: Tones.textMuted,
       ),
     );
   }
