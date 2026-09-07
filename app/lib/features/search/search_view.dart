@@ -6,6 +6,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/empty_state.dart';
 import '../../core/ui/initials.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
@@ -143,8 +144,13 @@ class _SearchViewState extends State<SearchView> {
                   onAlbumTap: widget.onAlbumTap,
                 )
               : results.isEmpty && !fromServer
-              ? const Center(
-                  child: Text('Nothing matches.', style: TypeScale.body),
+              ? const EmptyState(
+                  icon: Icons.search_off_rounded,
+                  title: 'Nothing found',
+                  body:
+                      'Try another artist, album, or track. Search also '
+                      'looks beyond your library, so a name you know is '
+                      'worth trying in full.',
                 )
               : ListView(
                   padding: const EdgeInsets.symmetric(

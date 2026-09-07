@@ -7,6 +7,7 @@ import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
@@ -186,7 +187,7 @@ class _LibraryViewState extends State<LibraryView> {
   Widget _buildLiked() {
     final likes = LikesScope.maybeOf(context);
     if (likes == null || likes.count == 0) {
-      return const _Message(
+      return const EmptyState(
         icon: Icons.favorite_border_rounded,
         title: 'Nothing liked yet',
         body: 'Tap the heart on a track, in the player, or from its menu.',
@@ -198,7 +199,7 @@ class _LibraryViewState extends State<LibraryView> {
         if (bySha[sha] case final ManifestTrack t) t,
     ];
     if (tracks.isEmpty) {
-      return const _Message(
+      return const EmptyState(
         icon: Icons.favorite_border_rounded,
         title: 'Liked tracks are not in the library',
         body: 'Everything you liked has since left the library.',
@@ -212,11 +213,24 @@ class _LibraryViewState extends State<LibraryView> {
     // wrong thing to say about a list the filter does not apply to.
     if (_segment == 3) return _buildLiked();
     if (filtered.isEmpty) {
-      return const _Message(
-        icon: Icons.music_note_outlined,
-        title: 'Nothing matches',
-        body: 'The library is empty or nothing matched the filter.',
-      );
+      // Two different situations were sharing one sentence. "Your library is
+      // empty or your filter matched nothing" tells someone who typed three
+      // letters that their whole library might be gone.
+      return widget.tracks.isEmpty
+          ? const EmptyState(
+              icon: Icons.library_music_outlined,
+              title: 'Your library is empty',
+              body:
+                  'Tracks appear here as the daemon fetches them. Pull down '
+                  'on Home to check again.',
+            )
+          : EmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'Nothing matches',
+              body:
+                  'No track, album or artist here matches '
+                  '"${widget.filter.trim()}".',
+            );
     }
     if (_segment == 0) return _trackList(filtered);
     if (_segment == 1) {
@@ -345,41 +359,6 @@ class _LibraryViewState extends State<LibraryView> {
           ),
         );
       },
-    );
-  }
-}
-
-class _Message extends StatelessWidget {
-  const _Message({required this.icon, required this.title, required this.body});
-
-  final IconData icon;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Space.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: Tones.surfaceRaised,
-                borderRadius: BorderRadius.circular(RadiusTokens.control),
-              ),
-              child: Icon(icon, size: 32, color: Tones.textMuted),
-            ),
-            const SizedBox(height: Space.lg),
-            Text(title, style: TypeScale.title),
-            const SizedBox(height: Space.sm),
-            Text(body, textAlign: TextAlign.center, style: TypeScale.body),
-          ],
-        ),
-      ),
     );
   }
 }

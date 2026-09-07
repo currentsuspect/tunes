@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/likes_store.dart';
 import '../theme/tokens.dart';
@@ -30,7 +31,12 @@ class LikeButton extends StatelessWidget {
     if (likes == null) return const SizedBox.shrink();
     final liked = likes.isLiked(sha);
     return IconButton(
-      onPressed: () => likes.toggle(sha),
+      onPressed: () {
+        // A like is a decision, and the heart is small: the tap is confirmed
+        // in the hand rather than only on screen.
+        HapticFeedback.lightImpact();
+        likes.toggle(sha);
+      },
       padding: padding,
       // A 22-point heart with eight points of padding is a 38-point target,
       // which is under the floor for something people tap while walking.

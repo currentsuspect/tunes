@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../core/ui/empty_state.dart';
 import '../../core/ui/missing_cover.dart';
 import '../../core/ui/pressable.dart';
 import '../../domain/collection_gaps.dart';
@@ -33,7 +34,18 @@ class DiscoverView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (gaps.isEmpty) return _Empty(offline: offline);
+    if (gaps.isEmpty) {
+      return EmptyState(
+        icon: offline ? Icons.cloud_off_rounded : Icons.travel_explore_rounded,
+        title: offline ? 'Nothing to compare against' : 'Nothing missing yet',
+        body: offline
+            ? 'Suggestions come from the daemon, which is not reachable right '
+                  'now. What you already have is all here.'
+            : 'This fills in as the daemon works through your artists. It '
+                  'only lists records by acts it could confirm, so a new '
+                  'library takes a cycle or two to say anything.',
+      );
+    }
     final releases = gaps.fold<int>(0, (a, g) => a + g.missing.length);
     return ListView(
       padding: const EdgeInsets.only(bottom: Space.xl),
@@ -221,48 +233,6 @@ class _ArtistSection extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty({required this.offline});
-
-  final bool offline;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Space.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              offline ? Icons.cloud_off_rounded : Icons.travel_explore_rounded,
-              size: 48,
-              color: Tones.textMuted,
-            ),
-            const SizedBox(height: Space.md),
-            Text(
-              offline ? 'Nothing to compare against' : 'Nothing missing yet',
-              style: TypeScale.title,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: Space.sm),
-            Text(
-              offline
-                  ? 'Suggestions come from the daemon, which is not reachable '
-                        'right now.'
-                  : 'This fills in as the daemon works through your artists. '
-                        'It only lists records by acts it could confirm, so a '
-                        'new library takes a cycle or two to say anything.',
-              style: TypeScale.caption.copyWith(height: 1.5),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }

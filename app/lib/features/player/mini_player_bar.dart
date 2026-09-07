@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
@@ -339,7 +340,10 @@ class _TransportButtonState extends State<_TransportButton> {
       onTapDown: (_) => setState(() => _down = true),
       onTapUp: (_) => setState(() => _down = false),
       onTapCancel: () => setState(() => _down = false),
-      onTap: widget.onPressed,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onPressed();
+      },
       behavior: HitTestBehavior.opaque,
       child: Semantics(
         button: true,

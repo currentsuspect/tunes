@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
@@ -104,6 +105,9 @@ class _ScrubberState extends State<Scrubber>
                   // track, refetches as many ranges -- the thumb is smooth
                   // either way, and this way the audio is too.
                   onChangeEnd: (v) {
+                    // On release, where the seek commits -- not during the
+                    // drag, which would buzz continuously.
+                    HapticFeedback.selectionClick();
                     widget.player.seek(Duration(milliseconds: v.round()));
                     setState(() => _dragMs = null);
                   },
