@@ -36,7 +36,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   media_kit: ^1.2.6
   media_kit_libs_android_video: ^1.3.8
-  audio_service: ^0.18.19
+  # Vendored, with MediaStyle made optional. See
+  # third_party/audio_service/PATCHES.md -- this ROM's system UI replaces
+  # MediaStyle notifications with its own widget and drops every transport
+  # button, and opting out is the only way to get them back.
+  audio_service:
+    path: third_party/audio_service
   # Focus and becoming-noisy events. Already present through audio_service,
   # named here because the app now depends on it directly.
   audio_session: ^0.2.4

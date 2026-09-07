@@ -16,6 +16,13 @@
         <meta-data
             android:name="com.currentsuspect.tunes.notification_icon"
             android:resource="@drawable/ic_stat_music"/>
+        <!-- Draw the media notification as an ordinary one. This ROM's system
+             UI intercepts MediaStyle and renders its own widget, which shows
+             artwork and text and no transport buttons at all. See
+             third_party/audio_service/PATCHES.md. -->
+        <meta-data
+            android:name="com.ryanheise.audioservice.PLAIN_NOTIFICATION"
+            android:value="true"/>
         <service
             android:name="com.ryanheise.audioservice.AudioService"
             android:foregroundServiceType="mediaPlayback"
