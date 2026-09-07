@@ -6,6 +6,7 @@ import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import '../artist/artist_page.dart';
@@ -104,16 +105,20 @@ class AlbumPage extends StatelessWidget {
                 ),
                 children: [
                   Center(
-                    child: Artwork(
-                      url: release.artSha == null
-                          ? null
-                          : artUrlFor(release.artSha!),
-                      size: 220,
-                      fallback: GeneratedArtwork(
-                        title: release.title,
-                        artist: release.artist,
+                    child: SharedSleeve(
+                      tag: 'album-${release.id}',
+                      child: Artwork(
+                        url: release.artSha == null
+                            ? null
+                            : artUrlFor(release.artSha!),
                         size: 220,
-                        borderRadius: RadiusTokens.card,
+                        shared: true,
+                        fallback: GeneratedArtwork(
+                          title: release.title,
+                          artist: release.artist,
+                          size: 220,
+                          borderRadius: RadiusTokens.card,
+                        ),
                       ),
                     ),
                   ),

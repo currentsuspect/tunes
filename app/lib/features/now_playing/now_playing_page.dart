@@ -9,6 +9,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/like_button.dart';
+import '../../core/ui/shared_sleeve.dart';
 import '../player/scrubber.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
@@ -409,7 +410,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Flexible(
-                                      child: Hero(
+                                      child: SharedSleeve(
                                         tag: 'sleeve-${current.sha}',
                                         child: _Artwork(
                                           track: current,
@@ -659,6 +660,9 @@ class _Artwork extends StatelessWidget {
         final art = Artwork(
           url: track.artSha == null ? null : artUrlFor(track.artSha!),
           size: side,
+          // Same decode as the mini bar's copy, so the flight has nothing
+          // left to load when it arrives.
+          shared: true,
           fallback: GeneratedArtwork(
             title: track.title,
             artist: track.artistDisplay,

@@ -8,6 +8,7 @@ import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
@@ -408,11 +409,17 @@ class _LibraryViewState extends State<LibraryView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Artwork.fill(
-                    url: r.artSha == null ? null : widget.artUrlFor(r.artSha!),
-                    fallback: GeneratedArtwork(
-                      title: r.title,
-                      artist: r.artist,
+                  child: SharedSleeve(
+                    tag: 'album-${r.id}',
+                    child: Artwork.fill(
+                      url: r.artSha == null
+                          ? null
+                          : widget.artUrlFor(r.artSha!),
+                      shared: true,
+                      fallback: GeneratedArtwork(
+                        title: r.title,
+                        artist: r.artist,
+                      ),
                     ),
                   ),
                 ),
@@ -481,11 +488,15 @@ class _LibraryViewState extends State<LibraryView> {
                   for (final a in widget.artists) {
                     if (a.name == name) photo = a.artSha;
                   }
-                  return Artwork(
-                    url: photo == null ? null : widget.artUrlFor(photo),
-                    size: 48,
-                    borderRadius: 24,
-                    fallback: InitialsAvatar(name: name, size: 48),
+                  return SharedSleeve(
+                    tag: 'artist-$name',
+                    child: Artwork(
+                      url: photo == null ? null : widget.artUrlFor(photo),
+                      size: 48,
+                      borderRadius: 24,
+                      shared: true,
+                      fallback: InitialsAvatar(name: name, size: 48),
+                    ),
                   );
                 }(),
                 const SizedBox(width: Space.md),

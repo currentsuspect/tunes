@@ -6,6 +6,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/shared_sleeve.dart';
 import '../../domain/manifest.dart';
 
 class MiniPlayerBar extends StatefulWidget {
@@ -247,9 +248,10 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
               // The same sleeve the player shows, so opening it is one
               // object growing rather than two screens swapping. Tagged by
               // the track, so a change mid-flight cannot pair the wrong two.
-              child: Hero(
+              child: SharedSleeve(
                 tag: 'sleeve-${track.sha}',
                 child: Artwork(
+                  shared: true,
                   url: track.artSha != null && widget.artUrlFor != null
                       ? widget.artUrlFor!(track.artSha!)
                       : null,

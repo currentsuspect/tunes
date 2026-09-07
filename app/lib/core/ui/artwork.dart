@@ -21,6 +21,7 @@ class Artwork extends StatelessWidget {
     required this.fallback,
     this.height,
     this.borderRadius = RadiusTokens.card,
+    this.shared = false,
   });
 
   /// Null when there is no artwork to fetch, which is ordinary -- the daemon
@@ -39,6 +40,15 @@ class Artwork extends StatelessWidget {
 
   final double borderRadius;
 
+  /// This sleeve flies between screens, so it must not be decoded per size.
+  ///
+  /// cacheWidth is part of an image's cache key: a cover decoded at 44 and
+  /// the same cover decoded at 312 are two entries, neither warm for the
+  /// other. The destination would then decode from scratch mid-flight and
+  /// show its fallback while it did. Shared sleeves decode once, at natural
+  /// size, and both ends hit the same entry.
+  final bool shared;
+
   /// Fills whatever box the parent gives it -- a grid cell, say, whose size
   /// only the layout knows. Measures first so the decode is still sized to
   /// what is actually drawn.
@@ -46,6 +56,7 @@ class Artwork extends StatelessWidget {
     required String? url,
     required Widget fallback,
     double borderRadius = RadiusTokens.card,
+    bool shared = false,
   }) {
     return LayoutBuilder(
       builder: (context, c) {
@@ -57,6 +68,7 @@ class Artwork extends StatelessWidget {
           height: h,
           fallback: fallback,
           borderRadius: borderRadius,
+          shared: shared,
         );
       },
     );
@@ -85,7 +97,9 @@ class Artwork extends StatelessWidget {
       // Decoded at the size it is drawn at. A rail of twelve covers decoded
       // at their full resolution is tens of megabytes of bitmap for a strip
       // 132 points tall.
-      cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+      cacheWidth: shared
+          ? null
+          : (size * MediaQuery.devicePixelRatioOf(context)).round(),
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         // Already in the image cache: show it outright. Fading in a cover
         // that was ready before the frame began is a flicker, not a
@@ -119,29 +133,6 @@ class ArtworkPlaceholder extends StatelessWidget {
   const ArtworkPlaceholder({super.key, this.borderRadius = RadiusTokens.card});
 
   final double borderRadius;
-
-  /// Fills whatever box the parent gives it -- a grid cell, say, whose size
-  /// only the layout knows. Measures first so the decode is still sized to
-  /// what is actually drawn.
-  static Widget fill({
-    required String? url,
-    required Widget fallback,
-    double borderRadius = RadiusTokens.card,
-  }) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final w = c.hasBoundedWidth ? c.maxWidth : 200.0;
-        final h = c.hasBoundedHeight ? c.maxHeight : w;
-        return Artwork(
-          url: url,
-          size: w,
-          height: h,
-          fallback: fallback,
-          borderRadius: borderRadius,
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
