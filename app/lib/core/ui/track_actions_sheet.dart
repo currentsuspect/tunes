@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/manifest.dart';
+import '../../features/playlists/add_to_playlist_sheet.dart';
 import '../data/likes_store.dart';
+import '../data/playlist_store.dart';
 import '../theme/tokens.dart';
 import 'manual_find_sheet.dart';
 
@@ -92,6 +94,20 @@ class TrackActionsSheet extends StatelessWidget {
                 await onPlayNext();
               },
             ),
+            if (PlaylistScope.maybeOf(context) case final playlists?)
+              _ActionRow(
+                icon: Icons.playlist_add_rounded,
+                label: 'Add to playlist',
+                subtitle: 'Keep it in a list you made',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  AddToPlaylistSheet.show(
+                    context,
+                    store: playlists,
+                    shas: [track.sha],
+                  );
+                },
+              ),
             _ActionRow(
               icon: Icons.queue_music_rounded,
               label: 'Add to queue',

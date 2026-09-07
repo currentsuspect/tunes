@@ -40,6 +40,38 @@ class LikedTracks extends Table {
   Set<Column> get primaryKey => {sha};
 }
 
+/// A list someone made, as opposed to one the app worked out.
+///
+/// Everything else here is derived -- what was played, what was liked, what
+/// is missing. This is the one table whose contents are entirely a decision,
+/// which is why it keeps its own order rather than sorting itself.
+class Playlists extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  IntColumn get createdAt => integer()();
+
+  /// Touched on every change to its contents, so a list of playlists can be
+  /// ordered by what is being worked on rather than by what is oldest.
+  IntColumn get updatedAt => integer()();
+}
+
+/// One track's place in one playlist.
+///
+/// Keyed on its own id, not on (playlist, track): **the same track twice in
+/// one playlist is allowed**. A sequence someone assembled is theirs, and a
+/// player that refuses to repeat a track is overruling a choice rather than
+/// preventing a mistake.
+class PlaylistItems extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get playlistId => integer()();
+  TextColumn get sha => text()();
+
+  /// Dense and renumbered on reorder. Gap-based ordering buys nothing at the
+  /// sizes a person actually curates by hand.
+  IntColumn get position => integer()();
+  IntColumn get addedAt => integer()();
+}
+
 /// One row per listen, kept as events rather than counters.
 ///
 /// A counter can answer "how many times", and nothing else. The discovery
@@ -189,6 +221,8 @@ class SyncState extends Table {
     Settings,
     PlayEvents,
     LikedTracks,
+    Playlists,
+    PlaylistItems,
   ],
 )
 class TunesDatabase extends _$TunesDatabase {
@@ -200,7 +234,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -261,6 +295,13 @@ class TunesDatabase extends _$TunesDatabase {
         // counts would put words in the listener's mouth, and the whole point
         // of this table is that it holds what was actually decided.
         await m.createTable(likedTracks);
+      }
+      if (from < 9) {
+        // v8 -> v9: playlists. New tables only. Nothing existing is read or
+        // rewritten, so an upgrade cannot damage a library that has been
+        // playing fine for months.
+        await m.createTable(playlists);
+        await m.createTable(playlistItems);
       }
     },
   );

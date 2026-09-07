@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/likes_store.dart';
+import '../../core/data/playlist_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
@@ -11,6 +12,7 @@ import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
 import '../../domain/manifest.dart';
+import '../playlists/playlist_page.dart';
 import 'library_widgets.dart';
 
 class LibraryView extends StatefulWidget {
@@ -87,19 +89,26 @@ class _LibraryViewState extends State<LibraryView> {
             Space.lg,
             Space.xs,
           ),
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('Tracks')),
-              ButtonSegment(value: 1, label: Text('Albums')),
-              ButtonSegment(value: 2, label: Text('Artists')),
-              ButtonSegment(value: 3, label: Text('Liked')),
-            ],
-            selected: {_segment},
-            onSelectionChanged: (s) => setState(() => _segment = s.first),
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              textStyle: WidgetStatePropertyAll(TypeScale.body),
+          // Scrolls, because five segments do not fit across a phone and a
+          // segmented button does not wrap. Better a row you can push than
+          // labels shaved to three letters each.
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 0, label: Text('Tracks')),
+                ButtonSegment(value: 1, label: Text('Albums')),
+                ButtonSegment(value: 2, label: Text('Artists')),
+                ButtonSegment(value: 3, label: Text('Liked')),
+                ButtonSegment(value: 4, label: Text('Playlists')),
+              ],
+              selected: {_segment},
+              onSelectionChanged: (s) => setState(() => _segment = s.first),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                textStyle: WidgetStatePropertyAll(TypeScale.body),
+              ),
             ),
           ),
         ),
@@ -208,10 +217,78 @@ class _LibraryViewState extends State<LibraryView> {
     return _trackList(tracks);
   }
 
+  /// The lists you made, most recently changed first.
+  ///
+  /// Rebuilt whenever the store changes, so a playlist created from a track
+  /// menu on another screen is here when you arrive rather than after a
+  /// restart.
+  Widget _buildPlaylists() {
+    final store = PlaylistScope.maybeOf(context);
+    if (store == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => FutureBuilder<List<PlaylistSummary>>(
+        future: store.summaries(),
+        builder: (context, snap) {
+          final lists = snap.data;
+          // Nothing while it loads: this resolves in a frame or two off a
+          // local database, and a spinner that flashes is worse than a beat
+          // of empty space.
+          if (lists == null) return const SizedBox.shrink();
+          if (lists.isEmpty) {
+            return const EmptyState(
+              icon: Icons.queue_music_rounded,
+              title: 'No playlists yet',
+              body:
+                  'Open the menu on any track and choose "Add to '
+                  'playlist" to make your first one.',
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: Space.sm),
+            itemCount: lists.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final p = lists[i];
+              return ListTile(
+                leading: const Icon(
+                  Icons.queue_music_rounded,
+                  color: Tones.textMuted,
+                ),
+                title: Text(p.name, style: TypeScale.title),
+                subtitle: Text(
+                  '${p.trackCount} '
+                  '${p.trackCount == 1 ? 'track' : 'tracks'}',
+                  style: TypeScale.caption,
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Tones.textMuted,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PlaylistPage(
+                      summary: p,
+                      store: store,
+                      player: widget.player,
+                      tracks: widget.tracks,
+                      artUrlFor: widget.artUrlFor,
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildBody(List<ManifestTrack> filtered) {
     // Ahead of the empty check, because "nothing matched the filter" is the
     // wrong thing to say about a list the filter does not apply to.
     if (_segment == 3) return _buildLiked();
+    if (_segment == 4) return _buildPlaylists();
     if (filtered.isEmpty) {
       // Two different situations were sharing one sentence. "Your library is
       // empty or your filter matched nothing" tells someone who typed three

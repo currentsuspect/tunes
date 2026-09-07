@@ -16,6 +16,7 @@ import 'core/data/download_store.dart';
 import 'core/data/likes_store.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/play_history.dart';
+import 'core/data/playlist_store.dart';
 import 'core/data/queue_store.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
@@ -86,6 +87,10 @@ Future<void> main() async {
   // that has to await its own state flickers on every row of every list.
   final likes = LikesStore(db);
   await likes.load();
+  // Not preloaded: playlists are read when a screen asks for them, and the
+  // set can be large enough that holding it all for a heart-sized answer
+  // would be the wrong trade.
+  final playlists = PlaylistStore(db);
   final client = TunesClient(_tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
@@ -165,6 +170,7 @@ Future<void> main() async {
       settings: settings,
       history: history,
       likes: likes,
+      playlists: playlists,
     ),
   );
 }
@@ -181,6 +187,7 @@ class TunesApp extends StatefulWidget {
     required this.settings,
     required this.history,
     required this.likes,
+    required this.playlists,
   });
 
   final TunesClient client;
@@ -192,6 +199,7 @@ class TunesApp extends StatefulWidget {
   final SettingsStore settings;
   final PlayHistory history;
   final LikesStore likes;
+  final PlaylistStore playlists;
 
   @override
   State<TunesApp> createState() => _TunesAppState();
@@ -221,26 +229,32 @@ class _TunesAppState extends State<TunesApp> {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
+    // Every scope sits above the Navigator, so a pushed route -- an album
+    // page, the player -- can read them. A scope below it is the bug that
+    // made download progress invisible on album pages.
     return SettingsScope(
       settings: widget.settings,
       child: LikesScope(
         likes: widget.likes,
-        child: DownloadScope(
-          manager: _downloads,
-          child: MaterialApp(
-            title: 'tunes',
-            debugShowCheckedModeBanner: false,
-            theme: buildTunesTheme(mq),
-            home: AppShell(
-              client: widget.client,
-              player: widget.player,
-              store: widget.store,
-              reachability: widget.reachability,
-              manifestStore: widget.manifestStore,
-              queueStore: widget.queueStore,
-              settings: widget.settings,
-              history: widget.history,
-              downloads: _downloads,
+        child: PlaylistScope(
+          playlists: widget.playlists,
+          child: DownloadScope(
+            manager: _downloads,
+            child: MaterialApp(
+              title: 'tunes',
+              debugShowCheckedModeBanner: false,
+              theme: buildTunesTheme(mq),
+              home: AppShell(
+                client: widget.client,
+                player: widget.player,
+                store: widget.store,
+                reachability: widget.reachability,
+                manifestStore: widget.manifestStore,
+                queueStore: widget.queueStore,
+                settings: widget.settings,
+                history: widget.history,
+                downloads: _downloads,
+              ),
             ),
           ),
         ),

@@ -12,6 +12,7 @@ import 'package:tunes/core/audio/playhead_clock.dart';
 import 'package:tunes/core/data/likes_store.dart';
 import 'package:tunes/core/data/manifest_store.dart';
 import 'package:tunes/core/data/play_history.dart';
+import 'package:tunes/core/data/playlist_store.dart';
 import 'package:tunes/core/data/queue_store.dart';
 import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/data/reachability.dart';
@@ -400,6 +401,7 @@ void main() {
   late QueueStore queueStore;
   late SettingsStore settings;
   late LikesStore likes;
+  late PlaylistStore playlists;
   late PlayHistory history;
 
   setUp(() async {
@@ -417,6 +419,7 @@ void main() {
     await settings.load();
     likes = LikesStore(db);
     await likes.load();
+    playlists = PlaylistStore(db);
   });
 
   tearDown(() async {
@@ -444,6 +447,7 @@ void main() {
         settings: settings,
         history: history,
         likes: likes,
+        playlists: playlists,
       ),
     );
     await tester.pumpAndSettle();
