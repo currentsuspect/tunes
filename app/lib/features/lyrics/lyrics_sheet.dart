@@ -6,6 +6,7 @@ import '../../core/lyrics/lrc_parser.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
 import 'karaoke_line.dart';
+import 'lyric_follow.dart';
 import 'lyrics_sync_page.dart';
 
 /// Bottom sheet that shows the lyrics for a track, with a tap-to-edit
@@ -358,22 +359,40 @@ class _View extends StatefulWidget {
 
 class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   Lrc? _lrc;
-  int? _activeIndex;
   // Drives the within-word sweep. Only the active line listens to it, so the
   // rest of the list is untouched at frame rate.
   late final PlayheadClock _playhead;
+  // Owns the active line and the follow/browse state. Fed from _playhead
+  // rather than the player so the line changes on the same timebase the word
+  // sweep uses -- reading player.position here would put the line back up to
+  // 250ms behind the words, which is the part you notice.
+  late LyricFollowController _follow;
+  late List<GlobalKey> _lineKeys;
+
+  int? get _activeIndex => _follow.activeIndex;
 
   @override
   void initState() {
     super.initState();
     _parse();
     _playhead = PlayheadClock(player: widget.player, vsync: this);
-    // The line follows the same projected clock as the word sweep. It used to
-    // read player.position, which is up to 250ms stale and only refreshes
-    // when the player notifies -- so words glided on time while the line
-    // changed late, which is the part you notice.
-    _playhead.addListener(_onPlayerChange);
-    widget.player.addListener(_onPlayerChange);
+    _follow = LyricFollowController(
+      player: widget.player,
+      lrc: _lrc,
+      clock: _playhead,
+    );
+    _follow.addListener(_onFollowUpdate);
+    _lineKeys = List.generate(_lrc?.lines.length ?? 0, (_) => GlobalKey());
+    // Nothing else subscribes to the clock here: KaraokeLine takes it and
+    // rebuilds itself through a ValueListenableBuilder, so the word sweep
+    // repaints at frame rate without this State rebuilding the whole list.
+    // Opening transfers into the current lyric position: settle onto the
+    // active line on the first frame rather than starting at the top.
+    if (_follow.activeIndex != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollToActive(animated: true),
+      );
+    }
   }
 
   @override
@@ -385,7 +404,11 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     if (oldWidget.lyrics != widget.lyrics) {
       setState(() {
         _parse();
-        _activeIndex = null;
+        // The controller owns the active line now, so re-anchoring goes
+        // through it. The keys are per-line, so they have to be rebuilt for
+        // the new line count or ensureVisible would target a stale context.
+        _follow.updateLyrics(_lrc);
+        _lineKeys = List.generate(_lrc?.lines.length ?? 0, (_) => GlobalKey());
       });
     }
   }
@@ -396,19 +419,73 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
 
   @override
   void dispose() {
-    widget.player.removeListener(_onPlayerChange);
-    _playhead.removeListener(_onPlayerChange);
+    _follow.removeListener(_onFollowUpdate);
+    // The controller listens to the clock, so it has to let go before the
+    // clock is torn down.
+    _follow.dispose();
     _playhead.dispose();
     super.dispose();
   }
 
-  void _onPlayerChange() {
-    final lrc = _lrc;
-    if (lrc == null || lrc.lines.isEmpty) return;
-    final active = LrcParser.activeLine(lrc, _playhead.value);
-    final idx = active == null ? null : lrc.lines.indexOf(active);
-    if (idx != _activeIndex && mounted) {
-      setState(() => _activeIndex = idx);
+  /// Shared follow state changed: refresh the highlight / recenter pill,
+  /// and glide to the new line when following. The controller only
+  /// notifies on active-index (or follow-state) change, never on every
+  /// position tick, so this never stutters mid-line.
+  void _onFollowUpdate() {
+    if (!mounted) return;
+    setState(() {});
+    if (_follow.following && _follow.activeIndex != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollToActive(animated: true),
+      );
+    }
+  }
+
+  void _scrollToActive({required bool animated}) {
+    if (!mounted) return;
+    final idx = _follow.activeIndex;
+    if (idx == null || idx < 0 || idx >= _lineKeys.length) return;
+    final ctx = _lineKeys[idx].currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.35,
+      duration: animated ? const Duration(milliseconds: 350) : Duration.zero,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  /// A manual drag pauses following so browsing is never yanked away.
+  /// When the scroll settles back on the active line, following resumes.
+  /// (Programmatic glides carry no drag details, so they never pause.)
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is ScrollStartNotification && n.dragDetails != null) {
+      _follow.userScrolled();
+    } else if (n is ScrollEndNotification) {
+      // Geometry is stale until the next frame lays out the settled
+      // offset, so defer the visibility check past layout.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _resumeIfActiveVisible(),
+      );
+    }
+    return false;
+  }
+
+  void _resumeIfActiveVisible() {
+    if (!mounted) return;
+    if (_follow.following) return;
+    final idx = _follow.activeIndex;
+    if (idx == null || idx < 0 || idx >= _lineKeys.length) return;
+    final ctx = _lineKeys[idx].currentContext;
+    if (ctx == null) return;
+    final box = ctx.findRenderObject();
+    final scrollable = Scrollable.of(ctx);
+    final viewport = scrollable.context.findRenderObject();
+    if (box is! RenderBox || viewport is! RenderBox) return;
+    final top = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+    final extent = scrollable.position.viewportDimension;
+    if (top >= -box.size.height && top + box.size.height <= extent) {
+      _follow.resumeFollowing();
     }
   }
 
@@ -431,6 +508,52 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         ),
       );
     }
+    // The no-timed-lines case is already handled above, against lrc.untimed
+    // rather than a re-derived plain-text blob.
+    final list = NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: _timedList(lrc),
+    );
+    // Paused by a manual scroll: offer an explicit way back. The pill
+    // hides itself as soon as following resumes (new line, scroll-back,
+    // or tap). The Stack stays mounted unconditionally: swapping the
+    // list between a bare return and a Stack child would remount the
+    // ListView and silently reset its scroll offset to zero.
+    return Stack(
+      children: [
+        list,
+        if (!_follow.following && _follow.activeIndex != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: Space.md,
+            child: Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  _follow.resumeFollowing();
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _scrollToActive(animated: true),
+                  );
+                },
+                icon: const Icon(Icons.my_location_rounded, size: 16),
+                label: const Text('Back to current line'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Tones.primary,
+                  backgroundColor: Tones.surfaceRaised,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Space.md,
+                    vertical: Space.sm,
+                  ),
+                  shape: const StadiumBorder(),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _timedList(Lrc lrc) {
     final activeIdx = _activeIndex ?? -1;
     // Timed lines first, then anything still untimed. Rendering only the timed
     // ones meant that syncing a single line of a forty-line lyric hid the
@@ -458,31 +581,36 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         final line = lrc.lines[i];
         final isActive = i == activeIdx;
         final isPast = i < activeIdx;
-        return GestureDetector(
-          onTap: () => widget.player.seek(line.timestamp),
-          child: line.hasWordTiming
-              // Word-synced: sweep the highlight across the word being sung.
-              ? KaraokeLine(
-                  lrc: lrc,
-                  lineIndex: i,
-                  playhead: _playhead,
-                  trackEnd: widget.player.duration,
-                  isActive: isActive,
-                  isPast: isPast,
-                )
-              : AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 200),
-                  style: TypeScale.title.copyWith(
-                    color: isActive
-                        ? Tones.text
-                        : isPast
-                        ? Tones.textMuted.withValues(alpha: 0.6)
-                        : Tones.text.withValues(alpha: 0.85),
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                    height: 1.3,
+        // The key is what _scrollToActive and _resumeIfActiveVisible resolve
+        // through, so it wraps the whole row rather than the text inside it.
+        return KeyedSubtree(
+          key: _lineKeys[i],
+          child: GestureDetector(
+            onTap: () => widget.player.seek(line.timestamp),
+            child: line.hasWordTiming
+                // Word-synced: sweep the highlight across the word being sung.
+                ? KaraokeLine(
+                    lrc: lrc,
+                    lineIndex: i,
+                    playhead: _playhead,
+                    trackEnd: widget.player.duration,
+                    isActive: isActive,
+                    isPast: isPast,
+                  )
+                : AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    style: TypeScale.title.copyWith(
+                      color: isActive
+                          ? Tones.text
+                          : isPast
+                          ? Tones.textMuted.withValues(alpha: 0.6)
+                          : Tones.text.withValues(alpha: 0.85),
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                      height: 1.3,
+                    ),
+                    child: Text(line.text),
                   ),
-                  child: Text(line.text),
-                ),
+          ),
         );
       },
     );

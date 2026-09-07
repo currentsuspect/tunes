@@ -16,6 +16,7 @@ import '../album/album_page.dart';
 import '../artist/artist_page.dart';
 import '../lyrics/lyrics_sheet.dart';
 import '../queue/queue_sheet.dart';
+import 'lyric_preview.dart';
 import 'now_playing_details.dart';
 
 class NowPlayingPage extends StatefulWidget {
@@ -316,19 +317,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           _showTrackInfo(context, current);
                                           break;
                                         case 'lyrics':
-                                          LyricsSheet.show(
-                                            context,
-                                            track: current,
-                                            player: widget.player,
-                                            onSave: (text) async {
-                                              await widget.manifestStore
-                                                  .setEdit(
-                                                    current.sha,
-                                                    'lyrics',
-                                                    text,
-                                                  );
-                                            },
-                                          );
+                                          // Same opener the preview tap and
+                                          // the details sheet use, so all
+                                          // three routes save identically.
+                                          _openLyrics(context, current);
                                           break;
                                       }
                                     },
@@ -506,6 +498,21 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     tooltip: 'Next',
                                   ),
                                 ],
+                              ),
+                            ),
+                            // The line being sung, right under the transport.
+                            // A reactive surface, not a control: it shows
+                            // where the words are and opens the full view on
+                            // tap. The drawer below still holds the whole
+                            // lyric -- this is the glance, that is the read.
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: Space.xl,
+                              ),
+                              child: LyricPreview(
+                                lyrics: current.lyrics,
+                                player: widget.player,
+                                onOpen: () => _openLyrics(context, current),
                               ),
                             ),
                             // One cluster, centred under the transport,
