@@ -22,6 +22,7 @@ class SettingsStore extends ChangeNotifier {
   static const _stopOnClose = 'playback.stopOnClose';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
+  static const _serverUrl = 'server.url';
 
   Future<void> load() async {
     final rows = await _db.select(_db.settings).get();
@@ -92,6 +93,36 @@ class SettingsStore extends ChangeNotifier {
   /// one piece of motion in the app that runs continuously.
   bool get animatedArtwork => _bool(_animatedArtwork, fallback: true);
   Future<void> setAnimatedArtwork(bool v) => _put(_animatedArtwork, '$v');
+
+  // --- server --------------------------------------------------------------
+
+  /// Where tunesd lives, or null to use the address this build was compiled
+  /// with.
+  ///
+  /// The compile-time TUNESD_URL was the only way to say this, which meant a
+  /// second person could not use the app without someone rebuilding it for
+  /// them. Stored rather than baked so one APK serves everyone, and so an
+  /// address that moves -- a laptop changing networks, a tailnet node -- is a
+  /// text field rather than a release.
+  ///
+  /// Null when unset, deliberately: the fallback then remains whatever the
+  /// build was compiled with, so an existing install behaves exactly as it did
+  /// before this setting existed.
+  String? get serverUrl {
+    final v = _cache[_serverUrl]?.trim();
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// Stores a server address, or clears it back to the compiled-in default.
+  ///
+  /// Trailing slashes are stripped because every request builds its path as
+  /// '$baseUrl/manifest' -- a stored 'http://host:4780/' would ask for
+  /// '//manifest' and fail in a way that looks like the server being down.
+  Future<void> setServerUrl(String? url) {
+    final v = url?.trim();
+    if (v == null || v.isEmpty) return _clear(_serverUrl);
+    return _put(_serverUrl, v.endsWith('/') ? v.substring(0, v.length - 1) : v);
+  }
 
   // --- lyrics --------------------------------------------------------------
 

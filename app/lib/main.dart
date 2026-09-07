@@ -91,7 +91,10 @@ Future<void> main() async {
   // set can be large enough that holding it all for a heart-sized answer
   // would be the wrong trade.
   final playlists = PlaylistStore(db);
-  final client = TunesClient(_tunesdUrl, support);
+  // A stored address wins over the compiled-in one, so a build can be handed
+  // to someone whose tunesd is somewhere else without rebuilding it for them.
+  // Falls back to _tunesdUrl when unset, which is every existing install.
+  final client = TunesClient(settings.serverUrl ?? _tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
   final player = MediaKitTunePlayer(
@@ -635,6 +638,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           history: widget.history,
           supportDir: widget.store.dir,
           onResync: _reload,
+          onServerChanged: (url) async {
+            await widget.settings.setServerUrl(url);
+            // Repoint the live client rather than asking for a restart. Every
+            // request builds its URL from baseUrl at call time, so the next
+            // one already goes to the new address.
+            widget.client.baseUrl = widget.settings.serverUrl ?? _tunesdUrl;
+            // What is on screen still came from the old server, so fetch the
+            // library again instead of leaving a stale one that looks current.
+            _reload();
+          },
         ),
       ),
     );

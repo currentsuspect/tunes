@@ -61,7 +61,11 @@ export class ManifestServer {
     /// same map the daemon fills for releases we hold, reused for the ones we
     /// only know about — a cover is a cover regardless of whether the audio
     /// is here.
-    private readonly getReleaseArt: () => Map<string, string> = () => new Map()
+    private readonly getReleaseArt: () => Map<string, string> = () => new Map(),
+    /// Interface to bind. Last and defaulted so no existing caller changes:
+    /// 0.0.0.0 is what this always did. See TunesdEnv.host for why narrowing
+    /// it is sometimes the point.
+    private readonly host: string = "0.0.0.0"
   ) {
     this.externalCache = new Map();
   }
@@ -299,8 +303,21 @@ export class ManifestServer {
       }
     });
 
-    server.listen(this.port, "0.0.0.0", () => {
-      this.log.info({ event: "HTTP_LISTEN", port: this.port });
+    server.listen(this.port, this.host, () => {
+      // The host is logged, not just the port. There is no authentication on
+      // any route here, so "which interfaces is this on" is the entire access
+      // control story -- it belongs in the log rather than in someone's memory
+      // of how the service was started.
+      this.log.info({
+        event: "HTTP_LISTEN",
+        port: this.port,
+        host: this.host,
+        exposure: this.host === "127.0.0.1" || this.host === "::1"
+          ? "local-only"
+          : this.host === "0.0.0.0" || this.host === "::"
+            ? "all-interfaces (no auth: anyone who can reach this port has the library)"
+            : `bound to ${this.host}`,
+      });
     });
   }
 

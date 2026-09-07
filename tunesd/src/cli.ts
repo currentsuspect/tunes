@@ -1224,7 +1224,8 @@ async function main(): Promise<void> {
           await persistDiscographies(discographyFile, discographies);
           return entry;
         },
-        () => releaseArt
+        () => releaseArt,
+        env.host
       );
       await server.start();
       void runEnrichPass().catch((e) =>

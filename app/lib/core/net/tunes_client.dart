@@ -44,7 +44,14 @@ class TunesFetchException implements Exception {
 class TunesClient {
   TunesClient(this.baseUrl, [this._cacheDir]);
 
-  final String baseUrl;
+  /// Where tunesd is. Mutable so changing the server in Settings takes effect
+  /// on the next request instead of on the next launch.
+  ///
+  /// Every request builds its URL from this at call time, so there is no
+  /// connection or handle to rebuild — but anything already fetched is still
+  /// from the old server until something asks again, which is why the setting
+  /// triggers a resync rather than assuming the screen will catch up.
+  String baseUrl;
   final Directory? _cacheDir;
 
   static const _timeout = Duration(seconds: 8);

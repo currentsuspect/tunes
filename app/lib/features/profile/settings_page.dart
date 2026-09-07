@@ -32,6 +32,7 @@ class SettingsPage extends StatefulWidget {
     required this.store,
     required this.history,
     required this.onResync,
+    required this.onServerChanged,
     this.supportDir,
   });
 
@@ -50,6 +51,10 @@ class SettingsPage extends StatefulWidget {
   /// Re-fetches the library. Handed in rather than reached for, because the
   /// shell owns the sync and this screen only asks for one.
   final VoidCallback onResync;
+
+  /// Persists the address, repoints the client, and refetches. Empty string
+  /// means "clear it, use the compiled-in default".
+  final Future<void> Function(String url) onServerChanged;
   final Directory? supportDir;
 
   @override
@@ -66,6 +71,72 @@ class _SettingsPageState extends State<SettingsPage> {
   /// everyone else would be clutter that also invites damage.
   int _versionTaps = 0;
   bool _developer = false;
+
+  /// Asks for the address of a tunesd, and hands it upward.
+  ///
+  /// Not behind the seven-tap developer section: pointing the app at your own
+  /// server is the difference between this being usable by one person and
+  /// usable by anyone, which is not a debugging concern.
+  ///
+  /// Empty means "go back to the address this build was compiled with", so
+  /// there is always a way back from a typo without reinstalling.
+  Future<void> _editServer() async {
+    final controller = TextEditingController(text: widget.endpoint);
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Tones.surface,
+        title: const Text('Server', style: TypeScale.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Where your tunesd is. Include the port.',
+              style: TypeScale.caption,
+            ),
+            const SizedBox(height: Space.sm),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              style: TypeScale.body,
+              decoration: const InputDecoration(
+                hintText: 'http://100.100.235.90:4780',
+              ),
+              onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
+            ),
+            const SizedBox(height: Space.sm),
+            const Text(
+              'Leave it empty to go back to the address this build came with.',
+              style: TypeScale.caption,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (entered == null) return;
+    await widget.onServerChanged(entered);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      // The library on screen is still the old server's until something asks
+      // again, so say that rather than letting it look like nothing happened.
+      const SnackBar(content: Text('Server changed — refetching the library')),
+    );
+  }
 
   @override
   void initState() {
@@ -291,7 +362,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
             const _SectionLabel('Library'),
             _Row(label: 'Daemon', value: widget.offline ? 'offline' : 'online'),
-            _Row(label: 'Endpoint', value: widget.endpoint),
+            _Action(
+              label: 'Server',
+              detail: widget.endpoint,
+              onTap: _editServer,
+            ),
             _Row(label: 'Tracks', value: '${widget.trackCount}'),
             _Row(label: 'Downloaded', value: '${widget.downloadCount}'),
 

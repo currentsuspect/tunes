@@ -119,8 +119,11 @@ class _FakeClient implements TunesClient {
     return custom != null ? custom() : const [];
   }
 
+  /// Settable, because the real client's address is now settable: pointing the
+  /// app at a different server has to take effect without a relaunch. A
+  /// getter-only override no longer satisfies the interface.
   @override
-  String get baseUrl => 'http://fake:4780';
+  String baseUrl = 'http://fake:4780';
 
   @override
   Future<TunesManifest> fetchManifest() => result();

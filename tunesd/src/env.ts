@@ -12,6 +12,20 @@ export interface TunesdEnv {
   logLevel: "debug" | "info" | "warn" | "error";
   fetch: FetchDisciplineConfig;
   port: number;
+
+  /// The interface the HTTP server binds to.
+  ///
+  /// Defaults to 0.0.0.0 — every interface — which is what it always did and
+  /// what a single-machine setup wants. It is worth being able to change,
+  /// because the server has no authentication of any kind: every device that
+  /// can reach the port gets the whole library and can stream any track.
+  ///
+  /// On a laptop that joins other people's networks, or when the intended
+  /// path in is a tailnet, bind the one interface you mean:
+  ///
+  ///     TUNESD_HOST=100.100.235.90   # this node's Tailscale address
+  ///     TUNESD_HOST=127.0.0.1        # local only
+  host: string;
 }
 
 function loadEnvFile(p: string): void {
@@ -58,5 +72,6 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): TunesdEnv {
     logLevel: (env["TUNESD_LOG_LEVEL"] ?? "info") as TunesdEnv["logLevel"],
     fetch: { ...defaultFetchDiscipline, ...overrides },
     port: Number(env["TUNESD_PORT"] ?? 4780),
+    host: env["TUNESD_HOST"] ?? "0.0.0.0",
   };
 }
