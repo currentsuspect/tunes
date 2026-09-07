@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -50,6 +51,22 @@ const _tunesdUrl = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Draw behind the system bars. Recent Android does this to apps whether
+  // they ask or not, so an app that has not opted in gets the layout without
+  // the chance to say what the bars should look like over it.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      // Light icons: this app is dark everywhere, and the bars sit over its
+      // own surface rather than over anything the system chose.
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarContrastEnforced: false,
+    ),
+  );
   if (!const bool.fromEnvironment('SKIP_MEDIAKIT')) {
     MediaKit.ensureInitialized();
   }
@@ -823,69 +840,84 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           color: Tones.surface,
           border: Border(top: BorderSide(color: Tones.hairline)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            MiniPlayerBar(
-              player: widget.player,
-              onTap: _openNowPlaying,
-              artUrlFor: _artUrlFor,
-            ),
-            NavigationBarTheme(
-              data: NavigationBarThemeData(
-                height: 64,
-                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                indicatorColor: Colors.transparent,
-                backgroundColor: Tones.surface,
-                surfaceTintColor: Colors.transparent,
-                labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return TypeScale.caption.copyWith(
-                    color: selected ? Tones.text : Tones.textMuted,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  );
-                }),
+        // Bottom only: the top edge of this bar is the app's own, and the
+        // gesture strip is what would otherwise sit over the labels.
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MiniPlayerBar(
+                player: widget.player,
+                onTap: _openNowPlaying,
+                artUrlFor: _artUrlFor,
               ),
-              child: NavigationBar(
-                selectedIndex: _tab,
-                onDestinationSelected: (i) => setState(() => _tab = i),
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.home_outlined, color: Tones.textMuted),
-                    selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
-                    label: 'Home',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(
-                      Icons.travel_explore_outlined,
-                      color: Tones.textMuted,
+              NavigationBarTheme(
+                data: NavigationBarThemeData(
+                  // Grows with the system font scale, capped: at the largest
+                  // settings a fixed 64 clips the labels, and an uncapped bar
+                  // eats the screen those labels are there to navigate.
+                  height:
+                      64 *
+                      MediaQuery.textScalerOf(context)
+                          .scale(1.0)
+                          .clamp(1.0, 1.4),
+                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                  indicatorColor: Colors.transparent,
+                  backgroundColor: Tones.surface,
+                  surfaceTintColor: Colors.transparent,
+                  labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                    final selected = states.contains(WidgetState.selected);
+                    return TypeScale.caption.copyWith(
+                      color: selected ? Tones.text : Tones.textMuted,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    );
+                  }),
+                ),
+                child: NavigationBar(
+                  selectedIndex: _tab,
+                  onDestinationSelected: (i) => setState(() => _tab = i),
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.home_outlined, color: Tones.textMuted),
+                      selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
+                      label: 'Home',
                     ),
-                    selectedIcon: Icon(
-                      Icons.travel_explore_rounded,
-                      color: Tones.text,
+                    NavigationDestination(
+                      icon: Icon(
+                        Icons.travel_explore_outlined,
+                        color: Tones.textMuted,
+                      ),
+                      selectedIcon: Icon(
+                        Icons.travel_explore_rounded,
+                        color: Tones.text,
+                      ),
+                      label: 'Discover',
                     ),
-                    label: 'Discover',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.search_rounded, color: Tones.textMuted),
-                    selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
-                    label: 'Search',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(
-                      Icons.library_music_outlined,
-                      color: Tones.textMuted,
+                    NavigationDestination(
+                      icon: Icon(Icons.search_rounded, color: Tones.textMuted),
+                      selectedIcon: Icon(
+                        Icons.search_rounded,
+                        color: Tones.text,
+                      ),
+                      label: 'Search',
                     ),
-                    selectedIcon: Icon(
-                      Icons.library_music_rounded,
-                      color: Tones.text,
+                    NavigationDestination(
+                      icon: Icon(
+                        Icons.library_music_outlined,
+                        color: Tones.textMuted,
+                      ),
+                      selectedIcon: Icon(
+                        Icons.library_music_rounded,
+                        color: Tones.text,
+                      ),
+                      label: 'Library',
                     ),
-                    label: 'Library',
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
