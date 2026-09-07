@@ -298,4 +298,104 @@ void main() {
       expect(lrc.lines[0].text, 'Big Poe');
     });
   });
+
+  group('stacked enhanced LRC (overlapping vocal layers)', () {
+    // Enhanced LRC in the wild is not one performance per line. A line can
+    // carry a main vocal and an ad-lib happening underneath it, which means:
+    //
+    //   * the opening word is often untagged, timed by the line anchor
+    //   * the line anchor is not necessarily the earliest time on the line
+    //   * word starts do not ascend
+    //
+    // Every token must survive parsing regardless. Nothing here may be
+    // discarded, clamped, sorted or deduplicated.
+    const stacked =
+        "[00:14.36]Number <00:14.06>three, <00:15.57>don't <00:16.09>tap "
+        '<00:16.59>the <00:16.81>glass <00:15.51>(ad-lib)';
+
+    test('the untagged opening word survives', () {
+      // It used to be dropped: parsing began at the first '<', so every line
+      // whose first word carried no tag of its own silently lost that word.
+      final lrc = LrcParser.parse(stacked);
+      expect(lrc.lines.single.words.first.text, 'Number');
+      expect(lrc.lines.single.text, startsWith('Number'));
+    });
+
+    test('the opening word is timed by the line anchor', () {
+      final lrc = LrcParser.parse(stacked);
+      expect(
+        lrc.lines.single.words.first.start,
+        const Duration(seconds: 14, milliseconds: 360),
+      );
+    });
+
+    test('every timed token survives, in written order', () {
+      final lrc = LrcParser.parse(stacked);
+      expect(lrc.lines.single.words.map((w) => w.text), [
+        'Number',
+        'three,',
+        "don't",
+        'tap',
+        'the',
+        'glass',
+        '(ad-lib)',
+      ]);
+    });
+
+    test('a word timed before its own line anchor is kept, not clamped', () {
+      final lrc = LrcParser.parse(stacked);
+      final three = lrc.lines.single.words[1];
+      expect(three.text, 'three,');
+      // 14.06 is EARLIER than the line's 14.36. Both are correct; the anchor
+      // and the word times serve different purposes.
+      expect(three.start, const Duration(seconds: 14, milliseconds: 60));
+      expect(three.start, lessThan(lrc.lines.single.timestamp));
+    });
+
+    test('an out-of-order ad-lib keeps its own time', () {
+      final lrc = LrcParser.parse(stacked);
+      final adlib = lrc.lines.single.words.last;
+      expect(adlib.text, '(ad-lib)');
+      expect(adlib.start, const Duration(seconds: 15, milliseconds: 510));
+      // It is written last but starts before the word before it.
+      expect(adlib.start, lessThan(lrc.lines.single.words[5].start));
+    });
+
+    test('the highlight does not stall at the out-of-order token', () {
+      // The lookup used to stop at the first word starting after the playhead.
+      // On this line that is the ad-lib at 15.51, so at 16.9s the highlight
+      // froze on "don't" instead of reaching "glass".
+      final lrc = LrcParser.parse(stacked);
+      expect(
+        LrcParser.activeWordIndex(
+          lrc,
+          0,
+          const Duration(seconds: 16, milliseconds: 900),
+        ),
+        5, // 'glass'
+      );
+    });
+
+    test('a word is never given negative width by a later-but-earlier token', () {
+      final lrc = LrcParser.parse(stacked);
+      for (var i = 0; i < lrc.lines.single.words.length; i++) {
+        final start = lrc.lines.single.words[i].start;
+        final end = lrc.wordEndOf(0, i, trackEnd: const Duration(minutes: 3));
+        expect(
+          end,
+          greaterThan(start),
+          reason:
+              'word $i ("${lrc.lines.single.words[i].text}") ends before it starts',
+        );
+      }
+    });
+
+    test('a line whose first word starts well after its anchor is intact', () {
+      final lrc = LrcParser.parse(
+        '[02:46.10]<02:47.37>yeah, <02:47.75>he <02:47.92>know',
+      );
+      expect(lrc.lines.single.words, hasLength(3));
+      expect(lrc.lines.single.text, 'yeah, he know');
+    });
+  });
 }

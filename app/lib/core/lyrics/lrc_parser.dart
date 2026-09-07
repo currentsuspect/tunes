@@ -83,14 +83,26 @@ class Lrc {
   /// last line from having zero width when the duration is unknown.
   Duration wordEndOf(int lineIndex, int wordIndex, {Duration? trackEnd}) {
     final line = lines[lineIndex];
-    if (wordIndex + 1 < line.words.length) {
-      return line.words[wordIndex + 1].start;
+    final start = line.words[wordIndex].start;
+
+    // The next word by TIME, not by position. On a line that interleaves an
+    // ad-lib with the main vocal the following token can start earlier, and
+    // taking it verbatim gave the word a negative width -- a sweep that never
+    // moved. Scan for the soonest start after this one instead.
+    Duration? soonestAfter;
+    for (final w in line.words) {
+      if (w.start <= start) continue;
+      if (soonestAfter == null || w.start < soonestAfter) {
+        soonestAfter = w.start;
+      }
     }
+    if (soonestAfter != null) return soonestAfter;
+
     if (lineIndex + 1 < lines.length) return lines[lineIndex + 1].timestamp;
-    if (trackEnd != null && trackEnd > line.words[wordIndex].start) {
+    if (trackEnd != null && trackEnd > start) {
       return trackEnd;
     }
-    return line.words[wordIndex].start + const Duration(milliseconds: 800);
+    return start + const Duration(milliseconds: 800);
   }
 }
 
@@ -149,7 +161,9 @@ class LrcParser {
       if (inlineFrom == null) {
         // Every tag is a start time for the same text (or there is only one).
         final body = line.substring(tags.last.end);
-        final words = _parseWords(body);
+        // The anchor for leading untagged text is the tag immediately before
+        // the body -- the last one -- not the first of a repeated run.
+        final words = _parseWords(body, _durationOf(tags.last));
         // Strip word tags from the fallback too. Without it a line whose tags
         // carried no words -- a timing mark recorded before the word was typed
         // -- rendered its own markup as the lyric.
@@ -221,10 +235,34 @@ class LrcParser {
 
   /// Pulls `<mm:ss.ff>word` pairs out of a line body. Returns empty when the
   /// line carries no word tags, which is the ordinary line-synced case.
-  static List<LrcWord> _parseWords(String body) {
+  ///
+  /// [lineStart] times any text sitting between the line's own tag and the
+  /// first word tag. Real enhanced files leave the opening word untagged and
+  /// let the line anchor time it:
+  ///
+  ///     [00:14.36]Number <00:14.06>three, <00:15.57>don't ...
+  ///
+  /// This used to begin at the first `<`, so "Number" -- the word the line
+  /// opens on -- was dropped from both the word list and the display text.
+  /// Every such line lost its first word, silently.
+  ///
+  /// Note the line anchor there is *later* than the first tagged word. The
+  /// anchor and the word times serve different purposes and are not required
+  /// to be ordered, so nothing here sorts, clamps or dedupes: tokens come out
+  /// in the order written, timestamps untouched. Overlapping performances (an
+  /// ad-lib under a main vocal) are the normal reason for that, and both
+  /// tokens have to survive.
+  static List<LrcWord> _parseWords(String body, Duration lineStart) {
     final tags = [..._wordTag.allMatches(body)];
     if (tags.isEmpty) return const [];
     final words = <LrcWord>[];
+
+    // Leading untagged text belongs to the line anchor.
+    final lead = body.substring(0, tags.first.start).trim();
+    if (lead.isNotEmpty) {
+      words.add(LrcWord(text: lead, start: lineStart));
+    }
+
     for (var i = 0; i < tags.length; i++) {
       final from = tags[i].end;
       final to = i + 1 < tags.length ? tags[i + 1].start : body.length;
@@ -273,13 +311,29 @@ class LrcParser {
   static int? activeWordIndex(Lrc lrc, int lineIndex, Duration position) {
     final words = lrc.lines[lineIndex].words;
     if (words.isEmpty) return null;
-    if (position < words.first.start) return null;
-    var result = 0;
+
+    // Word starts are NOT guaranteed to ascend. A line carrying an ad-lib under
+    // the main vocal interleaves two performances, so a later token can start
+    // earlier:
+    //
+    //     don't 15.57   tap 16.09   the 16.59   glass 16.81   (ad-lib) 15.51
+    //
+    // This used to stop at the first word starting after the playhead, which on
+    // a line like that stopped at the ad-lib and froze the highlight partway
+    // through. Scan the whole line and take the latest start at or before the
+    // playhead instead; ties keep the earlier token, so the main vocal wins
+    // over an ad-lib written at the same instant.
+    int? best;
+    Duration bestStart = Duration.zero;
     for (var i = 0; i < words.length; i++) {
-      if (words[i].start > position) break;
-      result = i;
+      final start = words[i].start;
+      if (start > position) continue;
+      if (best == null || start > bestStart) {
+        best = i;
+        bestStart = start;
+      }
     }
-    return result;
+    return best;
   }
 
   /// How far through a word the playhead is, 0..1.

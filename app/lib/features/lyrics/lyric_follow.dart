@@ -62,13 +62,22 @@ List<LyricWordPart>? lyricWordParts(Lrc lrc, int lineIndex) {
 int? lyricActiveWordIndex(Lrc lrc, int lineIndex, Duration position) {
   final parts = lyricWordParts(lrc, lineIndex);
   if (parts == null || parts.isEmpty) return null;
-  if (position < parts.first.start) return null;
-  var result = 0;
+
+  // Mirrors LrcParser.activeWordIndex, including the part that matters most:
+  // word starts do not have to ascend. A line carrying an ad-lib under the main
+  // vocal interleaves two performances, so stopping at the first word that
+  // starts after the playhead froze the highlight partway along the line.
+  int? best;
+  Duration bestStart = Duration.zero;
   for (var i = 0; i < parts.length; i++) {
-    if (parts[i].start > position) break;
-    result = i;
+    final start = parts[i].start;
+    if (start > position) continue;
+    if (best == null || start > bestStart) {
+      best = i;
+      bestStart = start;
+    }
   }
-  return result;
+  return best;
 }
 
 String? _wordText(dynamic word) {
