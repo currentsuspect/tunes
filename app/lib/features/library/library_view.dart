@@ -89,26 +89,19 @@ class _LibraryViewState extends State<LibraryView> {
             Space.lg,
             Space.xs,
           ),
-          // Scrolls, because five segments do not fit across a phone and a
-          // segmented button does not wrap. Better a row you can push than
-          // labels shaved to three letters each.
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('Tracks')),
-                ButtonSegment(value: 1, label: Text('Albums')),
-                ButtonSegment(value: 2, label: Text('Artists')),
-                ButtonSegment(value: 3, label: Text('Liked')),
-                ButtonSegment(value: 4, label: Text('Playlists')),
-              ],
-              selected: {_segment},
-              onSelectionChanged: (s) => setState(() => _segment = s.first),
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                textStyle: WidgetStatePropertyAll(TypeScale.body),
-              ),
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Tracks')),
+              ButtonSegment(value: 1, label: Text('Albums')),
+              ButtonSegment(value: 2, label: Text('Artists')),
+              ButtonSegment(value: 3, label: Text('Playlists')),
+            ],
+            selected: {_segment},
+            onSelectionChanged: (s) => setState(() => _segment = s.first),
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStatePropertyAll(TypeScale.body),
             ),
           ),
         ),
@@ -193,29 +186,49 @@ class _LibraryViewState extends State<LibraryView> {
   /// library, and this is a different list that happens to live behind the
   /// same control. Resolved against the manifest so a like whose track has
   /// left the library is simply not shown rather than rendered as a blank.
-  Widget _buildLiked() {
-    final likes = LikesScope.maybeOf(context);
-    if (likes == null || likes.count == 0) {
-      return const EmptyState(
-        icon: Icons.favorite_border_rounded,
-        title: 'Nothing liked yet',
-        body: 'Tap the heart on a track, in the player, or from its menu.',
-      );
-    }
-    final bySha = {for (final t in widget.tracks) t.sha: t};
-    final tracks = [
-      for (final sha in likes.shas)
-        if (bySha[sha] case final ManifestTrack t) t,
-    ];
-    if (tracks.isEmpty) {
-      return const EmptyState(
-        icon: Icons.favorite_border_rounded,
-        title: 'Liked tracks are not in the library',
-        body: 'Everything you liked has since left the library.',
-      );
-    }
-    return _trackList(tracks);
+  Widget _likedPage() {
+    return Scaffold(
+      backgroundColor: Tones.surface,
+      appBar: AppBar(
+        backgroundColor: Tones.surface,
+        title: const Text('Liked songs', style: TypeScale.heading),
+      ),
+      body: ListenableBuilder(
+        listenable: LikesScope.maybeOf(context) ?? _never,
+        builder: (context, _) {
+          final likes = LikesScope.maybeOf(context);
+          if (likes == null || likes.count == 0) {
+            return const EmptyState(
+              icon: Icons.favorite_border_rounded,
+              title: 'Nothing liked yet',
+              body:
+                  'Tap the heart in the player, or open the menu on any '
+                  'track.',
+            );
+          }
+          final bySha = {for (final t in widget.tracks) t.sha: t};
+          final tracks = [
+            for (final sha in likes.shas)
+              if (bySha[sha] case final ManifestTrack t) t,
+          ];
+          if (tracks.isEmpty) {
+            return const EmptyState(
+              icon: Icons.favorite_border_rounded,
+              title: 'Liked tracks are not in the library',
+              body:
+                  'Everything you liked has since left the library. The '
+                  'likes are kept in case it comes back.',
+            );
+          }
+          return _trackList(tracks);
+        },
+      ),
+    );
   }
+
+  /// A listenable that never fires, for the case where there is no scope to
+  /// listen to. Rebuilding on nothing is better than a nullable listenable.
+  static final _never = ValueNotifier<int>(0);
 
   /// The lists you made, most recently changed first.
   ///
@@ -235,21 +248,41 @@ class _LibraryViewState extends State<LibraryView> {
           // local database, and a spinner that flashes is worse than a beat
           // of empty space.
           if (lists == null) return const SizedBox.shrink();
-          if (lists.isEmpty) {
-            return const EmptyState(
-              icon: Icons.queue_music_rounded,
-              title: 'No playlists yet',
-              body:
-                  'Open the menu on any track and choose "Add to '
-                  'playlist" to make your first one.',
-            );
-          }
+          // Liked songs sits at the top and is always there, empty or not.
+          // It is a playlist in everything but how it is filled -- the app
+          // keeps the order, you supply the members -- and giving it a
+          // segment of its own cost a tab for something that belongs in
+          // this list. There is no empty state here any more, because this
+          // screen is never empty.
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: Space.sm),
-            itemCount: lists.length,
+            itemCount: lists.length + 1,
             separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final p = lists[i];
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                final n = LikesScope.maybeOf(context)?.count ?? 0;
+                return ListTile(
+                  leading: const Icon(
+                    Icons.favorite_rounded,
+                    color: Tones.primary,
+                  ),
+                  title: const Text('Liked songs', style: TypeScale.title),
+                  subtitle: Text(
+                    n == 0
+                        ? 'Nothing liked yet'
+                        : '$n ${n == 1 ? 'track' : 'tracks'}',
+                    style: TypeScale.caption,
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Tones.textMuted,
+                  ),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute<void>(builder: (_) => _likedPage())),
+                );
+              }
+              final p = lists[index - 1];
               return ListTile(
                 leading: const Icon(
                   Icons.queue_music_rounded,
@@ -287,8 +320,7 @@ class _LibraryViewState extends State<LibraryView> {
   Widget _buildBody(List<ManifestTrack> filtered) {
     // Ahead of the empty check, because "nothing matched the filter" is the
     // wrong thing to say about a list the filter does not apply to.
-    if (_segment == 3) return _buildLiked();
-    if (_segment == 4) return _buildPlaylists();
+    if (_segment == 3) return _buildPlaylists();
     if (filtered.isEmpty) {
       // Two different situations were sharing one sentence. "Your library is
       // empty or your filter matched nothing" tells someone who typed three
