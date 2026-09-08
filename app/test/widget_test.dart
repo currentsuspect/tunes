@@ -462,12 +462,14 @@ void main() {
     Reachability? reachability,
   }) async {
     history = PlayHistory(db, player);
+    // Un-enrolled, which is what these tests want: the library UI must render
+    // from the local store without any credential.
+    final auth = TunesAuth(post: client.postJson, store: MemoryTokenStore());
     await tester.pumpWidget(
       TunesApp(
         client: client,
-        grants: MediaGrants(
-          auth: TunesAuth(post: client.postJson, store: MemoryTokenStore()),
-        ),
+        grants: MediaGrants(auth: auth),
+        auth: auth,
         player: player,
         store: store,
         reachability: reachability ?? Reachability(),

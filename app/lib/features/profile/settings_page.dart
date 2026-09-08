@@ -8,6 +8,7 @@ import '../../core/data/play_history.dart';
 import '../../core/data/storage_usage.dart';
 import '../../core/platform/diag_log.dart';
 import '../../core/data/avatar.dart';
+import '../../core/auth/tunes_auth.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/profile_avatar.dart';
@@ -21,6 +22,7 @@ class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
     required this.settings,
+    required this.auth,
     required this.player,
     required this.endpoint,
     required this.offline,
@@ -37,6 +39,10 @@ class SettingsPage extends StatefulWidget {
   });
 
   final SettingsStore settings;
+
+  /// Device identity. Enrolment is the only way the app gets a credential;
+  /// nothing usable ships inside the APK.
+  final TunesAuth auth;
   final TunePlayer player;
   final String endpoint;
   final bool offline;
@@ -71,6 +77,85 @@ class _SettingsPageState extends State<SettingsPage> {
   /// everyone else would be clutter that also invites damage.
   int _versionTaps = 0;
   bool _developer = false;
+
+  /// Device id once enrolled, null when this device has no credential.
+  /// Read once on open rather than watched: enrolment changes only when
+  /// someone on this screen changes it.
+  String? _deviceId;
+  bool _enrolling = false;
+
+  Future<void> _loadEnrolment() async {
+    final id = await widget.auth.deviceId();
+    if (mounted) setState(() => _deviceId = id);
+  }
+
+  /// Redeems an invite code for this device.
+  ///
+  /// The three outcomes are reported differently on purpose. "Invalid" and
+  /// "could not reach the server" are the same HTTP nothing from the user's
+  /// side, and collapsing them is how you get someone retyping a perfectly
+  /// good code at a server that is simply down.
+  Future<void> _enrolDevice() async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Tones.surface,
+        title: const Text('Invite code', style: TypeScale.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Paste the code you were sent. It works once, on this device.',
+              style: TypeScale.caption,
+            ),
+            const SizedBox(height: Space.sm),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              style: TypeScale.body,
+              onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Enrol'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (code == null || code.trim().isEmpty) return;
+
+    setState(() => _enrolling = true);
+    final label = widget.settings.displayName.trim().isEmpty
+        ? 'Android device'
+        : "${widget.settings.displayName.trim()}'s phone";
+    final result = await widget.auth.enrol(code.trim(), label);
+    if (!mounted) return;
+    setState(() => _enrolling = false);
+    await _loadEnrolment();
+    if (!mounted) return;
+
+    final message = switch (result) {
+      AuthOk() => 'This device is enrolled',
+      AuthNeedsEnrolment() =>
+        'That code was not accepted. It may be used or expired.',
+      AuthUnavailable() => 'Could not reach the server. The code was not used.',
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+    if (result is AuthOk) widget.onResync();
+  }
 
   /// Asks for the address of a tunesd, and hands it upward.
   ///
@@ -143,6 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _name = TextEditingController(text: widget.settings.displayName);
     _measure();
+    _loadEnrolment();
   }
 
   Future<void> _measure() async {
@@ -212,8 +298,8 @@ class _SettingsPageState extends State<SettingsPage> {
             const Padding(
               padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
               child: Text(
-                'Your name and picture stay on this device. Friends and '
-                'sharing need an account, which does not exist yet.',
+                'Your name and picture stay on this device. Sharing needs '
+                'this device to be enrolled, below.',
                 style: TypeScale.caption,
               ),
             ),
@@ -358,6 +444,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 widget.onResync();
                 Navigator.of(context).maybePop();
               },
+            ),
+
+            const _SectionLabel('This device'),
+            _Row(
+              label: 'Enrolment',
+              value: _deviceId == null ? 'not enrolled' : 'enrolled',
+            ),
+            _Action(
+              label: _enrolling
+                  ? 'Enrolling...'
+                  : _deviceId == null
+                  ? 'Enter invite code'
+                  : 'Enrol again with a new code',
+              detail: _deviceId == null
+                  ? 'Without this, the server will not serve music to this '
+                        'device. Downloads already on the phone keep playing.'
+                  : 'Replaces the credential on this device. The old one stops '
+                        'working.',
+              onTap: _enrolling ? null : _enrolDevice,
             ),
 
             const _SectionLabel('Library'),
@@ -646,7 +751,10 @@ class _Action extends StatelessWidget {
 
   final String label;
   final String detail;
-  final VoidCallback onTap;
+
+  /// Null disables the row. InkWell already renders that as unresponsive, so
+  /// an action that is mid-flight can say so without a second widget.
+  final VoidCallback? onTap;
   final bool destructive;
 
   @override

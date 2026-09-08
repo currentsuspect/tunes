@@ -228,6 +228,7 @@ Future<void> main() async {
     TunesApp(
       client: client,
       grants: grants,
+      auth: auth,
       player: player,
       store: store,
       reachability: reachability,
@@ -246,6 +247,7 @@ class TunesApp extends StatefulWidget {
     super.key,
     required this.client,
     required this.grants,
+    required this.auth,
     required this.player,
     required this.store,
     required this.reachability,
@@ -261,6 +263,9 @@ class TunesApp extends StatefulWidget {
 
   /// Signed media capabilities, consulted when building artwork URLs.
   final MediaGrants grants;
+
+  /// Device identity, so Settings can offer enrolment.
+  final TunesAuth auth;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
@@ -317,6 +322,7 @@ class _TunesAppState extends State<TunesApp> {
               home: AppShell(
                 client: widget.client,
                 grants: widget.grants,
+                auth: widget.auth,
                 player: widget.player,
                 store: widget.store,
                 reachability: widget.reachability,
@@ -339,6 +345,7 @@ class AppShell extends StatefulWidget {
     super.key,
     required this.client,
     required this.grants,
+    required this.auth,
     required this.player,
     required this.store,
     required this.reachability,
@@ -353,6 +360,9 @@ class AppShell extends StatefulWidget {
 
   /// Signed media capabilities, consulted when building artwork URLs.
   final MediaGrants grants;
+
+  /// Device identity, so Settings can offer enrolment.
+  final TunesAuth auth;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
@@ -842,6 +852,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) => SettingsPage(
           settings: widget.settings,
+          auth: widget.auth,
           player: widget.player,
           endpoint: widget.client.baseUrl,
           offline: widget.reachability.offline,

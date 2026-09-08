@@ -180,6 +180,13 @@ class TunesAuth {
     }
   }
 
+  /// The enrolled device id, or null when this device has no credential.
+  ///
+  /// Reads the store rather than the cached token, so it answers correctly
+  /// before anything has been minted -- which is exactly when the UI needs to
+  /// know whether to offer enrolment.
+  Future<String?> deviceId() => _store.readDeviceId();
+
   /// Forgets the cached access token without touching the refresh token.
   /// Used when the server rejects a token that has not yet expired locally,
   /// which means the clocks disagree.
