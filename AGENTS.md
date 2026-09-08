@@ -40,9 +40,21 @@ simulated). Prototypes live elsewhere.
 - No secrets in the repo: no Telegram session files, no api_id/api_hash, no tokens.
   tunesd's session lives box-side in its config dir, gitignored. The app's endpoint
   address is user-configured at setup, never baked in.
-- The app has no analytics, no ads, no accounts, no cloud, no WAN by default. Its only
-  network endpoint is the user-configured tunesd (SPEC §1.5). Adding any other network
-  destination requires an explicit product decision recorded with Dylan first.
+- The app has no analytics, no ads, and no third-party trackers. **It does have an
+  account and an authenticated service boundary** — product decision recorded
+  2026-09-08 with Dylan and the advisor, superseding the previous "no accounts, no
+  cloud, no WAN" rule. The app now reaches exactly two Tunes-operated destinations:
+  the auth service, and the media origin behind Cloudflare (SPEC §1.5, §2.4). Adding
+  any destination beyond those two still requires an explicit product decision
+  recorded with Dylan first.
+- **No reusable credential distributed with the APK grants access to the Tunes service
+  or media. Every online media authorization is derived from an authenticated device
+  session and expires automatically.** This is the invariant the auth implementation is
+  held against; a design that cannot satisfy it is wrong regardless of how convenient
+  it is. Possession of the APK is not authorization.
+- Offline playback is never gated on authentication. A downloaded track plays with no
+  network and no valid token, by construction — `trackUriFor` resolves a local path
+  before any URL is built. Treat this as an invariant, not an accident.
 - No channel content, message IDs, or filenames in logs or crash output. Log *where*
   something failed, never *what* it was.
 - Domain logic (identity, quality, manifest application, dedupe) stays pure Dart in the

@@ -63,10 +63,21 @@ The user should never think: *"Wait for the app."*
 
 ## 1.5 Private by default
 
+Amended 2026-09-08. The privacy posture is unchanged; what changed is that "private"
+is now enforced by authentication rather than by being hard to reach.
+
 - The Telegram session lives **on the box** (`tunesd`), never in the app.
-- The app talks only to a user-configured endpoint (LAN by default).
-- No advertising SDKs. No analytics. No third-party trackers.
-- No WAN access by the app unless the user explicitly configures a remote endpoint.
+- No advertising SDKs. No analytics. No third-party trackers. Unchanged.
+- The app talks to two Tunes-operated destinations and no others: the auth service,
+  and the media origin behind Cloudflare (§2.4).
+- **Accounts exist to make access revocable, not to build a profile.** An account is an
+  identity and a list of devices. It is not behavioural data, and there is nothing to
+  sell in it.
+- **Offline playback is never gated on authentication.** A downloaded track plays with
+  no network and no valid token.
+- Obscurity is not part of the security model. A hostname is published in Certificate
+  Transparency logs the moment a certificate is issued for it, so "nobody knows the
+  address" protects nothing and must never be relied on.
 
 ## 1.6 One user, one source of truth
 
@@ -147,13 +158,21 @@ Mirrors Faye's stack patterns: drift/sqlite, Riverpod, strongly typed domain mod
 The app knows these endpoints and nothing else:
 
 ```text
-GET /manifest      library state (checksummed, versioned)
-GET /art/*         cover bytes
-GET /track/*       track bytes — stream or download, original bytes only
-POST /download     mark a track for device download
+GET    /manifest        library state (checksummed, versioned)
+GET    /art/*           cover bytes
+GET    /track/*         track bytes — stream or download, original bytes only
+POST   /download        mark a track for device download
+
+POST   /auth/redeem     invite code → device enrolment + refresh token
+POST   /auth/token      refresh token → short-lived access token
+DELETE /auth/device/*   revoke one device
 ```
 
 Any new capability requires a new endpoint, which requires a spec change. The app must never grow into another backend: no crawling, no tagging, no Telegram knowledge inside the app process. This boundary is what keeps the phone fast, thin, and ban-safe.
+
+**Authentication is layered on top of this contract, not woven into it** (added 2026-09-08). The API routes carry a bearer access token. Media and artwork are fetched with a short-lived signed URL instead, because those bytes are fetched by mpv and by Android's notification loader — neither of which is the app's own HTTP client, and the notification loader cannot set headers at all.
+
+The validating edge must never learn where the bytes came from. Its contract stops at *authenticate → authorize → mint a signed media URL → hand off to a media origin*. Whether that origin served a local object, an R2 bucket, or a fresh Telegram fetch is not its concern — that opacity is what lets the storage layer change underneath without touching auth.
 
 ---
 
@@ -375,7 +394,8 @@ Branches: `main` (always releasable) + `feat/*`, `fix/*`, `docs/*`, `chore/*`. C
 - Gapless playback across contiguous tracks; R128 keeps albums level; no file rewritten for loudness — ever
 - Launch targets **measured, not assumed**: cold start < 1500 ms to first usable frame, warm start < 500 ms to usable library, search < 100 ms p95 — recorded on the M3 E2E phone, box on and box off
 - Library fully usable with the box off (downloaded content)
-- No analytics, no ads, no accounts, no cloud; the app talks to exactly one endpoint surface (the ~4 tunesd endpoints, LAN default) and never to Telegram
+- No analytics, no ads, no third-party trackers; the app talks to exactly two Tunes-operated destinations (auth service, media origin behind Cloudflare — §2.4) and never to Telegram
+- Every device that can reach the library is one someone deliberately enrolled, and revoking it takes effect without touching any other device
 - All quality-model and identity logic has deterministic unit tests
 - CI green on every PR; `main` always produces a releasable build; `deploy.sh` installs on the phone
 - Migrations are typed and tested; library data survives upgrades
@@ -389,7 +409,10 @@ The standard is: **"Would Dylan keep this on his phone and open it before anythi
 
 # 13. Non-goals (until they earn their way in)
 
-- No public publishing, no store listing, no "share to friends"
+- No public publishing, no store listing, no open "share by link". Sharing with a
+  *named, enrolled* person is in scope as of 2026-09-08 — that is what the device
+  registry and revocation exist for. What stays out of scope is anyone reaching the
+  library without an account someone deliberately created for them.
 - **No direct phone↔Telegram connection, ever** — "live pull" is always via tunesd; the phone cannot reach Telegram by construction
 - No recommendation engine, no charts, no "because you listened to"
 - No podcasting, no video, no lyrics-first features
