@@ -42,6 +42,20 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // `--target-platform android-arm64` only bounds what Flutter itself
+            // compiles -- libflutter.so and libapp.so. Plugin libraries arrive
+            // prebuilt inside AARs and are packaged for every ABI regardless, so
+            // mpv, sqlite3 and dartjni were still shipping x86_64 and
+            // armeabi-v7a copies: 16.5 MB that no device this installs on can
+            // load. Gradle has to be told separately, and this is the only thing
+            // that drops them.
+            //
+            // Release only, on purpose. A debug build keeps every ABI so it can
+            // still be run on an x86_64 emulator.
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
         }
     }
 }
