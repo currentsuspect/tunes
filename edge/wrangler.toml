@@ -7,6 +7,14 @@ compatibility_date = "2026-09-01"
 # no secrets in the repo). Two separate keys so either can be rotated without
 # invalidating the other.
 
+# The Worker owns the whole hostname, not just /auth. Requests hit it before
+# origin, so an unsigned media request is refused without the tunnel ever
+# being consulted -- which is what lets the origin stay unreachable while the
+# edge is live.
+routes = [
+  { pattern = "tunes.aestra.studio/*", zone_name = "aestra.studio" },
+]
+
 [vars]
 ACCESS_TTL_SEC = "600"
 

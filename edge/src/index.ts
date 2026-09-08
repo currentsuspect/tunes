@@ -22,7 +22,7 @@ import {
   signAccessToken,
   verifyAccessToken,
 } from "./crypto.js";
-import { MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
+import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
 import {
   accountById,
@@ -41,6 +41,11 @@ export interface Env {
   /** HMAC key for media URLs. Separate from ACCESS_SECRET so one can be rotated alone. */
   MEDIA_SECRET: string;
   ACCESS_TTL_SEC?: string;
+  /// Overrides MEDIA_TTL_SEC. Exists so the expiry path can be exercised
+  /// against the real edge without waiting four hours -- deploy with a small
+  /// value, prove a grant dies, put it back. Capped, so a bad value cannot
+  /// mint a permanent capability.
+  MEDIA_TTL_SEC?: string;
 }
 
 const DEFAULT_ACCESS_TTL_SEC = 600;
@@ -186,12 +191,17 @@ export default {
       const device = await deviceById(env.DB, claims.did);
       if (!device || device.status !== "active") return reject();
 
-      const exp = nowSec + MEDIA_TTL_SEC;
+      const configured = Number(env.MEDIA_TTL_SEC ?? MEDIA_TTL_SEC);
+      const ttl =
+        Number.isSafeInteger(configured) && configured > 0
+          ? Math.min(configured, MEDIA_TTL_MAX_SEC)
+          : MEDIA_TTL_SEC;
+      const exp = nowSec + ttl;
       const grants: Record<string, string> = {};
       for (const p of paths) {
         grants[p] = await signMediaUrl(p, claims.did, exp, env.MEDIA_SECRET);
       }
-      return json({ grants, expires_in: MEDIA_TTL_SEC });
+      return json({ grants, expires_in: ttl });
     }
 
     // ---- DELETE /auth/device/:id ------------------------------------------
