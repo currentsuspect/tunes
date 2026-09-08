@@ -52,6 +52,19 @@ simulated). Prototypes live elsewhere.
   session and expires automatically.** This is the invariant the auth implementation is
   held against; a design that cannot satisfy it is wrong regardless of how convenient
   it is. Possession of the APK is not authorization.
+- The credential hierarchy, and where each one lives. Do not move any of them
+  downward: the refresh token in particular must never land in SharedPreferences,
+  the drift database, or a plain file.
+
+  | Credential | Lifetime | Stored |
+  | --- | --- | --- |
+  | Refresh token | long, revocable server-side | Android keystore (`flutter_secure_storage`) |
+  | Access token | ~10 min | memory only |
+  | Media grant | ~4 h, one object | not stored |
+
+  Media grants are **single-object capabilities, not short-lived credentials**. Four
+  hours is longer than the access token on purpose — see SPEC §2.4 for why the
+  client's eager playlist construction forces it, and what bounds the damage instead.
 - Offline playback is never gated on authentication. A downloaded track plays with no
   network and no valid token, by construction — `trackUriFor` resolves a local path
   before any URL is built. Treat this as an invariant, not an accident.

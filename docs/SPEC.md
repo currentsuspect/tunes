@@ -170,7 +170,13 @@ DELETE /auth/device/*   revoke one device
 
 Any new capability requires a new endpoint, which requires a spec change. The app must never grow into another backend: no crawling, no tagging, no Telegram knowledge inside the app process. This boundary is what keeps the phone fast, thin, and ban-safe.
 
-**Authentication is layered on top of this contract, not woven into it** (added 2026-09-08). The API routes carry a bearer access token. Media and artwork are fetched with a short-lived signed URL instead, because those bytes are fetched by mpv and by Android's notification loader — neither of which is the app's own HTTP client, and the notification loader cannot set headers at all.
+**Authentication is layered on top of this contract, not woven into it** (added 2026-09-08). The API routes carry a bearer access token. Media and artwork are fetched with a signed URL instead, because those bytes are fetched by mpv and by Android's notification loader — neither of which is the app's own HTTP client, and the notification loader cannot set headers at all.
+
+**Media grants are single-object capabilities, and are not "short-lived" in the sense an access token is.** Their TTL must accommodate the client's eager playlist construction: `player.open(Playlist(...))` builds a `Media` for the whole queue at once and mpv resolves each URL only when playback reaches that item, so a grant minted at queue-open may not be fetched for hours. The TTL is therefore longer than the access-token TTL by design — currently **4 hours against 10 minutes** — and that gap is a deliberate compatibility tradeoff, not an oversight.
+
+What bounds the damage is the *scope*, not the lifetime: one grant fetches one object, cannot be exchanged for a token, and reveals nothing about the library. A revoked device stops being *issued* grants immediately, because minting reads the database; only already-issued grants outlive a revocation.
+
+The better long-term answer is a lazy grant obtained close to playback, which requires `trackUriFor` to become asynchronous and the player's playlist-index contract to change (`playAt` calls `player.jump(index)` against the queue index, and repeat-all loops mpv's own playlist). That is a player architecture improvement, not part of this migration.
 
 The validating edge must never learn where the bytes came from. Its contract stops at *authenticate → authorize → mint a signed media URL → hand off to a media origin*. Whether that origin served a local object, an R2 bucket, or a fresh Telegram fetch is not its concern — that opacity is what lets the storage layer change underneath without touching auth.
 

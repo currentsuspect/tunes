@@ -45,6 +45,12 @@ export interface Env {
 
 const DEFAULT_ACCESS_TTL_SEC = 600;
 
+/** Ceiling on one batch mint. Longer than any real queue, short enough to bound work. */
+const MAX_GRANTS_PER_REQUEST = 500;
+
+/** The only shape that may ever be signed. Mirrors tunesd's own route matching. */
+const MEDIA_PATH = /^\/(track|art)\/[0-9a-f]{64}$/;
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -146,33 +152,46 @@ export default {
     }
 
     // ---- POST /auth/media/grant -------------------------------------------
-    // Access token -> a signed URL for one object. Media bytes are fetched by
-    // mpv and by Android's notification loader, neither of which is the app's
-    // HTTP client, so the grant travels in the URL rather than a header.
+    // Access token -> signed URLs. Media bytes are fetched by mpv and by
+    // Android's notification loader, neither of which is the app's HTTP
+    // client, so the grant travels in the URL rather than a header.
+    //
+    // Batched because the player opens a whole playlist at once. One request
+    // per queue entry would put dozens of round trips in front of the first
+    // note.
     if (url.pathname === "/auth/media/grant" && req.method === "POST") {
       const claims = await bearer(req, env, nowSec);
       if (!claims) return reject();
 
       const body = await readJson(req);
-      const path = body?.["path"];
-      // Only ever sign our own media paths, and never a path containing a
-      // traversal or a query of its own -- a signature over an attacker-chosen
-      // string is a signing oracle.
-      if (typeof path !== "string" || !/^\/(track|art)\/[0-9a-f]{64}$/.test(path)) {
-        return reject(400);
+      const raw = body?.["paths"];
+      if (!Array.isArray(raw) || raw.length === 0) return reject(400);
+      // Bounded so one request cannot ask for unlimited signing work. A queue
+      // longer than this is not a real queue.
+      if (raw.length > MAX_GRANTS_PER_REQUEST) return reject(400);
+
+      // Only ever sign our own media paths. A signature over an
+      // attacker-chosen string is a signing oracle, so the shape is checked
+      // before anything is signed, and a single bad entry fails the request
+      // rather than being skipped -- silently returning fewer grants than
+      // asked for would surface as tracks that mysteriously do not play.
+      const paths: string[] = [];
+      for (const p of raw) {
+        if (typeof p !== "string" || !MEDIA_PATH.test(p)) return reject(400);
+        paths.push(p);
       }
 
-      // A revoked device must stop working before its access token expires,
-      // so this one endpoint pays for a database read. The media edge itself
-      // stays stateless.
+      // A revoked device must stop being issued grants immediately, so this
+      // endpoint pays for a database read. The media edge itself never does.
       const device = await deviceById(env.DB, claims.did);
       if (!device || device.status !== "active") return reject();
 
       const exp = nowSec + MEDIA_TTL_SEC;
-      return json({
-        url: await signMediaUrl(path, claims.did, exp, env.MEDIA_SECRET),
-        expires_in: MEDIA_TTL_SEC,
-      });
+      const grants: Record<string, string> = {};
+      for (const p of paths) {
+        grants[p] = await signMediaUrl(p, claims.did, exp, env.MEDIA_SECRET);
+      }
+      return json({ grants, expires_in: MEDIA_TTL_SEC });
     }
 
     // ---- DELETE /auth/device/:id ------------------------------------------

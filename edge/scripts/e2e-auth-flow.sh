@@ -66,17 +66,17 @@ pass "access token minted from refresh token"
 
 SHA=$(printf 'a%.0s' $(seq 1 64))
 GRANT=$(curl -s -X POST "$BASE/auth/media/grant" -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d "{\"path\":\"/track/$SHA\"}")
-echo "$GRANT" | grep -q '"url"' || fail "no media grant: $GRANT"
+  -H 'content-type: application/json' -d "{\"paths\":[\"/track/$SHA\"]}")
+echo "$GRANT" | grep -q '"grants"' || fail "no media grant: $GRANT"
 pass "media grant minted"
 
 TRAVERSE=$(curl -s -X POST "$BASE/auth/media/grant" -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d '{"path":"/../../etc/passwd"}')
+  -H 'content-type: application/json' -d '{"paths":["/../../etc/passwd"]}')
 echo "$TRAVERSE" | grep -q '"error"' || fail "signed an arbitrary path: $TRAVERSE"
 pass "refuses to sign a path outside /track and /art"
 
 NOAUTH=$(curl -s -X POST "$BASE/auth/media/grant" -H 'content-type: application/json' \
-  -d "{\"path\":\"/track/$SHA\"}")
+  -d "{\"paths\":[\"/track/$SHA\"]}")
 echo "$NOAUTH" | grep -q '"error"' || fail "granted media without a token: $NOAUTH"
 pass "media grant requires a bearer token"
 
@@ -90,7 +90,7 @@ echo "$AFTER" | grep -q '"error"' || fail "revoked device still gets tokens: $AF
 pass "revoked device can no longer mint access tokens"
 
 STALE=$(curl -s -X POST "$BASE/auth/media/grant" -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d "{\"path\":\"/track/$SHA\"}")
+  -H 'content-type: application/json' -d "{\"paths\":[\"/track/$SHA\"]}")
 echo "$STALE" | grep -q '"error"' || fail "revoked device still granted media on an unexpired token: $STALE"
 pass "revoked device is refused media even with an unexpired access token"
 

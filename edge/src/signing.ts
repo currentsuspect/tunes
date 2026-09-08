@@ -18,8 +18,43 @@
 
 import { hmacHex, timingSafeEqual } from "./crypto.js";
 
-/** How long a minted media URL stays valid. */
-export const MEDIA_TTL_SEC = 300;
+/**
+ * How long a minted media URL stays valid.
+ *
+ * This was 300s in the design doc, and 300s cannot work. Reading
+ * `tune_player.dart` settles it: `player.open(Playlist(...))` builds a `Media`
+ * for the ENTIRE queue up front, and mpv resolves each URL only when playback
+ * reaches that item. A grant minted at queue-open for track 20 is fetched an
+ * hour later. Five minutes expires everything past the first track or two.
+ *
+ * The alternatives were:
+ *
+ *   a) Re-mint and re-open the playlist near expiry. Re-opening is an existing
+ *      code path (playQueueAt seeks after open), but doing it mid-playback
+ *      every few minutes puts an audible gap in every listening session.
+ *   b) Open a short window and append as playback advances. Keeps the short
+ *      TTL, but breaks gapless across the window edge, and repeat/shuffle,
+ *      queue reorder and the QueueSheet all read the full `_queue`.
+ *   c) Mint for as long as a listening session plausibly runs.
+ *
+ * (c), deliberately, with the cost stated: an intercepted URL grants ONE
+ * track, to nobody in particular, for up to this long. It does not grant the
+ * library, and it cannot be exchanged for a token.
+ *
+ * What this does NOT weaken: a revoked device stops being issued new grants
+ * immediately, because minting reads the database. What it does weaken is how
+ * long already-issued grants outlive a revocation. That window is this value.
+ */
+export const MEDIA_TTL_SEC = 14_400; // 4 hours
+
+/**
+ * Ceiling on a client-requested TTL.
+ *
+ * The mint endpoint accepts no TTL from the client today, but if it ever does,
+ * an unbounded value is a permanent capability. Kept here so the cap lives
+ * beside the default rather than being invented at the call site.
+ */
+export const MEDIA_TTL_MAX_SEC = 86_400;
 
 /**
  * The exact string that gets signed.
