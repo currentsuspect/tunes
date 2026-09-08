@@ -82,7 +82,10 @@ void main() {
   test('artwork is fetched from the server in use, not the one at launch', () {
     var server = 'http://first:4780';
     final player = _FakePlayer();
-    final handler = TuneAudioHandler(player, artBase: () => server);
+    final handler = TuneAudioHandler(
+      player,
+      artUriFor: (sha) => '$server/art/$sha',
+    );
 
     player.setCurrent(_track());
     expect(

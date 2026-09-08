@@ -22,6 +22,9 @@ import 'core/data/manifest_store.dart';
 import 'core/data/play_history.dart';
 import 'core/data/playlist_store.dart';
 import 'core/data/queue_store.dart';
+import 'core/auth/media_grants.dart';
+import 'core/auth/secure_token_store.dart';
+import 'core/auth/tunes_auth.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
 import 'core/net/tunes_client.dart';
@@ -101,6 +104,11 @@ Future<void> main() async {
   final client = TunesClient(settings.serverUrl ?? _tunesdUrl, support);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
+  // Identity, and the signed capabilities it mints. The refresh token lives in
+  // the keystore; access tokens are memory-only; media grants are cached until
+  // they expire. Nothing here ships inside the APK.
+  final auth = TunesAuth(post: client.postJson, store: SecureTokenStore());
+  final grants = MediaGrants(auth: auth);
   final player = MediaKitTunePlayer(
     trackUriFor: (track) {
       final path = store.pathFor(track.sha);
@@ -110,8 +118,20 @@ Future<void> main() async {
       // a full library whose every track streamed from an address that was
       // only reachable on the original network: the app looked completely
       // healthy and played nothing.
-      return '${client.baseUrl}/track/${track.sha}';
+      // Signed capability when we hold one. Falling back to the bare URL is
+      // deliberate: the edge answers it with a 403, which is a diagnosable
+      // failure, where returning nothing would be a track that silently never
+      // plays.
+      final signed = grants.urlFor('/track/${track.sha}');
+      return '${client.baseUrl}${signed ?? '/track/${track.sha}'}';
     },
+    // Mint for the whole queue in one round trip before it opens. Downloaded
+    // tracks are skipped: they resolve to a local path and never touch the
+    // network, so signing them would be pure latency.
+    prepareQueue: (tracks) => grants.prime([
+      for (final t in tracks)
+        if (store.pathFor(t.sha) == null) '/track/${t.sha}',
+    ]),
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
       // QueueSheet reflects what's playing, and the queue survives
@@ -130,7 +150,12 @@ Future<void> main() async {
           player,
           // A closure, so notification artwork follows the server too rather
           // than being pinned to whatever it was at launch.
-          artBase: () => client.baseUrl,
+          // A closure, so notification artwork follows both the server and
+          // the current set of grants rather than being pinned at startup.
+          artUriFor: (sha) {
+            final signed = grants.urlFor('/art/$sha');
+            return '${client.baseUrl}${signed ?? '/art/$sha'}';
+          },
           stopOnTaskRemoved: () => settings.stopOnClose,
         ),
         config: const AudioServiceConfig(
@@ -202,6 +227,7 @@ Future<void> main() async {
   runApp(
     TunesApp(
       client: client,
+      grants: grants,
       player: player,
       store: store,
       reachability: reachability,
@@ -219,6 +245,7 @@ class TunesApp extends StatefulWidget {
   const TunesApp({
     super.key,
     required this.client,
+    required this.grants,
     required this.player,
     required this.store,
     required this.reachability,
@@ -231,6 +258,9 @@ class TunesApp extends StatefulWidget {
   });
 
   final TunesClient client;
+
+  /// Signed media capabilities, consulted when building artwork URLs.
+  final MediaGrants grants;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
@@ -286,6 +316,7 @@ class _TunesAppState extends State<TunesApp> {
               theme: buildTunesTheme(mq),
               home: AppShell(
                 client: widget.client,
+                grants: widget.grants,
                 player: widget.player,
                 store: widget.store,
                 reachability: widget.reachability,
@@ -307,6 +338,7 @@ class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.client,
+    required this.grants,
     required this.player,
     required this.store,
     required this.reachability,
@@ -318,6 +350,9 @@ class AppShell extends StatefulWidget {
   });
 
   final TunesClient client;
+
+  /// Signed media capabilities, consulted when building artwork URLs.
+  final MediaGrants grants;
   final TunePlayer player;
   final DownloadStore store;
   final Reachability reachability;
@@ -664,6 +699,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           // The first load happens before the manifest exists, so recents
           // cannot resolve their tracks until now.
           unawaited(_onHistoryChanged());
+          // Artwork is fetched all over the UI and by Android's notification
+          // loader, none of which can await a mint. One batch here covers the
+          // whole library -- there are far fewer distinct covers than tracks,
+          // since an album shares one -- and lookups afterwards are synchronous.
+          unawaited(_primeArtGrants(fresh));
           synced = true;
         }
       } else if (fetchError != null && mounted) {
@@ -680,6 +720,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // on it. Only refreshed after a real sync, since the answer changes only
     // when what we hold changes.
     if (mounted && synced) unawaited(_loadMissing());
+  }
+
+  /// Mints artwork grants for everything the library can show.
+  ///
+  /// Not awaited by the sync: a cover that arrives a moment late shows a
+  /// placeholder and then resolves, whereas blocking the library on it would
+  /// trade a visible screen for a spinner.
+  Future<void> _primeArtGrants(TunesManifest manifest) async {
+    final shas = <String>{};
+    for (final t in manifest.tracks) {
+      final sha = t.artSha;
+      if (sha != null && sha.isNotEmpty) shas.add('/art/$sha');
+    }
+    for (final r in manifest.releases) {
+      final sha = r.artSha;
+      if (sha != null && sha.isNotEmpty) shas.add('/art/$sha');
+    }
+    if (shas.isEmpty) return;
+    try {
+      await widget.grants.prime(shas);
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Artwork is decoration. A failure here must never break the library.
+    }
   }
 
   Future<void> _loadMissing() async {
@@ -766,7 +830,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _downloads.enqueue(track.sha);
   }
 
-  String _artUrlFor(String sha) => '${widget.client.baseUrl}/art/$sha';
+  String _artUrlFor(String sha) {
+    final signed = widget.grants.urlFor('/art/$sha');
+    return '${widget.client.baseUrl}${signed ?? '/art/$sha'}';
+  }
 
   /// The header avatar now goes straight to settings. The old sheet was a
   /// read-only diagnostics panel, and its contents live under Library there.

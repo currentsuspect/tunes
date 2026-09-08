@@ -262,6 +262,44 @@ class TunesClient {
   /// way to splice two builds together.
   String get updateApkUrl => '$baseUrl/update/apk';
 
+  /// POSTs JSON to an auth endpoint and returns the status alongside the
+  /// decoded body.
+  ///
+  /// Lives here rather than in the auth client so there is exactly one place
+  /// that knows where the server is. [baseUrl] is read at call time, so
+  /// changing the server in Settings redirects authentication too -- pinning
+  /// it at construction is the bug that made a configured server produce a
+  /// library that streamed from an unreachable address.
+  ///
+  /// A non-JSON body is reported as an empty map with the real status, so a
+  /// proxy error page cannot be mistaken for a valid response.
+  Future<({int status, Map<String, dynamic> body})> postJson(
+    String path,
+    Map<String, dynamic> payload, {
+    String? bearer,
+  }) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final req = await client.postUrl(Uri.parse('$baseUrl$path'));
+      req.headers.set('content-type', 'application/json; charset=utf-8');
+      if (bearer != null) req.headers.set('authorization', 'Bearer $bearer');
+      req.add(utf8.encode(jsonEncode(payload)));
+      final res = await req.close().timeout(_timeout);
+      final text = await res.transform(utf8.decoder).join();
+      Map<String, dynamic> body;
+      try {
+        final decoded = jsonDecode(text);
+        body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+      } catch (_) {
+        body = <String, dynamic>{};
+      }
+      return (status: res.statusCode, body: body);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {

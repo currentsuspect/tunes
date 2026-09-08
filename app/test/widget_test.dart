@@ -22,6 +22,9 @@ import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
 import 'package:tunes/features/player/mini_player_bar.dart';
+import 'package:tunes/core/auth/media_grants.dart';
+import 'package:tunes/core/auth/token_store.dart';
+import 'package:tunes/core/auth/tunes_auth.dart';
 import 'package:tunes/main.dart';
 
 /// Test-only QueueStore that persists to the same drift database
@@ -94,6 +97,16 @@ class _FakeClient implements TunesClient {
     this.onChanges,
     this.onMissing,
   });
+
+  /// Unauthenticated by default. These tests exercise the library UI, not
+  /// enrolment, so every auth call is refused and the app falls back to
+  /// unsigned URLs -- which is what an un-enrolled device does for real.
+  @override
+  Future<({int status, Map<String, dynamic> body})> postJson(
+    String path,
+    Map<String, dynamic> payload, {
+    String? bearer,
+  }) async => (status: 401, body: <String, dynamic>{});
 
   @override
   Future<ChangesResponse> fetchChanges(DateTime since) async {
@@ -452,6 +465,9 @@ void main() {
     await tester.pumpWidget(
       TunesApp(
         client: client,
+        grants: MediaGrants(
+          auth: TunesAuth(post: client.postJson, store: MemoryTokenStore()),
+        ),
         player: player,
         store: store,
         reachability: reachability ?? Reachability(),

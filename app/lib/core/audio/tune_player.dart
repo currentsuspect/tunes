@@ -50,9 +50,28 @@ abstract class TunePlayer extends ChangeNotifier {
 }
 
 class MediaKitTunePlayer extends TunePlayer {
-  MediaKitTunePlayer({required this.trackUriFor, this.onQueuePlayed});
+  MediaKitTunePlayer({
+    required this.trackUriFor,
+    this.prepareQueue,
+    this.onQueuePlayed,
+  });
 
   final String Function(ManifestTrack track) trackUriFor;
+
+  /// Awaited before a queue is opened, so [trackUriFor] can answer
+  /// synchronously afterwards.
+  ///
+  /// Media bytes need a signed capability per object, and minting one is a
+  /// network call -- but `player.open(Playlist(...))` needs a URL for every
+  /// entry at once, and `trackUriFor` is called inside that map. Rather than
+  /// make the whole call chain async, the async part happens here, once, for
+  /// the whole queue.
+  ///
+  /// Failure is deliberately not fatal: if grants cannot be minted the queue
+  /// still opens, with unsigned URLs that the edge will refuse. A visible 403
+  /// beats a queue that silently refuses to start.
+  Future<void> Function(List<ManifestTrack> tracks)? prepareQueue;
+
   Future<void> Function()? onFirstPlay;
 
   /// Optional side-effect hook fired after [playQueue] applies the new
@@ -141,15 +160,7 @@ class MediaKitTunePlayer extends TunePlayer {
     final created = _player == null;
     final player = _player ??= Player();
     if (created) unawaited(_applyGapless(player));
-    unawaited(
-      player.open(
-        Playlist(
-          _queue.map((t) => Media(trackUriFor(t))).toList(),
-          index: _index,
-        ),
-        play: false,
-      ),
-    );
+    unawaited(_openQueue(player, _queue, _index, play: false));
     // Seek after opening rather than before: there is nothing to seek within
     // until the media is loaded. If the player is not ready to take it the
     // seek is dropped and playback starts at zero, which is exactly the
@@ -190,17 +201,31 @@ class MediaKitTunePlayer extends TunePlayer {
     final created = _player == null;
     final player = _player ??= Player();
     if (created) unawaited(_applyGapless(player));
-    unawaited(
-      player.open(
-        Playlist(
-          ordered.map((t) => Media(trackUriFor(t))).toList(),
-          index: _index,
-        ),
-        play: true,
-      ),
-    );
+    unawaited(_openQueue(player, ordered, _index, play: true));
     _applyPlaylistMode(player);
     _attachStreams(player);
+  }
+
+  /// Mints whatever the queue needs, then opens it.
+  ///
+  /// The prepare step is awaited but its failure is swallowed: a queue that
+  /// opens with unsigned URLs fails loudly at the edge, which is far easier to
+  /// diagnose than a play button that does nothing.
+  Future<void> _openQueue(
+    Player player,
+    List<ManifestTrack> tracks,
+    int index, {
+    required bool play,
+  }) async {
+    try {
+      await prepareQueue?.call(tracks);
+    } catch (_) {
+      // Fall through and open anyway.
+    }
+    await player.open(
+      Playlist(tracks.map((t) => Media(trackUriFor(t))).toList(), index: index),
+      play: play,
+    );
   }
 
   List<ManifestTrack> _shuffledWithStart(

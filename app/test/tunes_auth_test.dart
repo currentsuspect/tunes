@@ -165,6 +165,7 @@ void main() {
               '/track/aa': '/track/aa?sig=x',
               '/track/bb': '/track/bb?sig=y',
             },
+            'expires_in': 14400,
           },
         ),
       });
@@ -172,13 +173,17 @@ void main() {
 
       final grants = await auth.mediaGrants(['/track/aa', '/track/bb']);
 
-      expect(grants['/track/aa'], '/track/aa?sig=x');
+      expect(grants.grants['/track/aa'], '/track/aa?sig=x');
+      expect(grants.expiresIn, 14400);
       expect(t.bearers.last, 'a-1');
     });
 
     test('an empty request never touches the network', () async {
       final t = FakeTransport({});
-      expect(await build(t, MemoryTokenStore()).mediaGrants([]), isEmpty);
+      expect(
+        (await build(t, MemoryTokenStore()).mediaGrants([])).grants,
+        isEmpty,
+      );
       expect(t.calls, isEmpty);
     });
 
@@ -187,7 +192,7 @@ void main() {
       // the player.
       final t = FakeTransport({});
       expect(
-        await build(t, MemoryTokenStore()).mediaGrants(['/track/aa']),
+        (await build(t, MemoryTokenStore()).mediaGrants(['/track/aa'])).grants,
         isEmpty,
       );
     });

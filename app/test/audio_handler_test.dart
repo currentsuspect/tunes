@@ -169,9 +169,13 @@ void main() {
   });
 
   test('media item carries the track artwork for the notification', () {
-    // A closure now: the artwork host follows the configured server rather
-    // than being fixed when the handler is built.
-    final withArt = TuneAudioHandler(player, artBase: () => 'http://box:4780');
+    // A resolver now: the handler asks for a full artwork URL rather than
+    // building one from a base, so a signed capability can be attached
+    // without the notification loader knowing anything about it.
+    final withArt = TuneAudioHandler(
+      player,
+      artUriFor: (sha) => 'http://box:4780/art/$sha',
+    );
     expect(withArt.mediaItem.valueOrNull?.artUri, isNull);
 
     player.playQueue([_track('Art', artSha: 'a' * 64)], 0);

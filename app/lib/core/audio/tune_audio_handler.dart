@@ -9,7 +9,7 @@ import 'tune_player.dart';
 class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   TuneAudioHandler(
     this.player, {
-    this.artBase,
+    this.artUriFor,
     this.stopOnTaskRemoved,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
@@ -31,9 +31,26 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   /// [stopOnTaskRemoved]. Captured, it kept pointing at whichever server the
   /// app launched against, so changing the server left the notification
   /// loading covers from a machine no longer in reach.
-  final String Function()? artBase;
+  /// Builds a full, signed artwork URL for a sha.
+  final String Function(String sha)? artUriFor;
 
-  String get _artBase => artBase?.call() ?? '';
+  /// Full artwork URI, or null.
+  ///
+  /// Resolved through the same signed-capability path as the rest of the UI:
+  /// Android's notification loader fetches this itself, outside the app's HTTP
+  /// client, which is exactly why the grant has to travel in the URL rather
+  /// than a header.
+  ///
+  /// Null rather than a relative or empty URI when there is no resolver or it
+  /// has nothing to give. An empty artUri is not "no artwork" to the platform,
+  /// it is a fetch that fails.
+  Uri? _artUri(String? sha) {
+    if (sha == null || sha.isEmpty) return null;
+    final url = artUriFor?.call(sha);
+    if (url == null || url.isEmpty) return null;
+    final parsed = Uri.tryParse(url);
+    return (parsed != null && parsed.hasScheme) ? parsed : null;
+  }
 
   /// Read at the moment the app is closed rather than captured at startup, so
   /// changing the setting takes effect without a restart.
@@ -158,9 +175,7 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
       title: current.title,
       artist: current.artist,
       album: current.album,
-      artUri: current.artSha != null
-          ? Uri.parse('$_artBase/art/${current.artSha}')
-          : null,
+      artUri: _artUri(current.artSha),
       duration: current.durationMs != null
           ? Duration(milliseconds: current.durationMs!)
           : null,

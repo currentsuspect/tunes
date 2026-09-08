@@ -152,24 +152,31 @@ class TunesAuth {
   /// Returns a map from the requested path to its signed URL. Paths the
   /// server refuses are simply absent rather than throwing, so one bad entry
   /// cannot stop a queue from playing.
-  Future<Map<String, String>> mediaGrants(List<String> paths) async {
-    if (paths.isEmpty) return const {};
+  Future<({Map<String, String> grants, int expiresIn})> mediaGrants(
+    List<String> paths,
+  ) async {
+    const empty = (grants: <String, String>{}, expiresIn: 0);
+    if (paths.isEmpty) return empty;
     final auth = await accessToken();
-    if (auth is! AuthOk) return const {};
+    if (auth is! AuthOk) return empty;
     try {
       final res = await _post("/auth/media/grant", {
         "paths": paths,
       }, bearer: auth.accessToken);
-      if (res.status != 200) return const {};
+      if (res.status != 200) return empty;
       final grants = res.body["grants"];
-      if (grants is! Map) return const {};
-      return {
-        for (final e in grants.entries)
-          if (e.key is String && e.value is String)
-            e.key as String: e.value as String,
-      };
+      final expiresIn = res.body["expires_in"];
+      if (grants is! Map || expiresIn is! int) return empty;
+      return (
+        grants: {
+          for (final e in grants.entries)
+            if (e.key is String && e.value is String)
+              e.key as String: e.value as String,
+        },
+        expiresIn: expiresIn,
+      );
     } catch (_) {
-      return const {};
+      return empty;
     }
   }
 
