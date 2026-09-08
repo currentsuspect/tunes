@@ -35,7 +35,10 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   media_kit: ^1.2.6
-  media_kit_libs_android_video: ^1.3.8
+  # Audio, not video. Same mpv, built without the video decoders -- this app
+  # never renders a frame, and the video bundle's libmpv.so was the single
+  # largest thing in the APK.
+  media_kit_libs_android_audio: ^1.3.8
   # Vendored, with MediaStyle made optional. See
   # third_party/audio_service/PATCHES.md -- this ROM's system UI replaces
   # MediaStyle notifications with its own widget and drops every transport
