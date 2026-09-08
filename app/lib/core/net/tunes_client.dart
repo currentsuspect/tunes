@@ -253,8 +253,13 @@ class TunesClient {
     }
   }
 
-  /// Where the APK lives. Downloaded with the existing range-capable path, so
-  /// a 100 MB transfer over a phone connection resumes rather than restarting.
+  /// Where the APK lives.
+  ///
+  /// The daemon serves this range-capable, but [UpdateInstaller] does not ask:
+  /// it issues a plain GET and starts over if the transfer breaks. That is
+  /// survivable now the APK is ~28 MB rather than ~104 MB, and it is what makes
+  /// a failed update harmless -- there is no partial file to resume from and no
+  /// way to splice two builds together.
   String get updateApkUrl => '$baseUrl/update/apk';
 
   Future<bool> ping() async {

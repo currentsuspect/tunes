@@ -2,10 +2,23 @@
 <!--
   What the update FileProvider is allowed to share.
 
-  Only the app's own cache directory, and only that: the provider exists to
-  hand one downloaded APK to the system installer, and a broader path would
-  let any component holding the authority read anywhere the app can.
+  Only the `updates/` directory the downloader writes into, and only that: the
+  provider exists to hand one downloaded APK to the system installer, and a
+  broader path would let any component holding the authority read anywhere the
+  app can.
+
+  `files-path`, not `cache-path`. These name different directories: files-path
+  is getFilesDir(), cache-path is getCacheDir(). UpdateInstaller is handed
+  `${store.dir}/updates`, which resolves to the former. Declaring the cache
+  directory here meant getUriForFile could never resolve the downloaded APK,
+  and every in-app update died at the handoff with
+
+      Failed to find configured root that contains
+      /data/data/com.currentsuspect.tunes/files/updates/tunes-269.apk
+
+  after the download had already completed. That surfaced to the user as
+  "Update download failed", which pointed at the one part that had worked.
 -->
 <paths>
-    <cache-path name="updates" path="updates/"/>
+    <files-path name="updates" path="updates/"/>
 </paths>
