@@ -1,0 +1,17 @@
+name = "tunes-auth"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# ACCESS_SECRET and MEDIA_SECRET are NOT here. They are Worker secrets, set
+# with `wrangler secret put`, so they never land in the repo (AGENTS.md §1:
+# no secrets in the repo). Two separate keys so either can be rotated without
+# invalidating the other.
+
+[vars]
+ACCESS_TTL_SEC = "600"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tunes-auth"
+database_id = "6c1fe5e2-5806-4f84-8e87-e746ca33e077"
+migrations_dir = "migrations"

@@ -15,3 +15,5 @@ app/.dart_tool/
 
 # deploy artifacts
 tools/dist/
+# wrangler local state (local D1 sqlite, dev cache)
+.wrangler/
