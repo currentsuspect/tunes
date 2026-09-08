@@ -42,20 +42,33 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 
-            // `--target-platform android-arm64` only bounds what Flutter itself
-            // compiles -- libflutter.so and libapp.so. Plugin libraries arrive
-            // prebuilt inside AARs and are packaged for every ABI regardless, so
-            // mpv, sqlite3 and dartjni were still shipping x86_64 and
-            // armeabi-v7a copies: 16.5 MB that no device this installs on can
-            // load. Gradle has to be told separately, and this is the only thing
-            // that drops them.
-            //
-            // Release only, on purpose. A debug build keeps every ABI so it can
-            // still be run on an x86_64 emulator.
-            ndk {
-                abiFilters += "arm64-v8a"
-            }
+    // `--target-platform android-arm64` only bounds what Flutter itself
+    // compiles -- libflutter.so and libapp.so, which it does correctly. Plugin
+    // libraries never pass through that step: they ship prebuilt inside AARs,
+    // so mpv, sqlite3, dartjni and the media_kit helper were still packaged for
+    // x86_64 and armeabi-v7a. 16.5 MB no device this installs on can load.
+    //
+    // `ndk.abiFilters` on the release build type was tried first and changed
+    // nothing -- build 268 came out byte-identical in size to 267. AGP merges
+    // abiFilters across defaultConfig and the build type as a union, so adding
+    // one ABI there cannot subtract the others. Excluding by path at packaging
+    // time is not subject to that merge and does not depend on evaluation
+    // order.
+    //
+    // The cost: a debug build for an x86_64 emulator loses its native libs too.
+    // Nothing here is built locally -- Flutter is not installed on the box that
+    // develops this -- so that trade is currently free. Scope this per-variant
+    // if that changes.
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "lib/x86/**",
+                "lib/x86_64/**",
+                "lib/armeabi-v7a/**",
+            )
         }
     }
 }
