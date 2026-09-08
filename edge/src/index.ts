@@ -23,6 +23,7 @@ import {
   verifyAccessToken,
 } from "./crypto.js";
 import { MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
+import { handleMedia, stripSignature } from "./media.js";
 import {
   accountById,
   deviceById,
@@ -185,6 +186,16 @@ export default {
       return json({ revoked: await revokeDevice(env.DB, target.id) });
     }
 
-    return json({ error: "not found" }, 404);
+    // ---- everything else: the media edge ----------------------------------
+    // Stateless from here down. No env.DB below this line, deliberately: the
+    // path that serves bytes must not depend on the database, or the origin
+    // and cache layers cannot move later without dragging auth along.
+    const rejected = await handleMedia(req, env, nowSec);
+    if (rejected) return rejected;
+
+    // Validated, or a public path. Continue to origin — which for
+    // tunes.aestra.studio is tunesd through the tunnel. The Worker does not
+    // know or care where the bytes come from.
+    return fetch(stripSignature(req));
   },
 };
