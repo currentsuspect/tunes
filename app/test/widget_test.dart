@@ -98,9 +98,13 @@ class _FakeClient implements TunesClient {
     this.onMissing,
   });
 
-  /// Unauthenticated by default. These tests exercise the library UI, not
-  /// enrolment, so every auth call is refused and the app falls back to
-  /// unsigned URLs -- which is what an un-enrolled device does for real.
+  /// No token: these tests exercise the library UI, not enrolment, so the
+  /// client behaves exactly as an un-enrolled device does for real.
+  @override
+  Future<String?> Function()? bearer;
+
+  /// Unauthenticated by default. Every auth call is refused and the app falls
+  /// back to unsigned URLs.
   @override
   Future<({int status, Map<String, dynamic> body})> postJson(
     String path,

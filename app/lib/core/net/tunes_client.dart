@@ -55,6 +55,23 @@ class TunesClient {
   String baseUrl;
   final Directory? _cacheDir;
 
+  /// Supplies a bearer token for requests this client makes itself.
+  ///
+  /// Set by the app once auth exists; null before enrolment and in tests, in
+  /// which case requests go out unauthenticated exactly as they used to. A
+  /// callback rather than a value because access tokens are short-lived and
+  /// re-minted underneath -- capturing one at construction would work for ten
+  /// minutes and then quietly stop.
+  ///
+  /// mpv is not covered by this and cannot be: it fetches media itself and
+  /// cannot set headers. That is what signed URLs are for.
+  Future<String?> Function()? bearer;
+
+  Future<void> _authorize(HttpClientRequest req) async {
+    final token = await bearer?.call();
+    if (token != null) req.headers.set('authorization', 'Bearer $token');
+  }
+
   static const _timeout = Duration(seconds: 8);
   static const _downloadTimeout = Duration(minutes: 30);
 
@@ -68,6 +85,7 @@ class TunesClient {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
       final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
+      await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('manifest ${res.statusCode}');
@@ -98,6 +116,7 @@ class TunesClient {
     try {
       final iso = Uri.encodeComponent(since.toUtc().toIso8601String());
       final req = await client.getUrl(Uri.parse('$baseUrl/changes?since=$iso'));
+      await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('changes ${res.statusCode}');
@@ -125,6 +144,7 @@ class TunesClient {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
       final req = await client.getUrl(Uri.parse('$baseUrl/track/$sha'));
+      await _authorize(req);
       final res = await req.close().timeout(_downloadTimeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('track ${res.statusCode}');
@@ -172,6 +192,7 @@ class TunesClient {
     try {
       final uri = Uri.parse('$baseUrl/search?q=${Uri.encodeQueryComponent(q)}');
       final req = await client.getUrl(uri);
+      await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('search ${res.statusCode}');
@@ -190,6 +211,7 @@ class TunesClient {
         '$baseUrl/discography?artist=${Uri.encodeQueryComponent(artist)}',
       );
       final req = await client.getUrl(uri);
+      await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('discography ${res.statusCode}');
@@ -214,6 +236,7 @@ class TunesClient {
     try {
       final uri = Uri.parse('$baseUrl/missing?limit=$limit');
       final req = await client.getUrl(uri);
+      await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
         throw TunesFetchException('missing ${res.statusCode}');
@@ -300,10 +323,17 @@ class TunesClient {
     }
   }
 
+  /// Whether the server is reachable AND willing to answer this device.
+  ///
+  /// Authorized like every other request. Without the token this would 401
+  /// against an authenticated server and report "offline" forever, on a
+  /// daemon that is perfectly healthy -- which is exactly the class of bug
+  /// where the message names the wrong thing.
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
       final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
+      await _authorize(req);
       final res = await req.close().timeout(const Duration(seconds: 2));
       return res.statusCode == 200;
     } catch (_) {

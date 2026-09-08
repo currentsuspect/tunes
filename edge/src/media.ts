@@ -15,6 +15,7 @@
  * TTL.
  */
 
+import { verifyAccessToken } from "./crypto.js";
 import { verifyMediaUrl } from "./signing.js";
 
 /** Paths served straight through with no signature. Nothing here reveals library content. */
@@ -42,7 +43,29 @@ function deny(reason: string, status = 403): Response {
 
 export interface MediaEnv {
   MEDIA_SECRET: string;
+  ACCESS_SECRET: string;
 }
+
+/**
+ * Library metadata. Closed to the public, but reachable with a bearer token.
+ *
+ * These were briefly closed outright, which was half a design: /manifest names
+ * every track in the library, so it cannot be public -- but the app cannot
+ * sign them either, because a signature is minted per object and these are not
+ * objects. The answer is the access token the app already holds.
+ *
+ * Verified by signature alone, no database read, exactly like the media path.
+ * A revoked device therefore keeps reading metadata until its access token
+ * expires, which is the same ~10 minute bound documented for every other use
+ * of that token.
+ */
+const API_PATHS = new Set([
+  "/manifest",
+  "/changes",
+  "/search",
+  "/missing",
+  "/discography",
+]);
 
 /**
  * Returns a Response when the request is handled or rejected here, or null to
@@ -58,17 +81,45 @@ export async function handleMedia(
   if (PUBLIC_PATHS.has(url.pathname)) return null;
   if (url.pathname.startsWith("/update/")) return null;
 
+  if (API_PATHS.has(url.pathname)) {
+    const header = req.headers.get("authorization");
+    if (!header?.startsWith("Bearer ")) return deny("no-token", 401);
+    const claims = await verifyAccessToken(
+      header.slice(7),
+      env.ACCESS_SECRET,
+      nowSec,
+    );
+    if (!claims) return deny("bad-token", 401);
+    return null;
+  }
+
   if (!MEDIA_PATH.test(url.pathname)) {
-    // Everything else -- /manifest, /search, /changes -- is library metadata
-    // and must not be readable without a signature either. Until the app
-    // carries tokens on those routes they are simply closed at the edge; that
-    // is stricter than the tailnet was, which is the point.
-    return deny("not-signed", 404);
+    // Not media, not a known API route, not public. Refused without saying
+    // whether it exists.
+    return deny("not-found", 404);
   }
 
   // Only GET and HEAD reach media. The origin has no write routes today and
   // the edge should not be the thing that discovers otherwise.
   if (req.method !== "GET" && req.method !== "HEAD") return deny("method", 405);
+
+  // A bearer token is also a valid way to ask for media, and the app's own
+  // HTTP client uses it -- downloads go through dart:io, which can set
+  // headers. Signed URLs exist because mpv and Android's notification loader
+  // cannot; they are not the only credential a device holds.
+  //
+  // Strictly tighter than the signature it replaces: an access token lives
+  // ~10 minutes against a grant's four hours.
+  const header = req.headers.get("authorization");
+  if (header?.startsWith("Bearer ")) {
+    const claims = await verifyAccessToken(
+      header.slice(7),
+      env.ACCESS_SECRET,
+      nowSec,
+    );
+    if (claims) return null;
+    return deny("bad-token", 401);
+  }
 
   const verdict = await verifyMediaUrl(
     url.pathname,

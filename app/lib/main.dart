@@ -109,6 +109,13 @@ Future<void> main() async {
   // they expire. Nothing here ships inside the APK.
   final auth = TunesAuth(post: client.postJson, store: SecureTokenStore());
   final grants = MediaGrants(auth: auth);
+  // Everything the client fetches itself now carries the device's token. Set
+  // after both exist because they are mutually referential: the client is the
+  // auth transport, and auth supplies the client's credential.
+  client.bearer = () async {
+    final res = await auth.accessToken();
+    return res is AuthOk ? res.accessToken : null;
+  };
   final player = MediaKitTunePlayer(
     trackUriFor: (track) {
       final path = store.pathFor(track.sha);
@@ -644,6 +651,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrap() async {
+    // Warmed first and never awaited. Everything below needs a token
+    // eventually, and minting it lazily puts a round trip in front of
+    // whichever request happens to be first -- usually the one the listener
+    // is waiting on.
+    unawaited(widget.auth.accessToken());
     await _hydrateFromStore();
     if (mounted) await _sync();
     // Last, and not awaited by anything. The library is what the app is for;
@@ -709,11 +721,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           // The first load happens before the manifest exists, so recents
           // cannot resolve their tracks until now.
           unawaited(_onHistoryChanged());
-          // Artwork is fetched all over the UI and by Android's notification
-          // loader, none of which can await a mint. One batch here covers the
-          // whole library -- there are far fewer distinct covers than tracks,
-          // since an album shares one -- and lookups afterwards are synchronous.
-          unawaited(_primeArtGrants(fresh));
           synced = true;
         }
       } else if (fetchError != null && mounted) {
@@ -730,6 +737,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // on it. Only refreshed after a real sync, since the answer changes only
     // when what we hold changes.
     if (mounted && synced) unawaited(_loadMissing());
+
+    // Grants are minted here, off the critical path, rather than when the play
+    // button is pressed.
+    //
+    // prepareQueue awaits a mint before the player opens, so a cold first play
+    // cost a token round trip plus a grant round trip -- measured at ~1.5s
+    // and ~1.0s over the real hostname, before mpv had asked for a byte.
+    // Priming during sync makes prepareQueue find everything cached and return
+    // without touching the network.
+    //
+    // Deliberately after BOTH sync paths rather than inside the full-manifest
+    // branch: /changes short-circuits when nothing was added, which is the
+    // common case on a warm launch, and priming only on the rare path would
+    // have left exactly the launches people notice paying the full cost.
+    final current = _manifest;
+    if (mounted && synced && current != null) unawaited(_primeGrants(current));
   }
 
   /// Mints artwork grants for everything the library can show.
@@ -737,22 +760,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Not awaited by the sync: a cover that arrives a moment late shows a
   /// placeholder and then resolves, whereas blocking the library on it would
   /// trade a visible screen for a spinner.
-  Future<void> _primeArtGrants(TunesManifest manifest) async {
-    final shas = <String>{};
+  Future<void> _primeGrants(TunesManifest manifest) async {
+    final paths = <String>{};
     for (final t in manifest.tracks) {
-      final sha = t.artSha;
-      if (sha != null && sha.isNotEmpty) shas.add('/art/$sha');
+      final art = t.artSha;
+      if (art != null && art.isNotEmpty) paths.add('/art/$art');
+      // Streaming grants for anything not already on disk. Downloaded tracks
+      // resolve to a local path and never touch the network, so a grant for
+      // one would be waste.
+      if (widget.store.pathFor(t.sha) == null) paths.add('/track/${t.sha}');
     }
     for (final r in manifest.releases) {
-      final sha = r.artSha;
-      if (sha != null && sha.isNotEmpty) shas.add('/art/$sha');
+      final art = r.artSha;
+      if (art != null && art.isNotEmpty) paths.add('/art/$art');
     }
-    if (shas.isEmpty) return;
+    if (paths.isEmpty) return;
     try {
-      await widget.grants.prime(shas);
+      await widget.grants.prime(paths);
       if (mounted) setState(() {});
     } catch (_) {
-      // Artwork is decoration. A failure here must never break the library.
+      // Best effort. Anything missed is minted on demand by prepareQueue, at
+      // the cost of the latency this exists to avoid -- never of playback.
     }
   }
 
