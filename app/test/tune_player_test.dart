@@ -279,4 +279,25 @@ void main() {
       },
     );
   });
+
+  group('halt vs stop', () {
+    test('halt quiets without abandoning the queue', () {
+      final p = _PlayerUnderTest();
+      p.playQueue([_t('a'), _t('b')], 1);
+      p.halt();
+      expect(p.playing, isFalse);
+      expect(p.queue.length, 2);
+      expect(p.current?.title, 'b');
+      expect(p.index, 1);
+    });
+
+    test('stop abandons the queue', () {
+      final p = _PlayerUnderTest();
+      p.playQueue([_t('a'), _t('b')], 1);
+      p.stop();
+      expect(p.playing, isFalse);
+      expect(p.queue, isEmpty);
+      expect(p.current, isNull);
+    });
+  });
 }

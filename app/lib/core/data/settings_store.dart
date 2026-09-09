@@ -20,6 +20,7 @@ class SettingsStore extends ChangeNotifier {
   static const _avatarPath = 'profile.avatarPath';
   static const _gapless = 'playback.gapless';
   static const _stopOnClose = 'playback.stopOnClose';
+  static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _serverUrl = 'server.url';
@@ -87,6 +88,15 @@ class SettingsStore extends ChangeNotifier {
   /// with two tracks playing at once.
   bool get stopOnClose => _bool(_stopOnClose, fallback: true);
   Future<void> setStopOnClose(bool v) => _put(_stopOnClose, '$v');
+
+  /// Whether the music keeps going after the queue runs out.
+  ///
+  /// On by default: when an album (or anything else) ends with repeat off,
+  /// the radio engine picks what follows from the listener's own history, on
+  /// this device. The pick is appended to the queue, never spliced into it.
+  /// Off means the queue ends in silence, as before.
+  bool get radioAutoplay => _bool(_radioAutoplay, fallback: true);
+  Future<void> setRadioAutoplay(bool v) => _put(_radioAutoplay, '$v');
 
   /// Whether the sleeve turns slowly while a track plays.
   ///

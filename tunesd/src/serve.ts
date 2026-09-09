@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
+import type { OnDemandFetcher } from "./ondemand.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
@@ -69,7 +70,11 @@ export class ManifestServer {
     private readonly host: string = "0.0.0.0",
     /// App updates, or null when no token is configured. Optional so a daemon
     /// that only serves music is unchanged.
-    private readonly updates: UpdateFeed | null = null
+    private readonly updates: UpdateFeed | null = null,
+    /// On-demand fetch for store misses (ORIGIN step 1). Null serves the old
+    /// way: a miss is a 404. Optional so existing callers and tests that only
+    /// serve music are unchanged.
+    private readonly onDemand: OnDemandFetcher | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -161,6 +166,17 @@ export class ManifestServer {
         const trackMatch = /^\/track\/([0-9a-f]{64})$/.exec(url.pathname);
         if (trackMatch) {
           const sha = trackMatch[1] ?? "";
+          // ORIGIN step 1: a miss resolves through Telegram instead of 404.
+          // The first tap on a never-fetched track pays the download once;
+          // after that it is a store hit like anything else.
+          if (this.onDemand && !this.store.has(sha)) {
+            const fetched = await this.onDemand.fetchTrack(sha);
+            if (fetched === null) {
+              res.writeHead(404, { "content-type": "text/plain" });
+              res.end("not found");
+              return;
+            }
+          }
           await this.serveRange(res, req, this.store.pathOf(sha), null);
           return;
         }

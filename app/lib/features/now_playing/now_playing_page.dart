@@ -5,6 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/data/settings_store.dart';
+import '../../core/nav/tunes_nav.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -77,31 +78,29 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     QueueSheet.show(context, queueStore: qs, player: widget.player);
   }
 
-  /// Leaving the player for an artist or an album *replaces* it.
+  /// Leaving the player for an artist or an album goes through the single-panel
+  /// rule ([openTunesPanel]): it replaces the player rather than stacking on
+  /// it, and asking for the same panel twice is a no-op.
   ///
-  /// Pushing on top left the player underneath, so Back from the artist landed
-  /// back on the full player — a screen the listener had already left. By the
-  /// time you have tapped through to an artist you have mentally put the player
-  /// down; Back should continue outward, to where you were before you opened
-  /// it, not return you to it.
-  ///
-  /// The mini-player keeps playback reachable throughout, so nothing is lost by
-  /// dropping the full screen: it is one tap away again.
+  /// Back from the artist therefore lands where you were before the player,
+  /// not back on it -- by the time you have tapped through you have mentally
+  /// put the player down. The mini-player keeps playback reachable throughout,
+  /// so nothing is lost: it is one tap away again.
   void _openArtist(BuildContext context, String artist) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => ArtistPage(
-          artist: artist,
-          manifest: widget.manifest,
-          player: widget.player,
-          store: widget.store,
-          downloading: widget.downloading,
-          onDownload: widget.onDownload,
-          offline: widget.offline,
-          artUrlFor: widget.artUrlFor,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.artist(artist),
+      (_) => ArtistPage(
+        artist: artist,
+        manifest: widget.manifest,
+        player: widget.player,
+        store: widget.store,
+        downloading: widget.downloading,
+        onDownload: widget.onDownload,
+        offline: widget.offline,
+        artUrlFor: widget.artUrlFor,
+        manifestStore: widget.manifestStore,
+        queueStore: widget.queueStore,
       ),
     );
   }
@@ -138,20 +137,20 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     final resolved = release;
     if (resolved == null) return;
     // Replaces the player for the same reason as _openArtist.
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => AlbumPage(
-          release: resolved,
-          manifest: widget.manifest,
-          player: widget.player,
-          store: widget.store,
-          downloading: widget.downloading,
-          onDownload: widget.onDownload,
-          offline: widget.offline,
-          artUrlFor: widget.artUrlFor,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.album(resolved.id),
+      (_) => AlbumPage(
+        release: resolved,
+        manifest: widget.manifest,
+        player: widget.player,
+        store: widget.store,
+        downloading: widget.downloading,
+        onDownload: widget.onDownload,
+        offline: widget.offline,
+        artUrlFor: widget.artUrlFor,
+        manifestStore: widget.manifestStore,
+        queueStore: widget.queueStore,
       ),
     );
   }

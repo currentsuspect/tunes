@@ -17,6 +17,7 @@ import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
 import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
+import 'core/data/playback_cache.dart';
 import 'core/data/likes_store.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/play_history.dart';
@@ -27,6 +28,9 @@ import 'core/auth/secure_token_store.dart';
 import 'core/auth/tunes_auth.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
+import 'core/nav/tunes_nav.dart';
+import 'core/radio/radio_engine.dart';
+import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
@@ -109,6 +113,26 @@ Future<void> main() async {
   // they expire. Nothing here ships inside the APK.
   final auth = TunesAuth(post: client.postJson, store: SecureTokenStore());
   final grants = MediaGrants(auth: auth);
+  // Streamed bytes land here, LRU-capped, so replaying a track reads from
+  // disk instead of fetching from the cloud again. Explicit downloads stay
+  // separate: they are forever and user-managed, this is a cache and the app
+  // evicts it. One transfer at a time, behind playback in priority.
+  final cacheStore = DownloadStore(Directory('${support.path}/stream-cache'));
+  await cacheStore.load();
+  final streamCache = StreamCache(cacheStore);
+  await streamCache.load();
+  final caching = DownloadManager(
+    client: client,
+    store: cacheStore,
+    maxConcurrent: 1,
+  );
+  final resolver = TrackResolver(
+    store: store,
+    cache: streamCache,
+    caching: caching,
+    client: client,
+    grants: grants,
+  );
   // Everything the client fetches itself now carries the device's token. Set
   // after both exist because they are mutually referential: the client is the
   // auth transport, and auth supplies the client's credential.
@@ -117,20 +141,14 @@ Future<void> main() async {
     return res is AuthOk ? res.accessToken : null;
   };
   final player = MediaKitTunePlayer(
+    // Download first, stream cache second, signed URL last -- and resolving
+    // a URL also enqueues a background cache of the same bytes, so the
+    // second play of anything is a disk read. Sweeping rides along: opens
+    // are the only moments new bytes can have landed.
     trackUriFor: (track) {
-      final path = store.pathFor(track.sha);
-      if (path != null && File(path).existsSync()) return path;
-      // The configured server, not the compiled-in one. This read the constant
-      // while the manifest came from the client, so setting a server produced
-      // a full library whose every track streamed from an address that was
-      // only reachable on the original network: the app looked completely
-      // healthy and played nothing.
-      // Signed capability when we hold one. Falling back to the bare URL is
-      // deliberate: the edge answers it with a 403, which is a diagnosable
-      // failure, where returning nothing would be a track that silently never
-      // plays.
-      final signed = grants.urlFor('/track/${track.sha}');
-      return '${client.baseUrl}${signed ?? '/track/${track.sha}'}';
+      final uri = resolver.uriFor(track);
+      unawaited(streamCache.sweep());
+      return uri;
     },
     // Mint for the whole queue in one round trip before it opens. Downloaded
     // tracks are skipped: they resolve to a local path and never touch the
@@ -247,6 +265,37 @@ Future<void> main() async {
       playlists: playlists,
     ),
   );
+}
+
+/// Every path that needs a signed grant: artwork for tracks, releases and
+/// artists, plus streamable bytes for anything not already on disk.
+///
+/// Pure so the set is unit-testable -- a missing category here is invisible
+/// (a placeholder where a photo belongs) rather than loud, which is exactly
+/// how artist photos went unprimed while every cover around them worked.
+/// [pathFor] answers like [DownloadStore.pathFor]: non-null means on disk.
+Set<String> grantPathsFor(
+  TunesManifest manifest,
+  String? Function(String sha) pathFor,
+) {
+  final paths = <String>{};
+  for (final t in manifest.tracks) {
+    final art = t.artSha;
+    if (art != null && art.isNotEmpty) paths.add('/art/$art');
+    // Streaming grants for anything not already on disk. Downloaded tracks
+    // resolve to a local path and never touch the network, so a grant for
+    // one would be waste.
+    if (pathFor(t.sha) == null) paths.add('/track/${t.sha}');
+  }
+  for (final r in manifest.releases) {
+    final art = r.artSha;
+    if (art != null && art.isNotEmpty) paths.add('/art/$art');
+  }
+  for (final a in manifest.artists) {
+    final art = a.artSha;
+    if (art != null && art.isNotEmpty) paths.add('/art/$art');
+  }
+  return paths;
 }
 
 class TunesApp extends StatefulWidget {
@@ -388,6 +437,13 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
+
+  /// One key per tab. Re-tapping the active tab swaps in a fresh key, which
+  /// remounts that tab's scrollable at the top. The tabs hold no
+  /// PageStorageKeys, so a fresh mount always starts at offset zero -- the
+  /// cheap, uniform way to do "tap Home to go back to top" without threading
+  /// a controller through four views and their conditional lists.
+  late final List<Key> _tabKeys = List.generate(4, (_) => UniqueKey());
   TunesManifest? _manifest;
   Map<String, int> _playsByArtist = const {};
   List<ManifestTrack> _onRepeat = const [];
@@ -404,6 +460,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   // simply does not appear, which is the right answer when we cannot say.
   List<MissingRelease> _missingAlbums = const [];
 
+  /// The radio session: what the listener is in the middle of, right now.
+  ///
+  /// In memory only, rebuilt on every launch -- a session that survives a
+  /// restart is not a session (docs/RADIO.md §2). Fed by [_feedRadio] below.
+  final RadioSession _radioSession = RadioSession();
+  final RadioEngine _radioEngine = RadioEngine();
+
+  /// Long-run taste for the engine's taste component. Refreshed with the other
+  /// history-derived rails, so radio and the home screen never disagree about
+  /// what was played.
+  TasteSnapshot _taste = const TasteSnapshot();
+
+  /// The track the radio feeder last saw, and where it was. When the identity
+  /// flips, the previous entry is settled as heard-to-the-end or abandoned.
+  ManifestTrack? _radioPrev;
+  Duration _radioPrevPos = Duration.zero;
+  Duration _radioPrevDur = Duration.zero;
+
   bool _wasOffline = false;
 
   @override
@@ -416,6 +490,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
     widget.player.addListener(_trackRecents);
+    widget.player.addListener(_feedRadio);
+    widget.player.onQueueEnded = _pickRadio;
     // Recents used to live only in memory, so closing the app forgot what you
     // had been listening to. They come from the recorded history now.
     widget.history.addListener(_onHistoryChanged);
@@ -430,6 +506,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
+    widget.player.removeListener(_feedRadio);
+    widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
     // Only the listener: the manager itself belongs to TunesApp, which
     // outlives this shell.
@@ -446,6 +524,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Settle the listen in progress. Leaving mid-track is ordinary, and an
       // unsettled listen is one that never happened.
       widget.history.flush();
+      // Pin the exact resume point. The listener above persists the position
+      // every five seconds, so without this a close could lose most of a
+      // track's progress -- and the sha, if the track changed within the gap.
+      final current = widget.player.current;
+      unawaited(widget.settings.setLastPlayedSha(current?.sha));
+      unawaited(widget.settings.setLastPosition(widget.player.position));
     }
   }
 
@@ -504,10 +588,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _loadPlays() async {
     final counts = await widget.history.playCounts();
     if (!mounted) return;
+    final skips = await widget.history.skipCounts();
+    if (!mounted) return;
     final manifest = _manifest;
     if (manifest == null) return;
     final plays = playsByArtist(counts, manifest.tracks);
-    setState(() => _playsByArtist = plays);
+    setState(() {
+      _playsByArtist = plays;
+      _taste = TasteSnapshot(playCounts: counts, skipCounts: skips);
+    });
   }
 
   void _onReachability() {
@@ -530,6 +619,68 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         setState(() => _recents = next);
       }
     }
+  }
+
+  /// Settles the previous track into the radio session as heard or abandoned.
+  ///
+  /// Heard-to-the-end means the position had reached the track's tail when the
+  /// identity flipped -- which covers both playing through and skipping past
+  /// the last seconds. Anything else is a skip, the strongest signal the
+  /// listener gives without typing anything. Repeat-one restarts never flip
+  /// the identity, so replaying one track on loop does not count as playing
+  /// it a dozen times.
+  void _feedRadio() {
+    final player = widget.player;
+    final current = player.current;
+    if (current?.sha != _radioPrev?.sha) {
+      final prev = _radioPrev;
+      if (prev != null) {
+        final dur = _radioPrevDur;
+        final heard =
+            dur > Duration.zero &&
+            _radioPrevPos >= dur - const Duration(seconds: 5);
+        if (heard) {
+          _radioSession.completed(prev);
+        } else {
+          _radioSession.skipped(prev);
+        }
+      }
+      _radioPrev = current;
+      _radioPrevPos = Duration.zero;
+      _radioPrevDur = Duration.zero;
+    }
+    if (current != null) {
+      _radioPrevPos = player.position;
+      final decoder = player.duration;
+      if (decoder > Duration.zero) {
+        _radioPrevDur = decoder;
+      } else if (current.durationMs != null) {
+        _radioPrevDur = Duration(milliseconds: current.durationMs!);
+      }
+    }
+  }
+
+  /// The player's continuation hook: what follows the track that just ended.
+  ///
+  /// Null ends the queue in silence -- the setting is off, there is no
+  /// library yet, or nothing is eligible. Offline the library is filtered to
+  /// what is downloaded, so radio never offers a track that cannot play.
+  Future<ManifestTrack?> _pickRadio(ManifestTrack seed) async {
+    if (!widget.settings.radioAutoplay) return null;
+    final manifest = _manifest;
+    if (manifest == null || manifest.tracks.isEmpty) return null;
+    final library = widget.reachability.offline
+        ? manifest.tracks
+              .where((t) => widget.store.pathFor(t.sha) != null)
+              .toList()
+        : manifest.tracks;
+    if (library.isEmpty) return null;
+    return _radioEngine.next(
+      library: library,
+      session: _radioSession,
+      taste: _taste,
+      current: seed,
+    );
   }
 
   Future<void> _hydrateFromStore() async {
@@ -761,19 +912,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// placeholder and then resolves, whereas blocking the library on it would
   /// trade a visible screen for a spinner.
   Future<void> _primeGrants(TunesManifest manifest) async {
-    final paths = <String>{};
-    for (final t in manifest.tracks) {
-      final art = t.artSha;
-      if (art != null && art.isNotEmpty) paths.add('/art/$art');
-      // Streaming grants for anything not already on disk. Downloaded tracks
-      // resolve to a local path and never touch the network, so a grant for
-      // one would be waste.
-      if (widget.store.pathFor(t.sha) == null) paths.add('/track/${t.sha}');
-    }
-    for (final r in manifest.releases) {
-      final art = r.artSha;
-      if (art != null && art.isNotEmpty) paths.add('/art/$art');
-    }
+    final paths = grantPathsFor(manifest, widget.store.pathFor);
     if (paths.isEmpty) return;
     try {
       await widget.grants.prime(paths);
@@ -876,91 +1015,91 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The header avatar now goes straight to settings. The old sheet was a
   /// read-only diagnostics panel, and its contents live under Library there.
   void _openProfile(int trackCount) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SettingsPage(
-          settings: widget.settings,
-          auth: widget.auth,
-          player: widget.player,
-          endpoint: widget.client.baseUrl,
-          offline: widget.reachability.offline,
-          commit: _gitCommit,
-          buildNumber: _buildNumber,
-          channel: _channel,
-          trackCount: trackCount,
-          downloadCount: widget.store.shas.length,
-          store: widget.store,
-          history: widget.history,
-          supportDir: widget.store.dir,
-          onResync: _reload,
-          onServerChanged: (url) async {
-            await widget.settings.setServerUrl(url);
-            // Repoint the live client rather than asking for a restart. Every
-            // request builds its URL from baseUrl at call time, so the next
-            // one already goes to the new address.
-            widget.client.baseUrl = widget.settings.serverUrl ?? _tunesdUrl;
-            // What is on screen still came from the old server, so fetch the
-            // library again instead of leaving a stale one that looks current.
-            _reload();
-          },
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.settings,
+      (_) => SettingsPage(
+        settings: widget.settings,
+        auth: widget.auth,
+        player: widget.player,
+        endpoint: widget.client.baseUrl,
+        offline: widget.reachability.offline,
+        commit: _gitCommit,
+        buildNumber: _buildNumber,
+        channel: _channel,
+        trackCount: trackCount,
+        downloadCount: widget.store.shas.length,
+        store: widget.store,
+        history: widget.history,
+        supportDir: widget.store.dir,
+        onResync: _reload,
+        onServerChanged: (url) async {
+          await widget.settings.setServerUrl(url);
+          // Repoint the live client rather than asking for a restart. Every
+          // request builds its URL from baseUrl at call time, so the next
+          // one already goes to the new address.
+          widget.client.baseUrl = widget.settings.serverUrl ?? _tunesdUrl;
+          // What is on screen still came from the old server, so fetch the
+          // library again instead of leaving a stale one that looks current.
+          _reload();
+        },
       ),
     );
   }
 
   void _openArtist(String artist, TunesManifest manifest) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ArtistPage(
-          artist: artist,
-          manifest: manifest,
-          client: widget.client,
-          player: widget.player,
-          store: widget.store,
-          downloading: _downloading,
-          onDownload: _download,
-          offline: widget.reachability.offline,
-          artUrlFor: _artUrlFor,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.artist(artist),
+      (_) => ArtistPage(
+        artist: artist,
+        manifest: manifest,
+        client: widget.client,
+        player: widget.player,
+        store: widget.store,
+        downloading: _downloading,
+        onDownload: _download,
+        offline: widget.reachability.offline,
+        artUrlFor: _artUrlFor,
+        manifestStore: widget.manifestStore,
+        queueStore: widget.queueStore,
       ),
     );
   }
 
   void _openAlbum(ManifestRelease release, TunesManifest manifest) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => AlbumPage(
-          release: release,
-          manifest: manifest,
-          player: widget.player,
-          store: widget.store,
-          downloading: _downloading,
-          onDownload: _download,
-          offline: widget.reachability.offline,
-          artUrlFor: _artUrlFor,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.album(release.id),
+      (_) => AlbumPage(
+        release: release,
+        manifest: manifest,
+        player: widget.player,
+        store: widget.store,
+        downloading: _downloading,
+        onDownload: _download,
+        offline: widget.reachability.offline,
+        artUrlFor: _artUrlFor,
+        manifestStore: widget.manifestStore,
+        queueStore: widget.queueStore,
       ),
     );
   }
 
   void _openNowPlaying() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => NowPlayingPage(
-          player: widget.player,
-          manifest: _manifest ?? const TunesManifest(tracks: [], releases: []),
-          store: widget.store,
-          downloading: _downloading,
-          onDownload: _download,
-          offline: widget.reachability.offline,
-          artUrlFor: _artUrlFor,
-          manifestStore: widget.manifestStore,
-          queueStore: widget.queueStore,
-        ),
+    openTunesPanel(
+      context,
+      TunesPanels.nowPlaying,
+      (_) => NowPlayingPage(
+        player: widget.player,
+        manifest: _manifest ?? const TunesManifest(tracks: [], releases: []),
+        store: widget.store,
+        downloading: _downloading,
+        onDownload: _download,
+        offline: widget.reachability.offline,
+        artUrlFor: _artUrlFor,
+        manifestStore: widget.manifestStore,
+        queueStore: widget.queueStore,
       ),
     );
   }
@@ -1042,7 +1181,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (widget.settings.stopOnClose) widget.player.stop();
+        // Halt, not stop: backing out of the app quiets it, but the queue and
+        // the resume point survive so reopening lands back where it was.
+        // Stopping here used to wipe the persisted queue with it.
+        if (widget.settings.stopOnClose) widget.player.halt();
         // Leave regardless of the setting: refusing to pop is a mechanism for
         // getting here, not a decision about whether the app should close.
         // Swallowing it would trap someone who has turned stopOnClose off.
@@ -1223,7 +1365,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ),
                   child: NavigationBar(
                     selectedIndex: _tab,
-                    onDestinationSelected: (i) => setState(() => _tab = i),
+                    onDestinationSelected: _onTabSelected,
                     destinations: const [
                       NavigationDestination(
                         icon: Icon(Icons.home_outlined, color: Tones.textMuted),
@@ -1344,6 +1486,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         artUrlFor: _artUrlFor,
       ),
     };
-    return content;
+    // Keyed by tab and by tap: re-tapping the active tab swaps the key (see
+    // _onTabSelected), which remounts the scrollable back at the top.
+    return KeyedSubtree(key: _tabKeys[_tab], child: content);
+  }
+
+  /// A tab tap either switches tabs, or -- when the tab is already active --
+  /// goes back to its top: any pushed panels are dismissed and the feed
+  /// remounts at offset zero. Tapping Home twice doing nothing was the
+  /// complaint; every tab behaves the same way.
+  void _onTabSelected(int i) {
+    if (i == _tab) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() => _tabKeys[i] = UniqueKey());
+      return;
+    }
+    setState(() => _tab = i);
   }
 }

@@ -49,3 +49,17 @@ echo "→ installing $(basename "$APK") ($(du -h "$APK" | cut -f1))"
 echo "→ launching"
 "$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
 echo "✓ tunes is up on the phone"
+
+# The install landed, so the remote copy has served its purpose: delete it
+# and the artifact quota stays near zero whatever CI uploads (the workflow
+# overwrites one artifact per run; this removes even that one). Best effort --
+# a failed delete must never fail a good install. Only in fetch mode, where
+# a run_id names the artifact to remove.
+if [ "${1:-}" != "--no-fetch" ] && [ -n "${run_id:-}" ]; then
+  artifact_id=$(gh api "repos/$REPO/actions/runs/$run_id/artifacts" \
+    --jq '.artifacts[] | select(.name=="'"$ARTIFACT"'") | .id' 2>/dev/null | head -n 1) || true
+  if [ -n "${artifact_id:-}" ]; then
+    gh api -X DELETE "repos/$REPO/actions/artifacts/$artifact_id" --silent 2>/dev/null \
+      && echo "→ deleted remote artifact $artifact_id" || true
+  fi
+fi

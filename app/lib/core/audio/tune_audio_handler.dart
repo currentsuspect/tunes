@@ -215,6 +215,14 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> stop() async => player.stop();
 
+  /// The app was swiped out of the recents list, or backed out of.
+  ///
+  /// Halts rather than stops: the audio goes away, which is what closing the
+  /// app looks like it means, but the queue and the resume point survive so
+  /// reopening lands back where the listener was. [stop] used to run here and
+  /// wiped the persisted queue with it, so every close forgot the session.
+  Future<void> halt() async => player.halt();
+
   @override
   Future<void> skipToNext() async => player.next();
 
@@ -238,11 +246,12 @@ class TuneAudioHandler extends BaseAudioHandler with SeekHandler {
   ///
   /// Without this the foreground service kept the process alive and the audio
   /// simply carried on: no mini player to stop it, and reopening the app and
-  /// pressing play started a *second* stream over the first. Stopping here
-  /// makes closing the app mean what it looks like it means.
+  /// pressing play started a *second* stream over the first. Halting here
+  /// makes closing the app mean what it looks like it means, while keeping
+  /// the queue so the next launch resumes instead of forgetting.
   @override
   Future<void> onTaskRemoved() async {
-    if (stopOnTaskRemoved?.call() ?? true) await stop();
+    if (stopOnTaskRemoved?.call() ?? true) await halt();
     await super.onTaskRemoved();
   }
 

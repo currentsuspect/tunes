@@ -102,6 +102,35 @@ export class State {
     return { sha: entry.sha, caption: entry.caption ?? null, fileName: entry.fileName ?? null };
   }
 
+  /** Reverse lookup: which message holds `sha`, if any.
+   *
+   * The seen index runs message → sha; the on-demand fetcher needs the other
+   * direction. A linear scan over hundreds of entries per miss is nothing
+   * next to the Telegram round trip that follows, so no second index is kept
+   * in sync -- one source of truth, read both ways. */
+  findMessage(sha: string): { channelId: string; messageId: number } | null {
+    return this.findMessages(sha)[0] ?? null;
+  }
+
+  /** Every message holding `sha`, oldest first.
+   *
+   * A track re-posted across channels (or surviving an account swap in one
+   * channel but not the other) has several rows; the fetcher tries each in
+   * turn, so one dead source does not doom the rest. */
+  findMessages(sha: string): { channelId: string; messageId: number }[] {
+    const out: { channelId: string; messageId: number }[] = [];
+    for (const [key, v] of Object.entries(this.data.seen)) {
+      const s = typeof v === "string" ? v : v.sha;
+      if (s !== sha) continue;
+      const i = key.lastIndexOf(":");
+      if (i < 0) continue;
+      const messageId = Number(key.slice(i + 1));
+      if (!Number.isInteger(messageId)) continue;
+      out.push({ channelId: key.slice(0, i), messageId });
+    }
+    return out;
+  }
+
   markSeen(
     channelId: string,
     messageId: number,

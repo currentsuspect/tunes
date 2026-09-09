@@ -22,6 +22,7 @@ import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
+import { OnDemandFetcher } from "./ondemand.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
@@ -85,6 +86,12 @@ async function main(): Promise<void> {
       log
     );
     const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log);
+    // ORIGIN step 1: serve misses from Telegram through the fetcher instead
+    // of 404. Same session the daemon already serves from -- a tap is
+    // human-low-frequency and counts against the same daily cap.
+    const onDemand = new OnDemandFetcher(client, store, state, {
+      dailyCapFiles: env.fetch.dailyCapFiles,
+    }, log);
 
     const probeCache = new Map<string, ProbeResult>();
     // Probe results are keyed by content hash, so they never go stale for a
@@ -1249,7 +1256,8 @@ async function main(): Promise<void> {
         },
         () => releaseArt,
         env.host,
-        updates
+        updates,
+        onDemand
       );
       await server.start();
       void runEnrichPass().catch((e) =>

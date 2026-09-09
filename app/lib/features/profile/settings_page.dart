@@ -331,6 +331,20 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               onChanged: s.setStopOnClose,
             ),
+            SwitchListTile(
+              value: s.radioAutoplay,
+              title: const Text(
+                'Keep playing with radio',
+                style: TypeScale.body,
+              ),
+              subtitle: const Text(
+                'When the queue runs out, picks what follows from your own '
+                'listening, on this device. Added after the queue, never '
+                'mixed into it.',
+                style: TypeScale.caption,
+              ),
+              onChanged: s.setRadioAutoplay,
+            ),
 
             const _SectionLabel('Lyrics'),
             ListTile(

@@ -88,6 +88,16 @@ class _FakePlayer extends TunePlayer {
   @override
   void stop() => stopCalls += 1;
 
+  int haltCalls = 0;
+
+  /// Mirrors the real halt: quiet, but the queue and the place in it survive.
+  @override
+  void halt() {
+    haltCalls += 1;
+    _playing = false;
+    notifyListeners();
+  }
+
   @override
   void toggle() => _playing = !_playing;
 
@@ -183,6 +193,30 @@ void main() {
       withArt.mediaItem.valueOrNull?.artUri?.toString(),
       'http://box:4780/art/${'a' * 64}',
     );
+  });
+
+  test('swiping the app away halts without abandoning the queue', () async {
+    // Closing used to stop, which cleared the in-memory queue and wiped the
+    // stored one with it -- so every close forgot the session and reopening
+    // showed a bar with nothing behind it. Halting quiets the audio and keeps
+    // both, so the next launch resumes.
+    player.setPlaying(true);
+    await handler.onTaskRemoved();
+    expect(player.haltCalls, 1);
+    expect(player.stopCalls, 0);
+    expect(player.playing, isFalse);
+    expect(player.queue.length, 2);
+    expect(player.current?.title, 'One');
+  });
+
+  test('dismissing the notification still stops outright', () async {
+    // The dismissal is the listener saying "I am done" -- that one abandons.
+    // (The count is at-least: the base handler's own delete hook also routes
+    // to stop, so it fires twice. What matters here is the stop path ran and
+    // the halt path did not.)
+    await handler.onNotificationDeleted();
+    expect(player.stopCalls, greaterThanOrEqualTo(1));
+    expect(player.haltCalls, 0);
   });
 
   group('notification updates', () {

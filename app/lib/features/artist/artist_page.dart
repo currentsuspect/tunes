@@ -4,6 +4,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
+import '../../core/nav/tunes_nav.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
@@ -259,20 +260,20 @@ class _ArtistPageState extends State<ArtistPage> {
                       release: r,
                       manifest: widget.manifest,
                       artUrlFor: widget.artUrlFor,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => AlbumPage(
-                            release: r,
-                            manifest: widget.manifest,
-                            player: widget.player,
-                            store: widget.store,
-                            downloading: widget.downloading,
-                            onDownload: widget.onDownload,
-                            offline: widget.offline,
-                            artUrlFor: widget.artUrlFor,
-                            manifestStore: widget.manifestStore,
-                            queueStore: widget.queueStore,
-                          ),
+                      onTap: () => openTunesPanel(
+                        context,
+                        TunesPanels.album(r.id),
+                        (_) => AlbumPage(
+                          release: r,
+                          manifest: widget.manifest,
+                          player: widget.player,
+                          store: widget.store,
+                          downloading: widget.downloading,
+                          onDownload: widget.onDownload,
+                          offline: widget.offline,
+                          artUrlFor: widget.artUrlFor,
+                          manifestStore: widget.manifestStore,
+                          queueStore: widget.queueStore,
                         ),
                       ),
                     ),
@@ -286,19 +287,19 @@ class _ArtistPageState extends State<ArtistPage> {
       ),
       bottomNavigationBar: MiniPlayerBar(
         player: widget.player,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => NowPlayingPage(
-              player: widget.player,
-              manifest: widget.manifest,
-              store: widget.store,
-              downloading: widget.downloading,
-              onDownload: widget.onDownload,
-              offline: widget.offline,
-              artUrlFor: widget.artUrlFor,
-              manifestStore: widget.manifestStore,
-              queueStore: widget.queueStore,
-            ),
+        onTap: () => openTunesPanel(
+          context,
+          TunesPanels.nowPlaying,
+          (_) => NowPlayingPage(
+            player: widget.player,
+            manifest: widget.manifest,
+            store: widget.store,
+            downloading: widget.downloading,
+            onDownload: widget.onDownload,
+            offline: widget.offline,
+            artUrlFor: widget.artUrlFor,
+            manifestStore: widget.manifestStore,
+            queueStore: widget.queueStore,
           ),
         ),
         artUrlFor: widget.artUrlFor,

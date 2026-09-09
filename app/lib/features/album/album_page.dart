@@ -4,6 +4,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
+import '../../core/nav/tunes_nav.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -132,20 +133,23 @@ class AlbumPage extends StatelessWidget {
                   ),
                   const SizedBox(height: Space.xs),
                   GestureDetector(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ArtistPage(
-                          artist: release.artist,
-                          manifest: manifest,
-                          player: player,
-                          store: store,
-                          downloading: downloading,
-                          onDownload: onDownload,
-                          offline: offline,
-                          artUrlFor: artUrlFor,
-                          manifestStore: manifestStore,
-                          queueStore: queueStore,
-                        ),
+                    // One panel at a time: an album reached from an artist (or
+                    // vice versa) replaces it, and the same artist twice is a
+                    // no-op rather than a twin route.
+                    onTap: () => openTunesPanel(
+                      context,
+                      TunesPanels.artist(release.artist),
+                      (_) => ArtistPage(
+                        artist: release.artist,
+                        manifest: manifest,
+                        player: player,
+                        store: store,
+                        downloading: downloading,
+                        onDownload: onDownload,
+                        offline: offline,
+                        artUrlFor: artUrlFor,
+                        manifestStore: manifestStore,
+                        queueStore: queueStore,
                       ),
                     ),
                     child: Text(
@@ -214,19 +218,19 @@ class AlbumPage extends StatelessWidget {
       ),
       bottomNavigationBar: MiniPlayerBar(
         player: player,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => NowPlayingPage(
-              player: player,
-              manifest: manifest,
-              store: store,
-              downloading: downloading,
-              onDownload: onDownload,
-              offline: offline,
-              artUrlFor: artUrlFor,
-              manifestStore: manifestStore,
-              queueStore: queueStore,
-            ),
+        onTap: () => openTunesPanel(
+          context,
+          TunesPanels.nowPlaying,
+          (_) => NowPlayingPage(
+            player: player,
+            manifest: manifest,
+            store: store,
+            downloading: downloading,
+            onDownload: onDownload,
+            offline: offline,
+            artUrlFor: artUrlFor,
+            manifestStore: manifestStore,
+            queueStore: queueStore,
           ),
         ),
         artUrlFor: artUrlFor,

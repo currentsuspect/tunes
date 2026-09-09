@@ -94,7 +94,13 @@ jobs:
         with:
           name: tunes-apk
           path: app/build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
+          # Overwritten every run, so the quota holds one APK, not one per
+          # push: at ~47 MB each with 30-day retention this filled the
+          # account quota and red-flagged every PR until it was pruned by
+          # hand. deploy.sh deletes the artifact after a successful install,
+          # so even that one is short-lived.
+          overwrite: true
+          retention-days: 7
 
       # A release as well as an artifact, because they are for different
       # readers. The artifact is for a human with a GitHub account: it expires

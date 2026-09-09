@@ -78,6 +78,11 @@ simulated). Prototypes live elsewhere.
   package for one small function.
 - Do not silence analyzer, lint, or reviewer findings without a clear technical reason.
 - Do not "fix" dead/commented code unless the task explicitly targets it.
+- **Radio sequencing runs on-device and stays there** (`docs/RADIO.md`). It may
+  read the listener's own play history and the local manifest. It must not
+  upload a profile, rank by popularity, or reorder an explicit queue. Those
+  three are what SPEC §13's old "no recommendation engine" rule was protecting,
+  and they survive it.
 
 ## 2. Agent Workflow
 

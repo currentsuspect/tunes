@@ -100,6 +100,7 @@ This is why R128 gain lives at the playback edge, why dedupe is non-destructive,
 | Network unavailable | downloaded library still works, fully |
 
 Downloads remain the preferred path (data costs, offline, box-off survivability), but the first tap on a song must never dead-end into a download screen. Honest latency: a first tap on a never-fetched track can take 1–3 s to start while the box pulls it — shown, not hidden.
+- Streamed bytes are cached on the phone (LRU, ~2 GB, separate from downloads): replaying a track reads from disk instead of fetching again. Eviction only costs a re-stream.
 
 ---
 
@@ -279,7 +280,12 @@ The primary screen. Tabs: **Tracks / Albums / Artists / Channels**.
 ### Now Playing
 - Full-screen ambient player: large art, seek (accurate), queue (up next / history), gapless stitching already handled by media_kit.
 - Loudness-normalized by default with a plain "Flat" toggle in settings.
-- Resume: playback position + queue survive restarts and app kills.
+- Resume: playback position + queue survive restarts and app kills. Closing the
+  app halts audio but keeps the queue; only an explicit stop abandons it.
+- Radio: when the queue runs out with repeat off, the engine in `docs/RADIO.md`
+  picks what follows from the listener's own history, on the device. The pick
+  is appended after the queue, never mixed into it; a `Keep playing with radio`
+  toggle turns it off, and offline it draws from downloads only.
 
 ### Queue
 Persistent, reorderable, editable. "Play next", "add to queue", long-press → context menu on everything.
@@ -420,6 +426,10 @@ The standard is: **"Would Dylan keep this on his phone and open it before anythi
   registry and revocation exist for. What stays out of scope is anyone reaching the
   library without an account someone deliberately created for them.
 - **No direct phone↔Telegram connection, ever** — "live pull" is always via tunesd; the phone cannot reach Telegram by construction
-- No recommendation engine, no charts, no "because you listened to"
+- No charts, no popularity ranking, no "listeners also enjoyed". Sequencing
+  is allowed and specified in `docs/RADIO.md` (decision recorded 2026-09-08,
+  superseding the blanket "no recommendation engine" this replaced) — but it
+  runs on the listener's own play history, on their own device, and nothing
+  about it leaves the phone. An explicit queue is never reordered by it.
 - No podcasting, no video, no lyrics-first features
 - No re-encoding anywhere in the default pipeline

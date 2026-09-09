@@ -1121,6 +1121,7 @@ void main() {
     // rather than the screen merely opening.
     expect(find.text('Gapless playback'), findsOneWidget);
     expect(find.text('Stop when the app closes'), findsOneWidget);
+    expect(find.text('Keep playing with radio'), findsOneWidget);
     expect(find.text('Display name'), findsOneWidget);
 
     // The developer section is hidden until asked for.
@@ -1705,5 +1706,146 @@ void main() {
       isNotNull,
       reason: 'a pushed route must still be inside DownloadScope',
     );
+  });
+
+  testWidgets('re-tapping the active tab returns its list to the top', (
+    tester,
+  ) async {
+    // Tapping Home twice doing nothing was the complaint. The mechanism is
+    // per-tab (a fresh content key remounts the scrollable at offset zero),
+    // so the library's long track list proves it best; every tab shares the
+    // same path.
+    final tracks = List.generate(
+      14,
+      (i) => _track(
+        'Song $i',
+        'flac',
+        200000 + i,
+        sha: 'song$i'.padRight(64, '0'),
+        releaseId: 'rel-$i',
+      ),
+    );
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(tracks)),
+      FakeTunePlayer(),
+    );
+    await goToLibrary(tester);
+
+    final list = find.byType(ListView);
+    expect(list, findsOneWidget);
+    ScrollableState scroller() => tester.state<ScrollableState>(
+      find.descendant(of: list, matching: find.byType(Scrollable)),
+    );
+    await tester.drag(list, const Offset(0, -800));
+    await tester.pumpAndSettle();
+    expect(scroller().position.pixels, greaterThan(0));
+
+    await tester.tap(find.text('Library'));
+    await tester.pumpAndSettle();
+    expect(scroller().position.pixels, 0);
+  });
+
+  testWidgets('backgrounding pins the exact resume point', (tester) async {
+    // The periodic saver runs every five seconds; without a save on the way
+    // out, closing could lose most of a track's progress.
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    player.seek(const Duration(minutes: 1));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+
+    expect(settings.lastPlayedSha, 'a' * 64);
+    expect(settings.lastPosition, const Duration(minutes: 1));
+  });
+
+  testWidgets('radio continues the queue after the last track', (tester) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    final last = player.current!;
+    final pick = await player.onQueueEnded!(last);
+    // Two tracks in the library, one playing: the other is the only answer.
+    expect(pick?.sha, 'b' * 64);
+  });
+
+  testWidgets('radio off ends the queue in silence', (tester) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    await settings.setRadioAutoplay(false);
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+
+    expect(await player.onQueueEnded!(player.current!), isNull);
+  });
+
+  testWidgets('offline radio only offers what is downloaded', (tester) async {
+    final reach = Reachability();
+    final player = FakeTunePlayer();
+    await tester.runAsync(() async {
+      await store.add('a' * 64, '${tempDir.path}/bassline');
+      await store.add('b' * 64, '${tempDir.path}/nightdrive');
+    });
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+      reachability: reach,
+    );
+    await goToLibrary(tester);
+    reach.setOffline(true);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    expect(player.current?.title, 'Bassline');
+    // Both are on the device, so the other one is playable.
+    expect((await player.onQueueEnded!(player.current!))?.title, 'Nightdrive');
+  });
+
+  testWidgets('offline radio ends the queue when nothing else is downloaded', (
+    tester,
+  ) async {
+    final reach = Reachability();
+    final player = FakeTunePlayer();
+    await tester.runAsync(
+      () => store.add('a' * 64, '${tempDir.path}/bassline'),
+    );
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+      reachability: reach,
+    );
+    await goToLibrary(tester);
+    reach.setOffline(true);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    // The only downloaded track is the one playing: offering anything else
+    // would be offering something that cannot play.
+    expect(await player.onQueueEnded!(player.current!), isNull);
   });
 }
