@@ -117,7 +117,8 @@ class RadioEngine {
     if (skips > 0) reasons['disliked'] = -0.35 * (1 - 1 / (1 + skips));
 
     // Continuity with what is playing. The only "musical fit" available
-    // without embeddings: same act, then same release.
+    // without embeddings: same act, then same release, then the guest graph
+    // (features are the one relationship edge the tags actually carry).
     if (current != null) {
       final a = (candidate.primaryArtist ?? candidate.artist).toLowerCase();
       final b = (current.primaryArtist ?? current.artist).toLowerCase();
@@ -125,6 +126,18 @@ class RadioEngine {
       final ra = candidate.releaseId, rb = current.releaseId;
       if (ra != null && ra.isNotEmpty && ra == rb) {
         reasons['same-release'] = 0.15;
+      }
+      final cg = candidate.featured.map((g) => g.toLowerCase()).toSet();
+      final ug = current.featured.map((g) => g.toLowerCase()).toSet();
+      if (a.isNotEmpty && ug.contains(a)) {
+        // The current track features this candidate's act.
+        reasons['feature-in'] = 0.20;
+      } else if (b.isNotEmpty && cg.contains(b)) {
+        // This candidate features the current act.
+        reasons['feature-out'] = 0.20;
+      } else if (cg.intersection(ug).isNotEmpty) {
+        // A shared guest: adjacent territory through a third act.
+        reasons['shared-guest'] = 0.12;
       }
     }
 
@@ -139,6 +152,22 @@ class RadioEngine {
       // Grows with each repeat rather than being flat: two in a row is a
       // choice, four in a row is a rut.
       reasons['repeat-artist'] = -0.12 * recentArtist;
+    }
+    // Lookahead: the scorer optimizes one track, so sequences are policed
+    // here, not in the weights. Newest first: a third consecutive track by
+    // one act, or the close of an A-B-A-B alternation, is penalized no
+    // matter how strong its local fit.
+    final recent = session.recentArtists;
+    final al = act.toLowerCase();
+    if (recent.length >= 2 &&
+        recent[0].toLowerCase() == al &&
+        recent[1].toLowerCase() == al) {
+      reasons['run'] = -0.30;
+    } else if (recent.length >= 3 &&
+        recent[1].toLowerCase() == al &&
+        recent[0].toLowerCase() == recent[2].toLowerCase() &&
+        recent[0].toLowerCase() != al) {
+      reasons['alternation'] = -0.25;
     }
 
     // Novelty, scaled by how adventurous the session currently is. A track

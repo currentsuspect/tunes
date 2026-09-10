@@ -37,6 +37,7 @@ import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
 import 'core/ui/profile_avatar.dart';
 import 'domain/collection_gaps.dart';
+import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'features/album/album_page.dart';
@@ -508,6 +509,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// what was played.
   TasteSnapshot _taste = const TasteSnapshot();
 
+  /// Relationship rails for Discover, from the same counts. Empty until
+  /// there is a library worth threading -- and absent, not stubbed.
+  List<ThreadRail> _threads = const [];
+
   /// The track the radio feeder last saw, and where it was. When the identity
   /// flips, the previous entry is settled as heard-to-the-end or abandoned.
   ManifestTrack? _radioPrev;
@@ -646,6 +651,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       _playsByArtist = plays;
       _taste = TasteSnapshot(playCounts: counts, skipCounts: skips);
+      _threads = followThreads(library: manifest.tracks, plays: counts);
     });
   }
 
@@ -1531,9 +1537,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final content = switch (_tab) {
       1 => DiscoverView(
         gaps: collectionGaps(missing: _missingAlbums, plays: _playsByArtist),
+        threads: _threads,
         offline: offline,
         artUrlFor: _artUrlFor,
         onArtistTap: (artist) => _openArtist(artist, manifest),
+        onPlay: (list, index) => widget.player.playQueue(list, index),
         hasHistory: _playsByArtist.isNotEmpty,
       ),
       2 => SearchView(

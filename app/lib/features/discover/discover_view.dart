@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
 import '../../core/ui/empty_state.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/missing_cover.dart';
 import '../../core/ui/pressable.dart';
 import '../../domain/collection_gaps.dart';
+import '../../domain/manifest.dart';
+import '../../domain/threads.dart';
 
 /// Where the library stops and the world carries on.
 ///
@@ -17,16 +21,27 @@ class DiscoverView extends StatelessWidget {
   const DiscoverView({
     super.key,
     required this.gaps,
+    required this.threads,
     required this.offline,
     required this.artUrlFor,
     required this.onArtistTap,
+    required this.onPlay,
     required this.hasHistory,
   });
 
   final List<ArtistGap> gaps;
+
+  /// Relationship rails built from the library and the play counts: guest
+  /// spots and deep cuts around the acts actually played. Shown above the
+  /// gaps -- what you hold comes before what you lack.
+  final List<ThreadRail> threads;
   final bool offline;
   final String Function(String sha) artUrlFor;
   final void Function(String artist) onArtistTap;
+
+  /// Plays a rail from the tapped track, so the rest of the suggestion
+  /// follows on rather than ending after one song.
+  final void Function(List<ManifestTrack> tracks, int index) onPlay;
 
   /// Whether anything has been listened to yet. Changes what the ranking is
   /// honestly described as, since with no history it is ordered by ownership.
@@ -34,7 +49,7 @@ class DiscoverView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (gaps.isEmpty) {
+    if (gaps.isEmpty && threads.isEmpty) {
       return EmptyState(
         icon: offline ? Icons.cloud_off_rounded : Icons.travel_explore_rounded,
         title: offline ? 'Nothing to compare against' : 'Nothing missing yet',
@@ -50,38 +65,165 @@ class DiscoverView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: Space.xl),
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Complete your collection', style: TypeScale.heading),
-              const SizedBox(height: Space.xs),
-              Text(
-                '$releases ${releases == 1 ? 'release' : 'releases'} by '
-                '${gaps.length} ${gaps.length == 1 ? 'artist' : 'artists'} '
-                'already in your library. '
-                '${hasHistory ? 'Ordered by what you actually play.' : 'Ordered by what you own most of, until there is listening to go on.'}',
-                style: TypeScale.caption.copyWith(height: 1.5),
-              ),
-            ],
+        if (threads.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Follow the thread', style: TypeScale.heading),
+                SizedBox(height: Space.xs),
+                Text(
+                  'Guest spots and deep cuts around the acts you actually '
+                  'play. Built from your library and your listening, nothing '
+                  'else.',
+                  style: TypeScale.caption,
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: Space.md),
+          for (final rail in threads)
+            _ThreadRail(rail: rail, artUrlFor: artUrlFor, onPlay: onPlay),
+          const SizedBox(height: Space.md),
+        ],
+        if (gaps.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Complete your collection',
+                  style: TypeScale.heading,
+                ),
+                const SizedBox(height: Space.xs),
+                Text(
+                  '$releases ${releases == 1 ? 'release' : 'releases'} by '
+                  '${gaps.length} ${gaps.length == 1 ? 'artist' : 'artists'} '
+                  'already in your library. '
+                  '${hasHistory ? 'Ordered by what you actually play.' : 'Ordered by what you own most of, until there is listening to go on.'}',
+                  style: TypeScale.caption.copyWith(height: 1.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Space.md),
+        ],
         for (final gap in gaps)
           _ArtistSection(
             gap: gap,
             artUrlFor: artUrlFor,
             onArtistTap: onArtistTap,
           ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
-          child: Text(
-            'Only artists whose catalogue could be confirmed against something '
-            'you already own appear here. Asking for a common name returns the '
-            'wrong act often enough that guessing would be worse than a short '
-            'list.',
-            style: TypeScale.caption,
+        if (gaps.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
+            child: Text(
+              'Only artists whose catalogue could be confirmed against something '
+              'you already own appear here. Asking for a common name returns the '
+              'wrong act often enough that guessing would be worse than a short '
+              'list.',
+              style: TypeScale.caption,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One playable thread rail: a title, a play-all, and a horizontal run of
+/// covers. Tapping a track plays the rail from there, so the rest of the
+/// suggestion follows on -- a rail that ends after one song is a list, not
+/// a discovery.
+class _ThreadRail extends StatelessWidget {
+  const _ThreadRail({
+    required this.rail,
+    required this.artUrlFor,
+    required this.onPlay,
+  });
+
+  final ThreadRail rail;
+  final String Function(String sha) artUrlFor;
+  final void Function(List<ManifestTrack> tracks, int index) onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Space.lg,
+            Space.lg,
+            Space.sm,
+            Space.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(rail.title, style: TypeScale.heading),
+                    Text(rail.subtitle, style: TypeScale.caption),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => onPlay(rail.tracks, 0),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('Play'),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 176,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(Space.md, 0, Space.lg, 0),
+            itemCount: rail.tracks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final t = rail.tracks[i];
+              return SizedBox(
+                width: 132,
+                child: Pressable(
+                  onTap: () => onPlay(rail.tracks, i),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 132,
+                        height: 132,
+                        child: Artwork(
+                          url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                          size: 132,
+                          fallback: GeneratedArtwork.fromTrack(
+                            t,
+                            size: 132,
+                            borderRadius: RadiusTokens.card,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        t.title,
+                        style: TypeScale.body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        t.artistDisplay,
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],

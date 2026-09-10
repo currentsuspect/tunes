@@ -3,7 +3,7 @@ import { StringSession } from "teleproto/sessions/index.js";
 import { PromisedWebSockets } from "teleproto/extensions/PromisedWebSockets.js";
 import { Logger } from "teleproto/extensions/Logger.js";
 import { verifyMediaUrl } from "./grant.js";
-import { pickVictims } from "./policy.js";
+import { pickVictims, sniffMime } from "./policy.js";
 
 interface Env {
   TG_API_ID: string;
@@ -60,9 +60,13 @@ function parseRange(
   return { start, end };
 }
 
-function fullHeaders(total: number, src: string): Record<string, string> {
+function fullHeaders(
+  total: number,
+  src: string,
+  type: string
+): Record<string, string> {
   return {
-    "content-type": "audio/mpeg",
+    "content-type": type,
     "accept-ranges": "bytes",
     "content-length": String(total),
     "x-tunes-src": src,
@@ -73,10 +77,11 @@ function rangeHeaders(
   start: number,
   end: number,
   total: number,
-  src: string
+  src: string,
+  type: string
 ): Record<string, string> {
   return {
-    "content-type": "audio/mpeg",
+    "content-type": type,
     "accept-ranges": "bytes",
     "content-range": `bytes ${start}-${end}/${total}`,
     "content-length": String(end - start + 1),
@@ -266,7 +271,8 @@ export class Fetcher {
         // Audio playback is almost entirely range requests: a seek must come
         // back 206 with exactly the bytes asked for, from either source.
         // Totals come from the access map (full sizes recorded at put), never
-        // from a ranged read, whose size is the range, not the object.
+        // from a ranged read, whose size is the range, not the object. Types
+        // come from R2 metadata, sniffed once at put time.
         const range = parseRange(req.headers.get("range"));
         const known = await this.knownSize(sha);
         if (range && known !== null) {
@@ -281,7 +287,13 @@ export class Fetcher {
             await this.noteAccess(sha, known);
             return new Response(hit.body, {
               status: 206,
-              headers: rangeHeaders(range.start, end, known, "r2"),
+              headers: rangeHeaders(
+                range.start,
+                end,
+                known,
+                "r2",
+                hit.httpMetadata?.contentType ?? "application/octet-stream"
+              ),
             });
           }
         } else {
@@ -289,7 +301,11 @@ export class Fetcher {
           if (hit) {
             await this.noteAccess(sha, hit.size);
             return new Response(hit.body, {
-              headers: fullHeaders(hit.size, "r2"),
+              headers: fullHeaders(
+                hit.size,
+                "r2",
+                hit.httpMetadata?.contentType ?? "application/octet-stream"
+              ),
             });
           }
         }
@@ -304,18 +320,21 @@ export class Fetcher {
           );
         }
         const total = res.bytes.byteLength;
-        await this.env.CACHE.put(sha, res.bytes as any);
+        const type = sniffMime(res.bytes);
+        await this.env.CACHE.put(sha, res.bytes as any, {
+          httpMetadata: { contentType: type },
+        });
         await this.noteAccess(sha, total);
         if (range) {
           if (range.start >= total) return rangeEmpty(total);
           const end = Math.min(range.end, total - 1);
           return new Response(res.bytes.slice(range.start, end + 1) as any, {
             status: 206,
-            headers: rangeHeaders(range.start, end, total, "telegram"),
+            headers: rangeHeaders(range.start, end, total, "telegram", type),
           });
         }
         return new Response(res.bytes as any, {
-          headers: fullHeaders(total, "telegram"),
+          headers: fullHeaders(total, "telegram", type),
         });
       }
       return new Response("tunes-fetch", { status: 404 });

@@ -10,6 +10,7 @@ ManifestTrack t(
   String artist = 'A',
   String? release,
   String title = 'x',
+  List<String> featured = const [],
 }) => ManifestTrack(
   sha: sha,
   size: 1,
@@ -27,6 +28,7 @@ ManifestTrack t(
   trackNumber: null,
   discNumber: null,
   primaryArtist: artist,
+  featured: featured,
 );
 
 /// Zero jitter and deterministic sampling, so a ranking assertion is about the
@@ -240,6 +242,86 @@ void main() {
         picks.add(e.next(library: lib, session: s, taste: noTaste)!.sha);
       }
       expect(picks.length, greaterThan(1));
+    });
+  });
+
+  group('relationships', () {
+    test('a track featuring the current act outranks an unrelated one', () {
+      final lib = [
+        t('feat', artist: 'B', featured: ['A']),
+        t('far', artist: 'Q'),
+      ];
+      final r = engine.rank(
+        library: lib,
+        session: RadioSession(),
+        taste: noTaste,
+        current: t('cur', artist: 'A'),
+      );
+      expect(order(r).first, 'feat');
+      expect(r.first.reasons, contains('feature-out'));
+    });
+
+    test('a track by a featured guest outranks an unrelated one', () {
+      final lib = [t('by-guest', artist: 'B'), t('far', artist: 'Q')];
+      final r = engine.rank(
+        library: lib,
+        session: RadioSession(),
+        taste: noTaste,
+        current: t('cur', artist: 'A', featured: ['B']),
+      );
+      expect(order(r).first, 'by-guest');
+      expect(r.first.reasons, contains('feature-in'));
+    });
+
+    test('a shared guest beats no connection', () {
+      final lib = [
+        t('shared', artist: 'C', featured: ['Z']),
+        t('far', artist: 'Q'),
+      ];
+      final r = engine.rank(
+        library: lib,
+        session: RadioSession(),
+        taste: noTaste,
+        current: t('cur', artist: 'A', featured: ['Z']),
+      );
+      expect(order(r).first, 'shared');
+      expect(r.first.reasons, contains('shared-guest'));
+    });
+  });
+
+  group('lookahead', () {
+    RadioSession sessionOf(List<String> artists) {
+      final s = RadioSession();
+      for (final a in artists.reversed) {
+        s.completed(t('x-$a', artist: a));
+      }
+      return s;
+    }
+
+    test('a third consecutive track by one act is penalized', () {
+      final lib = [t('again', artist: 'A'), t('elsewhere', artist: 'B')];
+      final r = engine.rank(
+        library: lib,
+        session: sessionOf(['A', 'A']),
+        taste: noTaste,
+        current: t('cur', artist: 'A'),
+      );
+      expect(order(r).first, 'elsewhere');
+      final scored = r.firstWhere((s) => s.track.sha == 'again');
+      expect(scored.reasons, contains('run'));
+    });
+
+    test('closing an A-B-A-B alternation is penalized', () {
+      final lib = [t('b2', artist: 'B'), t('c1', artist: 'C')];
+      final r = engine.rank(
+        library: lib,
+        session: sessionOf(['A', 'B', 'A']),
+        taste: noTaste,
+        current: t('cur', artist: 'A'),
+      );
+      expect(order(r).first, 'c1');
+      final scored = r.firstWhere((s) => s.track.sha == 'b2');
+      expect(scored.reasons, contains('alternation'));
     });
   });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonicalString, timingSafeEqual, verifyMediaUrl } from "../src/grant.js";
 import { pickVictims } from "../src/policy.js";
+import { sniffMime } from "../src/policy.js";
 
 // Pinned against edge/src/signing.ts: the canonical string is the shared
 // contract. If this vector ever diverges from edge/test/media.test.ts, one of
@@ -50,6 +51,20 @@ describe("grant verification", () => {
     expect(timingSafeEqual("abc", "abc")).toBe(true);
     expect(timingSafeEqual("abc", "abd")).toBe(false);
     expect(timingSafeEqual("abc", "abcd")).toBe(false);
+  });
+});
+
+describe("sniffMime", () => {
+  const bytes = (s: string) => new TextEncoder().encode(s);
+  it("names the pipeline containers", () => {
+    expect(sniffMime(bytes("fLaC...."))).toBe("audio/flac");
+    expect(sniffMime(bytes("OggS...."))).toBe("audio/ogg");
+    expect(sniffMime(bytes("ID3....."))).toBe("audio/mpeg");
+    expect(sniffMime(bytes("RIFF....WAVE"))).toBe("audio/wav");
+    expect(sniffMime(new Uint8Array([0xff, 0xe3, 0, 0]))).toBe("audio/mpeg");
+  });
+  it("falls back to octet-stream rather than guessing", () => {
+    expect(sniffMime(bytes("........"))).toBe("application/octet-stream");
   });
 });
 

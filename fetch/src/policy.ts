@@ -47,3 +47,20 @@ export function pickVictims(
   }
   return { victims, remaining };
 }
+
+/** Sniffs the container from magic bytes for the Content-Type we serve.
+ *
+ * mpv gets exactly one type header and uses it as the demux hint; a FLAC
+ * labeled audio/mpeg still probes, but the opener has crashed on these
+ * URLs twice, and a wrong hint is the cheapest suspect to eliminate. Only
+ * the six containers the pipeline ever holds. */
+export function sniffMime(bytes: Uint8Array): string {
+  const head = (n: number) => String.fromCharCode(...bytes.slice(0, n));
+  if (head(4) === "fLaC") return "audio/flac";
+  if (head(4) === "OggS") return "audio/ogg";
+  if (head(4) === "RIFF" && head(12).slice(8) === "WAVE") return "audio/wav";
+  if (head(3) === "ID3") return "audio/mpeg";
+  if (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) return "audio/mpeg";
+  if (head(12).slice(4, 8) === "ftyp") return "audio/mp4";
+  return "application/octet-stream";
+}

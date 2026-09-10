@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/domain/collection_gaps.dart';
 import 'package:tunes/domain/discography.dart';
+import 'package:tunes/domain/manifest.dart';
+import 'package:tunes/domain/threads.dart';
 import 'package:tunes/features/discover/discover_view.dart';
 
 MissingRelease _missing(
@@ -32,9 +34,11 @@ void main() {
       home: Scaffold(
         body: DiscoverView(
           gaps: collectionGaps(missing: missing, plays: plays),
+          threads: const [],
           offline: offline,
           artUrlFor: (sha) => 'http://example.invalid/art/$sha',
           onArtistTap: (_) {},
+          onPlay: (_, _) {},
           hasHistory: plays.isNotEmpty,
         ),
       ),
@@ -95,5 +99,65 @@ void main() {
   ) async {
     await pump(tester, const []);
     expect(find.text('Nothing missing yet'), findsOneWidget);
+  });
+
+  ManifestTrack track(
+    String sha, {
+    String artist = 'Yeat',
+    String title = 'x',
+    List<String> featured = const [],
+  }) => ManifestTrack(
+    sha: sha,
+    size: 1,
+    codec: 'flac',
+    sampleRate: 44100,
+    channels: 2,
+    bitrate: 1000,
+    durationMs: 180000,
+    title: title,
+    artist: artist,
+    album: 'album',
+    year: null,
+    artSha: null,
+    releaseId: null,
+    trackNumber: null,
+    discNumber: null,
+    primaryArtist: artist,
+    featured: featured,
+  );
+
+  testWidgets('thread rails render above the gaps and play from a tap', (
+    tester,
+  ) async {
+    final library = [
+      track('y1', title: 'One'),
+      track('y2', title: 'Two', featured: ['Ken']),
+      track('y3', title: 'Three'),
+      track('k1', artist: 'Ken', title: 'Four', featured: ['Yeat']),
+      track('k2', artist: 'Ken', title: 'Five', featured: ['Yeat']),
+    ];
+    final threads = followThreads(library: library, plays: {'y1': 5});
+    expect(threads, isNotEmpty);
+    var playedFrom = -1;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DiscoverView(
+            gaps: const [],
+            threads: threads,
+            offline: false,
+            artUrlFor: (sha) => 'http://example.invalid/art/$sha',
+            onArtistTap: (_) {},
+            onPlay: (_, i) => playedFrom = i,
+            hasHistory: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Follow the thread'), findsOneWidget);
+    await tester.tap(find.text('Two').first);
+    await tester.pumpAndSettle();
+    expect(playedFrom, greaterThanOrEqualTo(0));
   });
 }
