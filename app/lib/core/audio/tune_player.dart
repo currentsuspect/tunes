@@ -40,6 +40,14 @@ abstract class TunePlayer extends ChangeNotifier {
   /// explicit queue is never reordered -- only continued.
   Future<ManifestTrack?> Function(ManifestTrack lastPlayed)? onQueueEnded;
 
+  /// Fired after [restoreQueue] loads a queue without playing it.
+  ///
+  /// The app binds the audio service here: a relaunch that restores paused
+  /// audio is exactly when the notification must start following the new
+  /// generation rather than the halted one. Concrete nullable like the other
+  /// hooks, so fakes ignore it.
+  Future<void> Function()? onRestored;
+
   /// Halts audio but keeps the queue, the place in it, and the resume state.
   ///
   /// This is what closing the app means: the sound stops, and reopening puts
@@ -118,6 +126,43 @@ class MediaKitTunePlayer extends TunePlayer {
   /// seconds after reopen. Every wrapper therefore adopts the process peer
   /// instead of creating its own; at most one mpv core ever exists here.
   static Player? _processPeer;
+
+  /// The wrapper currently allowed to publish: at most one per process.
+  ///
+  /// A relaunch builds a second Dart wrapper around the same mpv peer. Both
+  /// attach to its streams, and both feed listeners -- the audio service
+  /// among them. The superseded generation must go quiet, or the
+  /// notification follows a wrapper whose queue froze at close time while
+  /// the mini-player follows the live one.
+  static MediaKitTunePlayer? _liveWrapper;
+
+  /// Stream subscriptions onto the peer. Kept so supersede/dispose can
+  /// cancel them: a detached wrapper must not hear the peer anymore.
+  final List<StreamSubscription> _peerSubs = [];
+
+  /// Claims the live generation for this wrapper, detaching whoever held
+  /// it. Called whenever this wrapper is about to drive: construction is
+  /// too eager (a restored-then-never-played wrapper must not silence the
+  /// one still playing), and the first drive is exactly when publication
+  /// must move over.
+  void _claimLive() {
+    final live = _liveWrapper;
+    if (identical(live, this)) return;
+    live?.detach();
+    _liveWrapper = this;
+  }
+
+  /// Yields publication to the next generation. Cancels every peer
+  /// subscription, so this wrapper's listeners (the old audio handler
+  /// included) never publish again. Audio is untouched: detaching is about
+  /// who may speak, never about the decoder.
+  void detach() {
+    for (final s in _peerSubs) {
+      s.cancel();
+    }
+    _peerSubs.clear();
+    _subscribed = true;
+  }
 
   /// Returns the process peer, creating it on the first call in this process.
   ///
@@ -253,11 +298,13 @@ class MediaKitTunePlayer extends TunePlayer {
     }
     _applyPlaylistMode(player);
     _attachStreams(player);
+    if (onRestored != null) unawaited(onRestored!());
   }
 
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     if (tracks.isEmpty) return;
+    _claimLive();
     if (!_firstPlayDone && onFirstPlay != null) {
       _firstPlayDone = true;
       unawaited(onFirstPlay!());
@@ -341,6 +388,7 @@ class MediaKitTunePlayer extends TunePlayer {
   void toggle() {
     final player = _player;
     if (player == null) return;
+    _claimLive();
     if (_playing) {
       player.pause();
     } else {
@@ -353,11 +401,14 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
+    _claimLive();
     player.play();
   }
 
   @override
   void pause() {
+    if (_queue.isEmpty) return;
+    _claimLive();
     _player?.pause();
   }
 
@@ -366,6 +417,7 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
+    _claimLive();
     _clearPendingSeek();
     if (_repeat == PlaybackRepeat.one) {
       // Repeat-one restarts the current track from the top.
@@ -452,6 +504,7 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
+    _claimLive();
     _clearPendingSeek();
     final restartedAt = _restartedAt;
     final action = previousActionFor(
@@ -489,6 +542,7 @@ class MediaKitTunePlayer extends TunePlayer {
     final player = _player;
     if (player == null) return;
     if (index < 0 || index >= _queue.length) return;
+    _claimLive();
     _clearPendingSeek();
     player.jump(index);
     _index = index;
@@ -497,6 +551,7 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void seek(Duration target) {
+    _claimLive();
     // Scrubbing is a fresh decision about where to be, so the press that
     // follows is a first press again, not the second of a pair.
     _restartedAt = null;
@@ -630,52 +685,69 @@ class MediaKitTunePlayer extends TunePlayer {
   void _attachStreams(Player player) {
     if (_subscribed) return;
     _subscribed = true;
-    player.stream.playing.listen((p) {
-      _playing = p;
-      notifyListeners();
-    });
-    player.stream.position.listen((p) {
-      if (_swallowStaleRestoreReport(player, p)) return;
-      _position = p;
-      if ((p - _lastNotifiedPosition).abs() >=
-          const Duration(milliseconds: 250)) {
-        _lastNotifiedPosition = p;
+    _peerSubs.add(
+      player.stream.playing.listen((p) {
+        _playing = p;
         notifyListeners();
-      }
-    });
-    player.stream.duration.listen((d) {
-      _duration = d;
-      notifyListeners();
-    });
-    player.stream.playlist.listen((pl) {
-      if (pl.index >= 0) {
-        if (pl.index != _index) {
-          // A different track is playing -- skipped to, or arrived at on its
-          // own. Either way the restart that armed the double press belongs
-          // to a track that is no longer on.
-          _restartedAt = null;
+      }),
+    );
+    _peerSubs.add(
+      player.stream.position.listen((p) {
+        if (_swallowStaleRestoreReport(player, p)) return;
+        _position = p;
+        if ((p - _lastNotifiedPosition).abs() >=
+            const Duration(milliseconds: 250)) {
+          _lastNotifiedPosition = p;
+          notifyListeners();
         }
-        _index = pl.index;
+      }),
+    );
+    _peerSubs.add(
+      player.stream.duration.listen((d) {
+        _duration = d;
         notifyListeners();
-      }
-    });
+      }),
+    );
+    _peerSubs.add(
+      player.stream.playlist.listen((pl) {
+        // An emptied playlist echoing back from an earlier stop is not a track
+        // change: media_kit clears the native playlist on stop() and that echo
+        // can land after a later open, which used to slam the index (and with
+        // it the mini-player) back to the start. Only a populated playlist may
+        // move the index; our own stop()/halt() manage _queue themselves.
+        if (pl.medias.isEmpty) return;
+        if (pl.index >= 0) {
+          if (pl.index != _index) {
+            // A different track is playing -- skipped to, or arrived at on its
+            // own. Either way the restart that armed the double press belongs
+            // to a track that is no longer on.
+            _restartedAt = null;
+          }
+          _index = pl.index;
+          notifyListeners();
+        }
+      }),
+    );
     // The decoder finished the media by itself. With repeat off at the last
     // index the queue has run out; radio may continue it, otherwise it stops.
-    player.stream.completed.listen((done) {
-      if (done) _onNaturalEnd();
-    });
+    _peerSubs.add(
+      player.stream.completed.listen((done) {
+        if (done) _onNaturalEnd();
+      }),
+    );
   }
 
   bool _subscribed = false;
 
   @override
   void dispose() {
-    // The native peer is process-lifetime (see _processPeer): a wrapper from
-    // a previous activity generation may still be driving it through the
-    // audio service, so destroying it here would pull the decoder out from
-    // under live playback. This only detaches local interest; the OS reclaims
-    // the peer with the process.
-    _subscribed = true;
+    // The native peer is process-lifetime (see _processPeer): destroying it
+    // here would pull the decoder out from under live playback owned by a
+    // newer generation. Detach instead: cancel our subscriptions so we never
+    // publish again, yield liveness, and let the OS reclaim the peer with
+    // the process.
+    if (identical(_liveWrapper, this)) _liveWrapper = null;
+    detach();
     _player = null;
     super.dispose();
   }

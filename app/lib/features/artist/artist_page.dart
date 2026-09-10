@@ -4,7 +4,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
-import '../../core/nav/tunes_nav.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
@@ -105,7 +105,7 @@ class _ArtistPageState extends State<ArtistPage> {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
+                    onPressed: () => NavScope.of(context).back(),
                     icon: const Icon(
                       Icons.arrow_back_rounded,
                       color: Tones.textMuted,
@@ -260,10 +260,9 @@ class _ArtistPageState extends State<ArtistPage> {
                       release: r,
                       manifest: widget.manifest,
                       artUrlFor: widget.artUrlFor,
-                      onTap: () => openTunesPanel(
-                        context,
+                      onTap: () => NavScope.of(context).openPanel(
                         TunesPanels.album(r.id),
-                        (_) => AlbumPage(
+                        () => AlbumPage(
                           release: r,
                           manifest: widget.manifest,
                           player: widget.player,
@@ -287,10 +286,9 @@ class _ArtistPageState extends State<ArtistPage> {
       ),
       bottomNavigationBar: MiniPlayerBar(
         player: widget.player,
-        onTap: () => openTunesPanel(
-          context,
+        onTap: () => NavScope.of(context).openPanel(
           TunesPanels.nowPlaying,
-          (_) => NowPlayingPage(
+          () => NowPlayingPage(
             player: widget.player,
             manifest: widget.manifest,
             store: widget.store,

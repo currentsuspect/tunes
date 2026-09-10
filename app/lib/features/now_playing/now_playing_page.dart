@@ -5,7 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/data/settings_store.dart';
-import '../../core/nav/tunes_nav.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -78,19 +78,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     QueueSheet.show(context, queueStore: qs, player: widget.player);
   }
 
-  /// Leaving the player for an artist or an album goes through the single-panel
-  /// rule ([openTunesPanel]): it replaces the player rather than stacking on
-  /// it, and asking for the same panel twice is a no-op.
-  ///
-  /// Back from the artist therefore lands where you were before the player,
-  /// not back on it -- by the time you have tapped through you have mentally
-  /// put the player down. The mini-player keeps playback reachable throughout,
-  /// so nothing is lost: it is one tap away again.
+  /// Leaving the player for an artist or an album goes through the shell
+  /// history: the destination is recorded after the player, so Back returns
+  /// here rather than skipping it.
   void _openArtist(BuildContext context, String artist) {
-    openTunesPanel(
-      context,
+    NavScope.of(context).openPanel(
       TunesPanels.artist(artist),
-      (_) => ArtistPage(
+      () => ArtistPage(
         artist: artist,
         manifest: widget.manifest,
         player: widget.player,
@@ -136,11 +130,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     }
     final resolved = release;
     if (resolved == null) return;
-    // Replaces the player for the same reason as _openArtist.
-    openTunesPanel(
-      context,
+    // Recorded after the player, like _openArtist.
+    NavScope.of(context).openPanel(
       TunesPanels.album(resolved.id),
-      (_) => AlbumPage(
+      () => AlbumPage(
         release: resolved,
         manifest: widget.manifest,
         player: widget.player,
@@ -262,7 +255,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 children: [
                                   IconButton(
                                     onPressed: () =>
-                                        Navigator.of(context).maybePop(),
+                                        NavScope.of(context).back(),
                                     icon: const Icon(
                                       Icons.keyboard_arrow_down_rounded,
                                       color: Tones.textMuted,

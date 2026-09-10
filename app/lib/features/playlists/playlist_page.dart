@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/data/playlist_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
@@ -134,6 +135,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
       appBar: AppBar(
         backgroundColor: Tones.surface,
         title: Text(_name, style: TypeScale.heading),
+        leading: IconButton(
+          onPressed: () => NavScope.of(context).back(),
+          icon: const Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
+        ),
         actions: [
           IconButton(
             onPressed: _rename,

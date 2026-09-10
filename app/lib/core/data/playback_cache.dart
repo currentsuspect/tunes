@@ -143,11 +143,11 @@ class TrackResolver {
     // Read live, not captured: changing servers repoints the client, and a
     // URL baked at startup would keep streaming from the old address.
     //
-    // /t/, not /track/: streams come from the cloud fetch path (DO + R2 +
-    // Telegram), same hostname, same device grant shape. Explicit downloads
-    // stay on origin /track, where the box serves its own misses.
+    // Origin /track/ for now: the cloud /t/ path is suspected in the
+    // mpv/opener crashes and is being bisected out. Explicit downloads never
+    // moved. Revert to /t/ when the opener is exonerated.
     final baseUrl = client.baseUrl;
-    final signed = grants.urlFor('/t/$sha');
-    return '$baseUrl${signed ?? '/t/$sha'}';
+    final signed = grants.urlFor('/track/$sha');
+    return '$baseUrl${signed ?? '/track/$sha'}';
   }
 }

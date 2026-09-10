@@ -28,7 +28,7 @@ import 'core/auth/secure_token_store.dart';
 import 'core/auth/tunes_auth.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
-import 'core/nav/tunes_nav.dart';
+import 'core/nav/nav_controller.dart';
 import 'core/radio/radio_engine.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
@@ -155,7 +155,7 @@ Future<void> main() async {
     // network, so signing them would be pure latency.
     prepareQueue: (tracks) => grants.prime([
       for (final t in tracks)
-        if (store.pathFor(t.sha) == null) '/t/${t.sha}',
+        if (store.pathFor(t.sha) == null) '/track/${t.sha}',
     ]),
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
@@ -165,24 +165,25 @@ Future<void> main() async {
       unawaited(queueStore.replace(tracks.map((t) => t.sha).toList()));
     },
   );
-  var audioServiceReady = false;
-  Future<void> ensureAudioService() async {
-    if (audioServiceReady) return;
-    audioServiceReady = true;
+  TuneAudioHandler? boundHandler;
+  Future<void>? audioInitFlight;
+
+  Future<void> initAudioService() async {
     try {
+      final handler = TuneAudioHandler(
+        player,
+        // A closure, so notification artwork follows the server too rather
+        // than being pinned to whatever it was at launch.
+        // A closure, so notification artwork follows both the server and
+        // the current set of grants rather than being pinned at startup.
+        artUriFor: (sha) {
+          final signed = grants.urlFor('/art/$sha');
+          return '${client.baseUrl}${signed ?? '/art/$sha'}';
+        },
+        stopOnTaskRemoved: () => settings.stopOnClose,
+      );
       await AudioService.init(
-        builder: () => TuneAudioHandler(
-          player,
-          // A closure, so notification artwork follows the server too rather
-          // than being pinned to whatever it was at launch.
-          // A closure, so notification artwork follows both the server and
-          // the current set of grants rather than being pinned at startup.
-          artUriFor: (sha) {
-            final signed = grants.urlFor('/art/$sha');
-            return '${client.baseUrl}${signed ?? '/art/$sha'}';
-          },
-          stopOnTaskRemoved: () => settings.stopOnClose,
-        ),
+        builder: () => handler,
         config: const AudioServiceConfig(
           androidNotificationChannelId:
               'com.currentsuspect.tunes.channel.audio',
@@ -201,11 +202,28 @@ Future<void> main() async {
         ),
       );
       AudioService.asyncError.listen((e) => DiagLog.log('async error: $e'));
-      DiagLog.log('audio_service init ok (lazy)');
+      boundHandler = handler;
+      DiagLog.log('audio_service bound');
     } catch (e) {
-      audioServiceReady = false;
       DiagLog.log('AudioService.init failed (lazy): $e');
     }
+  }
+
+  /// Binds the audio service to the current player generation, re-binding
+  /// when it follows a halted one.
+  ///
+  /// A relaunch builds a new player around the same mpv peer while the
+  /// service still observes the old wrapper, whose queue froze at close
+  /// time: the notification then follows stale state while the mini-player
+  /// follows the live one. Rebinding swaps the service to a handler on the
+  /// live wrapper (whose constructor immediately republishes), and the old
+  /// generation, detached at claim time, never publishes again. One
+  /// publisher, always the live one.
+  Future<void> ensureAudioService() {
+    if (boundHandler?.player == player) return Future.value();
+    return audioInitFlight ??= initAudioService().whenComplete(
+      () => audioInitFlight = null,
+    );
   }
 
   // The player is built lazily on first play, so the stored choice has to be
@@ -244,6 +262,7 @@ Future<void> main() async {
   });
 
   player.onFirstPlay = ensureAudioService;
+  player.onRestored = ensureAudioService;
   // Not awaited: it only has to be in place before the first track, and the
   // library should not wait on the audio session to draw.
   unawaited(AudioFocus(player).attach());
@@ -284,8 +303,8 @@ Set<String> grantPathsFor(
     if (art != null && art.isNotEmpty) paths.add('/art/$art');
     // Streaming grants for anything not already on disk. Downloaded tracks
     // resolve to a local path and never touch the network, so a grant for
-    // one would be waste. Streams ride /t/ (cloud fetch path), not /track/.
-    if (pathFor(t.sha) == null) paths.add('/t/${t.sha}');
+    // one would be waste.
+    if (pathFor(t.sha) == null) paths.add('/track/${t.sha}');
   }
   for (final r in manifest.releases) {
     final art = r.artSha;
@@ -438,6 +457,23 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
 
+  /// Navigation history and the one-instance-per-identity pane registry.
+  /// Panels are destinations rendered by this shell, not pushed routes:
+  /// history may name an identity any number of times, the registry holds
+  /// each identity once, and Back walks history.
+  final NavController _nav = NavController();
+
+  void _onNavChanged() {
+    if (!mounted) return;
+    final current = _nav.current;
+    // The bottom bar follows the tab roots. Panels paint their own chrome;
+    // when one is up, _tab is whatever tab it was opened from.
+    if (current is TabDest && current.index != _tab) {
+      _tab = current.index;
+    }
+    setState(() {});
+  }
+
   /// One key per tab. Re-tapping the active tab swaps in a fresh key, which
   /// remounts that tab's scrollable at the top. The tabs hold no
   /// PageStorageKeys, so a fresh mount always starts at offset zero -- the
@@ -484,6 +520,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _nav.addListener(_onNavChanged);
     // The screens below still take a Set<String> of in-flight shas; keep it in
     // step with the manager rather than re-plumbing six widgets.
     _downloads.addListener(_onDownloadsChanged);
@@ -509,10 +546,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.player.removeListener(_feedRadio);
     widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
+    _nav.removeListener(_onNavChanged);
+    _nav.dispose();
     // Only the listener: the manager itself belongs to TunesApp, which
     // outlives this shell.
     _downloads.removeListener(_onDownloadsChanged);
     super.dispose();
+  }
+
+  /// Persists the exact resume point: which track, and where in it.
+  ///
+  /// Awaited -- every write here must commit before the caller lets the
+  /// process die. The settings writes look instant (cache first) but commit
+  /// to disk asynchronously; an unawaited save followed by an immediate
+  /// close loses the resume point to the kill, which reads exactly like
+  /// "resume doesn't store".
+  Future<void> _persistResume() async {
+    // Settle the listen in progress. Leaving mid-track is ordinary, and an
+    // unsettled listen is one that never happened.
+    widget.history.flush();
+    // Pin the exact resume point. The player listener persists the position
+    // every five seconds, so without this a close could lose most of a
+    // track's progress -- and the sha, if the track changed within the gap.
+    final current = widget.player.current;
+    await widget.settings.setLastPlayedSha(current?.sha);
+    await widget.settings.setLastPosition(widget.player.position);
   }
 
   @override
@@ -521,15 +579,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _reload();
     }
     if (state == AppLifecycleState.paused) {
-      // Settle the listen in progress. Leaving mid-track is ordinary, and an
-      // unsettled listen is one that never happened.
-      widget.history.flush();
-      // Pin the exact resume point. The listener above persists the position
-      // every five seconds, so without this a close could lose most of a
-      // track's progress -- and the sha, if the track changed within the gap.
-      final current = widget.player.current;
-      unawaited(widget.settings.setLastPlayedSha(current?.sha));
-      unawaited(widget.settings.setLastPosition(widget.player.position));
+      unawaited(_persistResume());
     }
   }
 
@@ -756,6 +806,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// overwrite whatever the listener has since chosen.
   bool _queueRestored = false;
 
+  /// Set when restore threw, so the UI can say so once instead of failing
+  /// silently. A resume that fails invisibly reads as "resume doesn't work"
+  /// with no way to tell a store failure from a restore crash.
+  bool _restoreFailed = false;
+
   /// Puts back what was playing when the app was last closed.
   ///
   /// The queue was already being written on every play and never read, so
@@ -796,8 +851,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               : Duration(milliseconds: tracks[index].durationMs!),
         ),
       );
-    } catch (_) {
-      // A queue that cannot be restored is not worth failing a launch over.
+    } catch (e) {
+      // A queue that cannot be restored is not worth failing a launch over --
+      // but it is worth one honest line and one notice, so a broken restore
+      // reads as broken rather than as forgotten.
+      DiagLog.log('restore failed: $e');
+      if (mounted) setState(() => _restoreFailed = true);
     }
   }
 
@@ -1015,10 +1074,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The header avatar now goes straight to settings. The old sheet was a
   /// read-only diagnostics panel, and its contents live under Library there.
   void _openProfile(int trackCount) {
-    openTunesPanel(
-      context,
+    _nav.openPanel(
       TunesPanels.settings,
-      (_) => SettingsPage(
+      () => SettingsPage(
         settings: widget.settings,
         auth: widget.auth,
         player: widget.player,
@@ -1048,10 +1106,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openArtist(String artist, TunesManifest manifest) {
-    openTunesPanel(
-      context,
+    _nav.openPanel(
       TunesPanels.artist(artist),
-      (_) => ArtistPage(
+      () => ArtistPage(
         artist: artist,
         manifest: manifest,
         client: widget.client,
@@ -1068,10 +1125,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openAlbum(ManifestRelease release, TunesManifest manifest) {
-    openTunesPanel(
-      context,
+    _nav.openPanel(
       TunesPanels.album(release.id),
-      (_) => AlbumPage(
+      () => AlbumPage(
         release: release,
         manifest: manifest,
         player: widget.player,
@@ -1087,10 +1143,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openNowPlaying() {
-    openTunesPanel(
-      context,
+    _nav.openPanel(
       TunesPanels.nowPlaying,
-      (_) => NowPlayingPage(
+      () => NowPlayingPage(
         player: widget.player,
         manifest: _manifest ?? const TunesManifest(tracks: [], releases: []),
         store: widget.store,
@@ -1149,6 +1204,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Widget _buildShell(BuildContext context) {
+    if (_restoreFailed) {
+      // Consumed, not setState: the notice is the only output, and it fires
+      // once via the post-frame callback below.
+      _restoreFailed = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't pick up where you left off"),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      });
+    }
     // Backing out of the last screen means leaving the app, and leaving should
     // behave the same way whether you backed out or swiped it away.
     //
@@ -1181,239 +1250,265 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        // Halt, not stop: backing out of the app quiets it, but the queue and
-        // the resume point survive so reopening lands back where it was.
-        // Stopping here used to wipe the persisted queue with it.
-        if (widget.settings.stopOnClose) widget.player.halt();
-        // Leave regardless of the setting: refusing to pop is a mechanism for
-        // getting here, not a decision about whether the app should close.
-        // Swallowing it would trap someone who has turned stopOnClose off.
-        SystemNavigator.pop();
+        // History first: Back walks the panel trail, and only the tab root
+        // below it means leaving the app.
+        if (_nav.back()) return;
+        // Persist first, then halt, then leave: the resume writes must commit
+        // before the process can die, or the close loses them to the kill.
+        // Bounded: a wedged write must never trap Back.
+        unawaited(
+          _persistResume()
+              .timeout(const Duration(seconds: 2), onTimeout: () {})
+              .then((_) {
+                // Halt, not stop: backing out of the app quiets it, but the queue and
+                // the resume point survive so reopening lands back where it was.
+                // Stopping here used to wipe the persisted queue with it.
+                if (widget.settings.stopOnClose) widget.player.halt();
+                // Leave regardless of the setting: refusing to pop is a mechanism for
+                // getting here, not a decision about whether the app should close.
+                // Swallowing it would trap someone who has turned stopOnClose off.
+                SystemNavigator.pop();
+              }),
+        );
       },
       child: Scaffold(
-        body: SafeArea(
-          child: ListenableBuilder(
-            listenable: widget.reachability,
-            builder: (context, _) {
-              final offline = widget.reachability.offline;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Above everything, and only when there is something to say.
-                  // A strip rather than a dialog: nobody opened a music app to
-                  // be told about software.
-                  if (_update != null && !_updateDismissed)
-                    UpdateBanner(
-                      update: _update!,
-                      progress: _updateProgress,
-                      needsPermission: _needsInstallPermission,
-                      onGrantPermission: () async {
-                        await _installer.openInstallSettings();
-                        // Re-checked on return rather than assumed: the person
-                        // may have looked at the settings page and backed out.
-                        final ok = await _installer.canInstall();
-                        if (mounted) {
-                          setState(() => _needsInstallPermission = !ok);
-                        }
-                      },
-                      onInstall: _startUpdate,
-                      onDismiss: () => setState(() => _updateDismissed = true),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.lg,
-                      Space.lg,
-                      Space.lg,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () {
-                            final count = _manifest?.tracks.length ?? 0;
-                            _openProfile(count);
-                          },
-                          // Listens to settings directly: choosing a picture in
-                          // the screen this opens should change the thing you
-                          // came back to, without a restart.
-                          child: ListenableBuilder(
-                            listenable: widget.settings,
-                            builder: (context, _) => ProfileAvatar(
-                              name: widget.settings.displayName,
-                              path: widget.settings.avatarPath,
-                              size: 38,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: Space.md),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('tunes', style: TypeScale.wordmark),
-                              // The library's size belongs to the wordmark, not
-                              // to the feed. It used to scroll away with the
-                              // first rail, which made it read as a caption on
-                              // "Just added" rather than a description of the
-                              // library.
-                              //
-                              // Home only: on Search or Discover it would be a
-                              // number about somewhere else.
-                              if (_tab == 0 && _manifest != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    _libraryLine(_manifest!),
-                                    style: TypeScale.caption,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (offline) ...[
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.fromLTRB(
-                        Space.lg,
-                        Space.md,
-                        Space.lg,
-                        0,
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: Space.md,
-                        vertical: Space.sm,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Tones.surfaceRaised,
-                        borderRadius: BorderRadius.circular(
-                          RadiusTokens.control,
-                        ),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(
-                            Icons.cloud_off_rounded,
-                            size: 16,
-                            color: Tones.textMuted,
-                          ),
-                          SizedBox(width: Space.sm),
-                          Expanded(
-                            child: Text(
-                              'Offline — playing downloads only',
-                              style: TypeScale.body,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  Expanded(child: _buildContent(offline)),
-                ],
-              );
-            },
-          ),
-        ),
+        body: NavScope(controller: _nav, child: _buildBody()),
         // The player sits above the navigation rather than beside it: it is a
         // layer over the app, and the nav is the app's own furniture. The
         // separation is a hairline and a surface change, not a shadow -- this
         // interface has no other shadows and one would read as a mistake.
-        bottomNavigationBar: DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Tones.surface,
-            border: Border(top: BorderSide(color: Tones.hairline)),
-          ),
-          // Bottom only: the top edge of this bar is the app's own, and the
-          // gesture strip is what would otherwise sit over the labels.
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                MiniPlayerBar(
-                  player: widget.player,
-                  onTap: _openNowPlaying,
-                  artUrlFor: _artUrlFor,
+        //
+        // Tab roots only: a panel paints its own chrome full-screen, exactly
+        // as pushed routes used to cover it.
+        bottomNavigationBar: _nav.current is PanelDest
+            ? null
+            : _buildBottomNav(),
+      ),
+    );
+  }
+
+  /// What the Scaffold body shows: the history top. Tab roots render the
+  /// header, feed and navigation chrome; panels paint full-screen.
+  Widget _buildBody() {
+    final current = _nav.current;
+    if (current is PanelDest) {
+      // Keyed by identity, so a revisit re-activates the same instance
+      // rather than rebuilding it -- one pane per identity, always.
+      return KeyedSubtree(
+        key: ValueKey(current.id),
+        child: _nav.instanceFor(current.id),
+      );
+    }
+    return _buildTabRoot();
+  }
+
+  Widget _buildTabRoot() {
+    return SafeArea(
+      child: ListenableBuilder(
+        listenable: widget.reachability,
+        builder: (context, _) {
+          final offline = widget.reachability.offline;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Above everything, and only when there is something to say.
+              // A strip rather than a dialog: nobody opened a music app to
+              // be told about software.
+              if (_update != null && !_updateDismissed)
+                UpdateBanner(
+                  update: _update!,
+                  progress: _updateProgress,
+                  needsPermission: _needsInstallPermission,
+                  onGrantPermission: () async {
+                    await _installer.openInstallSettings();
+                    // Re-checked on return rather than assumed: the person
+                    // may have looked at the settings page and backed out.
+                    final ok = await _installer.canInstall();
+                    if (mounted) {
+                      setState(() => _needsInstallPermission = !ok);
+                    }
+                  },
+                  onInstall: _startUpdate,
+                  onDismiss: () => setState(() => _updateDismissed = true),
                 ),
-                NavigationBarTheme(
-                  data: NavigationBarThemeData(
-                    // Grows with the system font scale, capped: at the largest
-                    // settings a fixed 64 clips the labels, and an uncapped bar
-                    // eats the screen those labels are there to navigate.
-                    height:
-                        64 *
-                        MediaQuery.textScalerOf(context)
-                            .scale(1.0)
-                            .clamp(1.0, 1.4),
-                    labelBehavior:
-                        NavigationDestinationLabelBehavior.alwaysShow,
-                    indicatorColor: Colors.transparent,
-                    backgroundColor: Tones.surface,
-                    surfaceTintColor: Colors.transparent,
-                    labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                      final selected = states.contains(WidgetState.selected);
-                      return TypeScale.caption.copyWith(
-                        color: selected ? Tones.text : Tones.textMuted,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      );
-                    }),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.lg,
+                  Space.lg,
+                  Space.lg,
+                  0,
+                ),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        final count = _manifest?.tracks.length ?? 0;
+                        _openProfile(count);
+                      },
+                      // Listens to settings directly: choosing a picture in
+                      // the screen this opens should change the thing you
+                      // came back to, without a restart.
+                      child: ListenableBuilder(
+                        listenable: widget.settings,
+                        builder: (context, _) => ProfileAvatar(
+                          name: widget.settings.displayName,
+                          path: widget.settings.avatarPath,
+                          size: 38,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('tunes', style: TypeScale.wordmark),
+                          // The library's size belongs to the wordmark, not
+                          // to the feed. It used to scroll away with the
+                          // first rail, which made it read as a caption on
+                          // "Just added" rather than a description of the
+                          // library.
+                          //
+                          // Home only: on Search or Discover it would be a
+                          // number about somewhere else.
+                          if (_tab == 0 && _manifest != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                _libraryLine(_manifest!),
+                                style: TypeScale.caption,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (offline) ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    Space.md,
+                    Space.lg,
+                    0,
                   ),
-                  child: NavigationBar(
-                    selectedIndex: _tab,
-                    onDestinationSelected: _onTabSelected,
-                    destinations: const [
-                      NavigationDestination(
-                        icon: Icon(Icons.home_outlined, color: Tones.textMuted),
-                        selectedIcon: Icon(
-                          Icons.home_rounded,
-                          color: Tones.text,
-                        ),
-                        label: 'Home',
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Space.md,
+                    vertical: Space.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Tones.surfaceRaised,
+                    borderRadius: BorderRadius.circular(RadiusTokens.control),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.cloud_off_rounded,
+                        size: 16,
+                        color: Tones.textMuted,
                       ),
-                      NavigationDestination(
-                        icon: Icon(
-                          Icons.travel_explore_outlined,
-                          color: Tones.textMuted,
+                      SizedBox(width: Space.sm),
+                      Expanded(
+                        child: Text(
+                          'Offline — playing downloads only',
+                          style: TypeScale.body,
                         ),
-                        selectedIcon: Icon(
-                          Icons.travel_explore_rounded,
-                          color: Tones.text,
-                        ),
-                        label: 'Discover',
-                      ),
-                      NavigationDestination(
-                        icon: Icon(
-                          Icons.search_rounded,
-                          color: Tones.textMuted,
-                        ),
-                        selectedIcon: Icon(
-                          Icons.search_rounded,
-                          color: Tones.text,
-                        ),
-                        label: 'Search',
-                      ),
-                      NavigationDestination(
-                        icon: Icon(
-                          Icons.library_music_outlined,
-                          color: Tones.textMuted,
-                        ),
-                        selectedIcon: Icon(
-                          Icons.library_music_rounded,
-                          color: Tones.text,
-                        ),
-                        label: 'Library',
                       ),
                     ],
                   ),
                 ),
               ],
+              Expanded(child: _buildContent(offline)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// The mini-player over the tab bar: a layer over the app while the nav is
+  /// its furniture. Tab roots only -- panels paint their own chrome.
+  Widget _buildBottomNav() {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Tones.surface,
+        border: Border(top: BorderSide(color: Tones.hairline)),
+      ),
+      // Bottom only: the top edge of this bar is the app's own, and the
+      // gesture strip is what would otherwise sit over the labels.
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MiniPlayerBar(
+              player: widget.player,
+              onTap: _openNowPlaying,
+              artUrlFor: _artUrlFor,
             ),
-          ),
+            NavigationBarTheme(
+              data: NavigationBarThemeData(
+                // Grows with the system font scale, capped: at the largest
+                // settings a fixed 64 clips the labels, and an uncapped bar
+                // eats the screen those labels are there to navigate.
+                height:
+                    64 *
+                    MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.4),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                indicatorColor: Colors.transparent,
+                backgroundColor: Tones.surface,
+                surfaceTintColor: Colors.transparent,
+                labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return TypeScale.caption.copyWith(
+                    color: selected ? Tones.text : Tones.textMuted,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  );
+                }),
+              ),
+              child: NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: _onTabSelected,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined, color: Tones.textMuted),
+                    selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
+                    label: 'Home',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(
+                      Icons.travel_explore_outlined,
+                      color: Tones.textMuted,
+                    ),
+                    selectedIcon: Icon(
+                      Icons.travel_explore_rounded,
+                      color: Tones.text,
+                    ),
+                    label: 'Discover',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.search_rounded, color: Tones.textMuted),
+                    selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
+                    label: 'Search',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(
+                      Icons.library_music_outlined,
+                      color: Tones.textMuted,
+                    ),
+                    selectedIcon: Icon(
+                      Icons.library_music_rounded,
+                      color: Tones.text,
+                    ),
+                    label: 'Library',
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1496,11 +1591,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// remounts at offset zero. Tapping Home twice doing nothing was the
   /// complaint; every tab behaves the same way.
   void _onTabSelected(int i) {
+    // The tab bar only answers at tab roots -- panels cover it -- but a tap
+    // can still land with panels above (rotation, restoration), so drain
+    // those first either way.
     if (i == _tab) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      while (_nav.current is PanelDest) {
+        _nav.back();
+      }
       setState(() => _tabKeys[i] = UniqueKey());
       return;
     }
+    _nav.selectTab(i);
     setState(() => _tab = i);
   }
 }

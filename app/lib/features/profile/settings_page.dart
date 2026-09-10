@@ -10,6 +10,7 @@ import '../../core/platform/diag_log.dart';
 import '../../core/data/avatar.dart';
 import '../../core/auth/tunes_auth.dart';
 import '../../core/data/settings_store.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/profile_avatar.dart';
 
@@ -256,6 +257,10 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(
         backgroundColor: Tones.surface,
         title: const Text('Settings', style: TypeScale.heading),
+        leading: IconButton(
+          onPressed: () => NavScope.of(context).back(),
+          icon: const Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
+        ),
       ),
       body: ListenableBuilder(
         listenable: s,
@@ -456,7 +461,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   'than the changes since last time. Nothing local is lost.',
               onTap: () async {
                 widget.onResync();
-                Navigator.of(context).maybePop();
+                NavScope.of(context).back();
               },
             ),
 

@@ -4,7 +4,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
-import '../../core/nav/tunes_nav.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -84,7 +84,7 @@ class AlbumPage extends StatelessWidget {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
+                    onPressed: () => NavScope.of(context).back(),
                     icon: const Icon(
                       Icons.arrow_back_rounded,
                       color: Tones.textMuted,
@@ -136,10 +136,9 @@ class AlbumPage extends StatelessWidget {
                     // One panel at a time: an album reached from an artist (or
                     // vice versa) replaces it, and the same artist twice is a
                     // no-op rather than a twin route.
-                    onTap: () => openTunesPanel(
-                      context,
+                    onTap: () => NavScope.of(context).openPanel(
                       TunesPanels.artist(release.artist),
-                      (_) => ArtistPage(
+                      () => ArtistPage(
                         artist: release.artist,
                         manifest: manifest,
                         player: player,
@@ -218,10 +217,9 @@ class AlbumPage extends StatelessWidget {
       ),
       bottomNavigationBar: MiniPlayerBar(
         player: player,
-        onTap: () => openTunesPanel(
-          context,
+        onTap: () => NavScope.of(context).openPanel(
           TunesPanels.nowPlaying,
-          (_) => NowPlayingPage(
+          () => NowPlayingPage(
             player: player,
             manifest: manifest,
             store: store,

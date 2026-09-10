@@ -6,6 +6,7 @@ import '../../core/data/likes_store.dart';
 import '../../core/data/playlist_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
+import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -193,6 +194,10 @@ class _LibraryViewState extends State<LibraryView> {
       appBar: AppBar(
         backgroundColor: Tones.surface,
         title: const Text('Liked songs', style: TypeScale.heading),
+        leading: IconButton(
+          onPressed: () => NavScope.of(context).back(),
+          icon: const Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
+        ),
       ),
       body: ListenableBuilder(
         listenable: LikesScope.maybeOf(context) ?? _never,
@@ -311,9 +316,9 @@ class _LibraryViewState extends State<LibraryView> {
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
                   ),
-                  onTap: () => Navigator.of(
-                    context,
-                  ).push(MaterialPageRoute<void>(builder: (_) => _likedPage())),
+                  onTap: () =>
+                      NavScope.of(context)
+                          .openPanel(TunesPanels.liked, () => _likedPage()),
                 );
               }
               if (index == 1) {
@@ -342,15 +347,14 @@ class _LibraryViewState extends State<LibraryView> {
                   Icons.chevron_right_rounded,
                   color: Tones.textMuted,
                 ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => PlaylistPage(
-                      summary: p,
-                      store: store,
-                      player: widget.player,
-                      tracks: widget.tracks,
-                      artUrlFor: widget.artUrlFor,
-                    ),
+                onTap: () => NavScope.of(context).openPanel(
+                  TunesPanels.playlist(p.id),
+                  () => PlaylistPage(
+                    summary: p,
+                    store: store,
+                    player: widget.player,
+                    tracks: widget.tracks,
+                    artUrlFor: widget.artUrlFor,
                   ),
                 ),
               );

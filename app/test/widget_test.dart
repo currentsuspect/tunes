@@ -21,6 +21,7 @@ import 'package:tunes/core/net/update_check.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
+import 'package:tunes/features/artist/artist_page.dart';
 import 'package:tunes/features/player/mini_player_bar.dart';
 import 'package:tunes/core/auth/media_grants.dart';
 import 'package:tunes/core/auth/token_store.dart';
@@ -979,6 +980,93 @@ void main() {
     expect(find.text('Artist'), findsOneWidget);
     expect(find.text('Play all'), findsOneWidget);
     expect(find.text('Vax'), findsOneWidget); // page title
+  });
+
+  TunesManifest albumManifest() {
+    final tracks = [
+      _track(
+        'MAFIA',
+        'flac',
+        950000,
+        artist: 'Travis Scott',
+        album: 'ESCAPE PLAN / MAFIA',
+        sha: 'a' * 64,
+        releaseId: 'rel-1',
+      ),
+    ];
+    return TunesManifest(
+      tracks: tracks,
+      releases: [
+        ManifestRelease(
+          id: 'rel-1',
+          title: 'ESCAPE PLAN / MAFIA',
+          artist: 'Travis Scott',
+          year: '2021',
+          artSha: null,
+          type: 'single',
+          totalTracks: null,
+          trackShas: ['a' * 64],
+        ),
+      ],
+    );
+  }
+
+  testWidgets('back from an album returns to the artist, not home', (
+    tester,
+  ) async {
+    // The regression: panels used to be replaced on open, so Back from an
+    // album skipped the artist it came from and fell through to Home.
+    await pumpApp(
+      tester,
+      _FakeClient(() async => albumManifest()),
+      FakeTunePlayer(),
+    );
+
+    await tester.tap(find.text('Travis Scott').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Play all'), findsOneWidget);
+
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Album'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Play all'), findsOneWidget);
+    expect(find.text('Album'), findsNothing);
+  });
+
+  testWidgets('revisiting panels keeps one instance each', (tester) async {
+    // History holds unique identities; a revisit moves to the top. Artist
+    // -> Album -> Artist -> Back lands on the album, Back again on Home,
+    // and only one of each page exists throughout.
+    await pumpApp(
+      tester,
+      _FakeClient(() async => albumManifest()),
+      FakeTunePlayer(),
+    );
+
+    await tester.tap(find.text('Travis Scott').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
+    // The album's artist link revisits the artist: a navigation event that
+    // repositions, not a duplicate pane.
+    await tester.tap(find.text('Travis Scott').first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ArtistPage), findsOneWidget);
+    expect(find.byType(AlbumPage), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlbumPage), findsOneWidget);
+    expect(find.text('MAFIA'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(ArtistPage), findsNothing);
+    expect(find.byType(AlbumPage), findsNothing);
   });
 
   testWidgets('search filters and plays results', (tester) async {
