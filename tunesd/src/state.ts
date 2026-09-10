@@ -102,6 +102,30 @@ export class State {
     return { sha: entry.sha, caption: entry.caption ?? null, fileName: entry.fileName ?? null };
   }
 
+  /** Every sighting in the given channels, for the cloud publish.
+   *
+   * Oldest first, each carrying its first-seen stamp: the publisher sends
+   * only rows newer than its watermark, so a cycle is usually an empty diff
+   * instead of 637 upserts. D1's free tier counts writes, and a full rewrite
+   * every five minutes tripped it. */
+  sightingsFor(channelIds: string[]): { sha: string; chat: number; msg: number; addedAt: string | null }[] {
+    const live = new Set(channelIds);
+    const out: { sha: string; chat: number; msg: number; addedAt: string | null }[] = [];
+    for (const [key, v] of Object.entries(this.data.seen)) {
+      const i = key.lastIndexOf(":");
+      if (i < 0) continue;
+      const channelId = key.slice(0, i);
+      if (!live.has(channelId)) continue;
+      const messageId = Number(key.slice(i + 1));
+      if (!Number.isInteger(messageId)) continue;
+      const sha = typeof v === "string" ? v : v.sha;
+      const addedAt = typeof v === "string" ? null : (v.addedAt ?? null);
+      out.push({ sha, chat: Number(channelId), msg: messageId, addedAt });
+    }
+    out.sort((a, b) => (a.addedAt ?? "").localeCompare(b.addedAt ?? ""));
+    return out;
+  }
+
   /** Reverse lookup: which message holds `sha`, if any.
    *
    * The seen index runs message → sha; the on-demand fetcher needs the other

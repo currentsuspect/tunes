@@ -5,7 +5,8 @@ compatibility_date = "2026-09-01"
 # ACCESS_SECRET and MEDIA_SECRET are NOT here. They are Worker secrets, set
 # with `wrangler secret put`, so they never land in the repo (AGENTS.md §1:
 # no secrets in the repo). Two separate keys so either can be rotated without
-# invalidating the other.
+# invalidating the other. INTERNAL_PUBLISH_KEY joins them: the box's service
+# key for POST /internal/publish, same treatment.
 
 # The Worker owns the whole hostname, not just /auth. Requests hit it before
 # origin, so an unsigned media request is refused without the tunnel ever
@@ -23,3 +24,17 @@ binding = "DB"
 database_name = "tunes-auth"
 database_id = "6c1fe5e2-5806-4f84-8e87-e746ca33e077"
 migrations_dir = "migrations"
+
+# Shared tune cache. The box publishes manifest.json here every cycle and the
+# fetch path stores bytes under their sha; /manifest is served from it.
+[[r2_buckets]]
+binding = "CACHE"
+bucket_name = "tunes-cache"
+
+# Cloud byte path. /t/<sha> is served by the tunes-fetch worker (DO session +
+# R2) instead of the tunnel origin: same public hostname, internal routing,
+# so no second DNS name and no second gate. The device grant is verified
+# before anything crosses the boundary.
+[[services]]
+binding = "FETCH_WORKER"
+service = "tunes-fetch"

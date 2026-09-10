@@ -1,0 +1,38 @@
+name = "tunes-fetch"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Reached only through the tunes-auth service binding, never directly:
+# one public hostname, internal routing. The phone streams /t/<sha> from
+# tunes.aestra.studio and this worker serves it without ever being addressed.
+# Secrets (never in repo): TG_API_ID via [vars], TG_API_HASH + TG_SESSION +
+# MEDIA_SECRET via `wrangler secret put`. The session is the isolated spike
+# key, revocable in Telegram Settings -> Devices.
+
+[vars]
+TG_API_ID = "34817058"
+
+
+[[durable_objects.bindings]]
+name = "FETCHER"
+class_name = "Fetcher"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Fetcher"]
+
+[[r2_buckets]]
+binding = "CACHE"
+bucket_name = "tunes-cache"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tunes-auth"
+database_id = "6c1fe5e2-5806-4f84-8e87-e746ca33e077"
+
+
+
+[triggers]
+crons = ["0 4 * * *"]
+

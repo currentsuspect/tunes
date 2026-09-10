@@ -22,6 +22,8 @@ import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
+import { publishCloud } from "./cloudpublish.js";
+import { selectNewRows } from "./cloudpublish.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
@@ -1190,6 +1192,13 @@ async function main(): Promise<void> {
       );
     };
 
+    // In-memory publish watermarks: rows newer than rowsSince, manifest when
+    // its integrity moves. A restart re-sends the full set once, which is
+    // hundreds of writes rarely -- against hundreds every five minutes
+    // before, which tripped D1's free write cap.
+    let rowsSince: string | null = null;
+    let lastIntegrity: string | null = null;
+
     const run = async (): Promise<void> => {
       const result = await engine.runCycle(channels);
       log.info({
@@ -1198,6 +1207,42 @@ async function main(): Promise<void> {
         aborted: result.aborted,
         reason: result.reason,
       });
+      // Cloud publish, best effort: the manifest and new sightings go to the
+      // edge once per cycle. A failure only logs -- serving never waits on it
+      // and the next cycle retries. Not awaited into the cadence: the scan
+      // schedule is ban-safety, publishing must not shift it.
+      if (env.publishUrl && env.publishKey) {
+        const ids = channels.map((c) => String(c.id));
+        void (async () => {
+          try {
+            const manifest = await manifestBuilder();
+            const integrity =
+              (manifest as { integrity?: unknown }).integrity ?? null;
+            const { rows, watermark } = selectNewRows(
+              state.sightingsFor(ids),
+              rowsSince
+            );
+            const manifestChanged =
+              typeof integrity === "string" && integrity !== lastIntegrity;
+            if (rows.length === 0 && !manifestChanged) return;
+            const done = await publishCloud({
+              url: env.publishUrl as string,
+              key: env.publishKey as string,
+              manifest,
+              rows,
+              log,
+            });
+            if (done !== null) {
+              rowsSince = watermark;
+              if (manifestChanged && typeof integrity === "string") {
+                lastIntegrity = integrity;
+              }
+            }
+          } catch (e) {
+            log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
+          }
+        })();
+      }
       return;
     };
 

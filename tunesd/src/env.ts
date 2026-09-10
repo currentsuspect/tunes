@@ -38,6 +38,15 @@ export interface TunesdEnv {
   /// the same footing as the music.
   updateToken: string | null;
 
+  /// Where to publish the manifest + sightings after each cycle (the edge
+  /// /internal/publish route). Null disables publishing: the box serves
+  /// everything itself, as before.
+  publishUrl: string | null;
+
+  /// The edge's service key for that route. Opaque; the edge holds the
+  /// Cloudflare side, so this never needs rotation alongside anything else.
+  publishKey: string | null;
+
   /// How often to ask GitHub for a newer release.
   updatePollMs: number;
 }
@@ -89,6 +98,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): TunesdEnv {
     host: env["TUNESD_HOST"] ?? "0.0.0.0",
     updateRepo: env["TUNESD_UPDATE_REPO"] ?? "currentsuspect/tunes",
     updateToken: env["TUNESD_UPDATE_TOKEN"] || null,
+    publishUrl: env["INTERNAL_PUBLISH_URL"] || null,
+    publishKey: env["INTERNAL_PUBLISH_KEY"] || null,
     // Fifteen minutes. Releases arrive minutes after a merge and nobody is
     // waiting on the notification, so this trades nothing for a poll rate
     // that will not draw rate-limit attention.

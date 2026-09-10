@@ -24,6 +24,7 @@ import {
 } from "./crypto.js";
 import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
+import { handlePublish } from "./publish.js";
 import {
   accountById,
   deviceById,
@@ -46,6 +47,12 @@ export interface Env {
   /// value, prove a grant dies, put it back. Capped, so a bad value cannot
   /// mint a permanent capability.
   MEDIA_TTL_SEC?: string;
+  /** Service key the box publishes with. Absent in tests; publish denies all. */
+  INTERNAL_PUBLISH_KEY?: string;
+  /** Shared tune cache. Absent in tests; manifest falls through to origin. */
+  CACHE?: R2Bucket;
+  /** Cloud byte path. Absent in tests; /t/ falls through to origin deny. */
+  FETCH_WORKER?: Fetcher;
 }
 
 const DEFAULT_ACCESS_TTL_SEC = 600;
@@ -53,8 +60,9 @@ const DEFAULT_ACCESS_TTL_SEC = 600;
 /** Ceiling on one batch mint. Longer than any real queue, short enough to bound work. */
 const MAX_GRANTS_PER_REQUEST = 500;
 
-/** The only shape that may ever be signed. Mirrors tunesd's own route matching. */
-const MEDIA_PATH = /^\/(track|art)\/[0-9a-f]{64}$/;
+/** The only shapes that may ever be signed. Mirrors tunesd's own route
+ * matching, plus the cloud fetcher's /t/ prefix, which signs the same way. */
+const MEDIA_PATH = /^\/(track|art|t)\/[0-9a-f]{64}$/;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -216,15 +224,53 @@ export default {
     }
 
     // ---- everything else: the media edge ----------------------------------
+    // ---- POST /internal/publish ------------------------------------------
+    // Box -> edge: manifest JSON to R2, new sightings to D1. The only write
+    // route on this Worker, and the only one keyed by a service secret
+    // rather than a device credential.
+    if (url.pathname === "/internal/publish") {
+      return handlePublish(req, env);
+    }
+
+    // ---- GET /manifest -----------------------------------------------------
+    // Served from R2 once the box publishes it; until then (or when the
+    // binding is absent, as in tests) the request falls through to origin
+    // exactly as before. Short client cache: the manifest changes on scan
+    // cadence, not per request.
+    //
+    // After the media gate, deliberately: the origin path requires a device
+    // credential, and a copy in R2 must not drop that gate.
+    const rejected = await handleMedia(req, env, nowSec);
+    if (rejected) return rejected;
+    if (url.pathname === "/manifest" && req.method === "GET" && env.CACHE) {
+      const obj = await env.CACHE.get("manifest.json");
+      if (obj) {
+        return new Response(obj.body, {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "public, max-age=60",
+          },
+        });
+      }
+    }
+
     // Stateless from here down. No env.DB below this line, deliberately: the
     // path that serves bytes must not depend on the database, or the origin
     // and cache layers cannot move later without dragging auth along.
-    const rejected = await handleMedia(req, env, nowSec);
-    if (rejected) return rejected;
-
-    // Validated, or a public path. Continue to origin — which for
-    // tunes.aestra.studio is tunesd through the tunnel. The Worker does not
-    // know or care where the bytes come from.
+    // Validated, or a public path. The cloud byte path goes to the fetch
+    // worker over a service binding -- same hostname externally, and the
+    // grant above was already verified, so nothing ungated crosses over.
+    // Without the binding (tests) it falls through to the origin deny below.
+    const cloudTrack =
+      (req.method === "GET" || req.method === "HEAD") &&
+      /^\/t\/[0-9a-f]{64}$/.test(url.pathname)
+        ? env.FETCH_WORKER
+        : undefined;
+    if (cloudTrack) {
+      return cloudTrack.fetch(new Request(url.toString(), req));
+    }
+    // Continue to origin — which for tunes.aestra.studio is tunesd through
+    // the tunnel. The Worker does not know or care where the bytes come from.
     return fetch(stripSignature(req));
   },
 };

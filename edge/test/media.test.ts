@@ -23,6 +23,13 @@ describe("media edge", () => {
     expect(await verdict(signed)).toBeNull();
   });
 
+  it("passes a validly signed cloud track through to the fetch worker", async () => {
+    // /t/<sha> carries the same device grant shape; the gate must not refuse
+    // what the signer mints.
+    const signed = await signMediaUrl(`/t/${SHA}`, "dev-1", NOW + 300, ENV.MEDIA_SECRET);
+    expect(await verdict(signed)).toBeNull();
+  });
+
   it("rejects an unsigned, unauthenticated track request", async () => {
     const res = await verdict(`/track/${SHA}`);
     expect(res?.status).toBe(403);

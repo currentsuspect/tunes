@@ -28,7 +28,7 @@ const PUBLIC_PATHS = new Set(["/update", "/health"]);
  * tunesd itself matches in serve.ts, and keeping it strict is what stops a
  * signature from ever being minted over a traversal or an arbitrary path.
  */
-const MEDIA_PATH = /^\/(track|art)\/[0-9a-f]{64}$/;
+const MEDIA_PATH = /^\/(track|art|t)\/[0-9a-f]{64}$/;
 
 function deny(reason: string, status = 403): Response {
   // The reason is for our own logs and the app's error surface; it names the
