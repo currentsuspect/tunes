@@ -133,7 +133,7 @@ void main() {
       // First play: nothing local, so a signed-or-bare URL -- and a
       // background cache starts behind it.
       final first = resolver.uriFor(t);
-      expect(first, startsWith('http://box:4780/track/'));
+      expect(first, startsWith('http://box:4780/t/'));
       expect(caching.jobFor('b' * 64), isNotNull);
       // Let the background transfer land.
       for (var i = 0; i < 50 && !cacheStore.contains('b' * 64); i++) {

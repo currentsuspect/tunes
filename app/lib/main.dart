@@ -155,7 +155,7 @@ Future<void> main() async {
     // network, so signing them would be pure latency.
     prepareQueue: (tracks) => grants.prime([
       for (final t in tracks)
-        if (store.pathFor(t.sha) == null) '/track/${t.sha}',
+        if (store.pathFor(t.sha) == null) '/t/${t.sha}',
     ]),
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
@@ -284,8 +284,8 @@ Set<String> grantPathsFor(
     if (art != null && art.isNotEmpty) paths.add('/art/$art');
     // Streaming grants for anything not already on disk. Downloaded tracks
     // resolve to a local path and never touch the network, so a grant for
-    // one would be waste.
-    if (pathFor(t.sha) == null) paths.add('/track/${t.sha}');
+    // one would be waste. Streams ride /t/ (cloud fetch path), not /track/.
+    if (pathFor(t.sha) == null) paths.add('/t/${t.sha}');
   }
   for (final r in manifest.releases) {
     final art = r.artSha;

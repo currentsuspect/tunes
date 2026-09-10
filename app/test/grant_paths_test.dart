@@ -53,12 +53,12 @@ void main() {
 
   test('streams anything not on disk', () {
     final paths = grantPathsFor(manifest(), (_) => null);
-    expect(paths, contains('/track/${'s' * 64}'));
+    expect(paths, contains('/t/${'s' * 64}'));
   });
 
   test('a download needs no stream grant but keeps its art', () {
     final paths = grantPathsFor(manifest(), (sha) => '/disk/$sha');
-    expect(paths, isNot(contains('/track/${'s' * 64}')));
+    expect(paths, isNot(contains('/t/${'s' * 64}')));
     expect(paths, contains('/art/${'t' * 64}'));
     expect(paths, contains('/art/${'a' * 64}'));
   });

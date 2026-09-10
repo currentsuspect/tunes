@@ -161,7 +161,8 @@ The app knows these endpoints and nothing else:
 ```text
 GET    /manifest        library state (checksummed, versioned)
 GET    /art/*           cover bytes
-GET    /track/*         track bytes — stream or download, original bytes only
+GET    /track/*         track bytes — downloads, original bytes only
+GET    /t/*             track bytes — streams (DO + R2 + Telegram), same grant
 POST   /download        mark a track for device download
 
 POST   /auth/redeem     invite code → device enrolment + refresh token
