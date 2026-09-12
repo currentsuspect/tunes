@@ -93,6 +93,13 @@ This is why R128 gain lives at the playback edge, why dedupe is non-destructive,
 
 ## 1.8 Stream first, keep what you love
 
+**Status, corrected 2026-09-08:** the on-demand fetch below was never built.
+`serve.ts` answers a cache miss with a 404, so the object store is not a cache
+in front of Telegram — it is a second complete copy of the library carrying the
+whole availability burden. See `docs/ORIGIN.md` for what is actually
+load-bearing (153 KB of session and sha→message map, against 11.97 GB of
+re-downloadable objects) and the sequence for fixing it.
+
 | State | Behavior |
 |---|---|
 | Not downloaded | **stream immediately** — tunesd fetches from Telegram on demand, serves original bytes |
