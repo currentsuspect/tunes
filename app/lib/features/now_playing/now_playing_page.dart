@@ -660,6 +660,7 @@ class _Artwork extends StatelessWidget {
         final side = available.clamp(0.0, 420.0);
         final art = Artwork(
           url: track.artSha == null ? null : artUrlFor(track.artSha!),
+          artSha: track.artSha,
           size: side,
           // Same decode as the mini bar's copy, so the flight has nothing
           // left to load when it arrives.

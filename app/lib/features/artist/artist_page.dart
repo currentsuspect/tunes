@@ -133,6 +133,7 @@ class _ArtistPageState extends State<ArtistPage> {
                         tag: 'artist-$artist',
                         child: Artwork(
                           url: photo == null ? null : widget.artUrlFor(photo),
+                          artSha: photo,
                           size: 140,
                           borderRadius: 70,
                           shared: true,

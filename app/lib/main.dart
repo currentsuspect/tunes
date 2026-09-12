@@ -15,6 +15,7 @@ import 'features/updates/update_banner.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
+import 'core/data/art_store.dart';
 import 'core/data/download_manager.dart';
 import 'core/data/download_store.dart';
 import 'core/data/playback_cache.dart';
@@ -88,6 +89,11 @@ Future<void> main() async {
   final support = await getApplicationSupportDirectory();
   final store = DownloadStore(support);
   await store.load();
+  // Covers live beside downloads, not in them: a downloaded library with
+  // empty frames is half an offline copy. Content-addressed like the audio,
+  // so presence is the whole index and nothing here ever goes stale.
+  final artStore = ArtStore(Directory('${support.path}/art'));
+  await artStore.load();
   final db = TunesDatabase();
   final manifestStore = ManifestStore(db);
   final queueStore = QueueStore(db);
@@ -107,6 +113,7 @@ Future<void> main() async {
   // to someone whose tunesd is somewhere else without rebuilding it for them.
   // Falls back to _tunesdUrl when unset, which is every existing install.
   final client = TunesClient(settings.serverUrl ?? _tunesdUrl, support);
+  artStore.attachClient(client);
   final reachability = Reachability();
   Heartbeat(ping: client.ping, reachability: reachability).start();
   // Identity, and the signed capabilities it mints. The refresh token lives in
@@ -270,19 +277,23 @@ Future<void> main() async {
 
   DiagLog.log('runApp');
   runApp(
-    TunesApp(
-      client: client,
-      grants: grants,
-      auth: auth,
-      player: player,
-      store: store,
-      reachability: reachability,
-      manifestStore: manifestStore,
-      queueStore: queueStore,
-      settings: settings,
-      history: history,
-      likes: likes,
-      playlists: playlists,
+    ArtScope(
+      store: artStore,
+      child: TunesApp(
+        client: client,
+        grants: grants,
+        auth: auth,
+        player: player,
+        store: store,
+        artStore: artStore,
+        reachability: reachability,
+        manifestStore: manifestStore,
+        queueStore: queueStore,
+        settings: settings,
+        history: history,
+        likes: likes,
+        playlists: playlists,
+      ),
     ),
   );
 }
@@ -326,6 +337,7 @@ class TunesApp extends StatefulWidget {
     required this.auth,
     required this.player,
     required this.store,
+    required this.artStore,
     required this.reachability,
     required this.manifestStore,
     required this.queueStore,
@@ -344,6 +356,7 @@ class TunesApp extends StatefulWidget {
   final TunesAuth auth;
   final TunePlayer player;
   final DownloadStore store;
+  final ArtStore artStore;
   final Reachability reachability;
   final ManifestStore manifestStore;
   final QueueStore queueStore;
@@ -368,7 +381,11 @@ class _TunesAppState extends State<TunesApp> {
   @override
   void initState() {
     super.initState();
-    _downloads = DownloadManager(client: widget.client, store: widget.store);
+    _downloads = DownloadManager(
+      client: widget.client,
+      store: widget.store,
+      artStore: widget.artStore,
+    );
   }
 
   @override
@@ -1073,7 +1090,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Hands the track to the queue. The transfer used to run inline here with
   /// no progress callback and no way to stop it.
   Future<void> _download(ManifestTrack track) async {
-    _downloads.enqueue(track.sha);
+    _downloads.enqueue(track.sha, artSha: track.artSha);
   }
 
   String _artUrlFor(String sha) {

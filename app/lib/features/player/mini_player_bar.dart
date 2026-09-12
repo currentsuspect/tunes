@@ -255,6 +255,7 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                   url: track.artSha != null && widget.artUrlFor != null
                       ? widget.artUrlFor!(track.artSha!)
                       : null,
+                  artSha: track.artSha,
                   size: 44,
                   borderRadius: 8,
                   // The same generated tile the list rows use. A blank

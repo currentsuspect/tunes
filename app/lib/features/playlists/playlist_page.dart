@@ -281,6 +281,7 @@ class _Row extends StatelessWidget {
             )
           : Artwork(
               url: t.artSha == null ? null : artUrlFor(t.artSha!),
+              artSha: t.artSha,
               size: 44,
               borderRadius: 8,
               fallback: GeneratedArtwork.fromTrack(

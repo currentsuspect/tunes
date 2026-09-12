@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'package:flutter/widgets.dart';
 
 import '../net/tunes_client.dart';
+import 'art_store.dart';
 import 'download_store.dart';
 
 /// Where a track is in the download pipeline.
@@ -64,10 +65,16 @@ class DownloadManager extends ChangeNotifier {
     required this.client,
     required this.store,
     this.maxConcurrent = 2,
+    this.artStore,
   });
 
   final TunesClient client;
   final DownloadStore store;
+
+  /// Covers ride along with track downloads so a downloaded library is a
+  /// complete offline copy, not audio with empty frames. Best effort and
+  /// outside the track pipeline: art never blocks, fails, or cancels audio.
+  final ArtStore? artStore;
 
   /// Two at a time: enough to keep the link busy, few enough that a phone on
   /// wi-fi is not fighting itself for bandwidth.
@@ -94,7 +101,13 @@ class DownloadManager extends ChangeNotifier {
 
   /// Adds a track to the queue. Already-downloaded and already-queued tracks
   /// are ignored, so a double tap cannot start two transfers of one file.
-  void enqueue(String sha) {
+  /// The cover goes with it when one is named: a download that leaves its
+  /// sleeve behind is half an offline copy.
+  void enqueue(String sha, {String? artSha}) {
+    final art = artSha;
+    if (art != null && art.isNotEmpty) {
+      unawaited(artStore?.fetch(art));
+    }
     if (store.contains(sha)) return;
     if (isActive(sha)) return;
     _jobs[sha] = DownloadJob(sha: sha, phase: DownloadPhase.queued);

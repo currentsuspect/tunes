@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
+import 'package:tunes/core/data/art_store.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/audio/playhead_clock.dart';
@@ -200,6 +201,12 @@ class _FakeClient implements TunesClient {
   }) async {
     File(path).parent.createSync(recursive: true);
     File(path).writeAsBytesSync(List.filled(100, 1));
+  }
+
+  @override
+  Future<void> downloadArt(String sha, String path) async {
+    File(path).parent.createSync(recursive: true);
+    File(path).writeAsBytesSync(List.filled(10, 2));
   }
 }
 
@@ -427,6 +434,7 @@ TunesManifest _manifestOf(List<ManifestTrack> tracks) =>
 void main() {
   late Directory tempDir;
   late DownloadStore store;
+  late ArtStore artStore;
   late TunesDatabase db;
   late ManifestStore manifestStore;
   late QueueStore queueStore;
@@ -443,6 +451,8 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('tunes-test-');
     store = DownloadStore(tempDir);
     await store.load();
+    artStore = ArtStore(Directory('${tempDir.path}/art'));
+    await artStore.load();
     db = TunesDatabase.forTesting(NativeDatabase.memory());
     manifestStore = ManifestStore(db);
     queueStore = _TestQueueStore(db);
@@ -477,6 +487,7 @@ void main() {
         auth: auth,
         player: player,
         store: store,
+        artStore: artStore,
         reachability: reachability ?? Reachability(),
         manifestStore: manifestStore,
         queueStore: queueStore,

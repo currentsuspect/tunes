@@ -112,6 +112,7 @@ class AlbumPage extends StatelessWidget {
                         url: release.artSha == null
                             ? null
                             : artUrlFor(release.artSha!),
+                        artSha: release.artSha,
                         size: 220,
                         shared: true,
                         fallback: GeneratedArtwork(

@@ -178,6 +178,38 @@ class TunesClient {
     }
   }
 
+  /// Cover bytes for one art sha. Small files, no progress reporting: either
+  /// the sleeve arrives whole or it does not arrive at all.
+  Future<void> downloadArt(String sha, String path) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.getUrl(Uri.parse('$baseUrl/art/$sha'));
+      await _authorize(req);
+      final res = await req.close().timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) {
+        throw TunesFetchException('art ${res.statusCode}');
+      }
+      await File(path).parent.create(recursive: true);
+      final sink = File(path).openWrite();
+      try {
+        await for (final chunk in res) {
+          sink.add(chunk);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+    } on SocketException catch (e) {
+      await _discardPartial(path);
+      throw TunesFetchException('art download failed: ${e.message}');
+    } catch (_) {
+      await _discardPartial(path);
+      rethrow;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// A half-written file is worse than no file: it would be indexed as a
   /// download and play as a truncated track.
   Future<void> _discardPartial(String path) async {

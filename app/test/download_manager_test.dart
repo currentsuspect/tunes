@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/data/art_store.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/net/tunes_client.dart';
@@ -151,4 +152,49 @@ void main() {
     manager.enqueue('a');
     expect(client.started.containsKey('a'), isFalse);
   });
+
+  test('the cover rides along with the download when one is named', () async {
+    final art = _FakeArt(tmp);
+    final m = DownloadManager(
+      client: client,
+      store: store,
+      artStore: art,
+      maxConcurrent: 2,
+    );
+    m.enqueue('a', artSha: 'cover-a');
+    await settle();
+    expect(art.fetched, ['cover-a']);
+    m.dispose();
+  });
+
+  test(
+    'no cover named means no art fetch, and no store means no crash',
+    () async {
+      final art = _FakeArt(tmp);
+      final m = DownloadManager(
+        client: client,
+        store: store,
+        artStore: art,
+        maxConcurrent: 2,
+      );
+      m.enqueue('a');
+      await settle();
+      expect(art.fetched, isEmpty);
+      m.dispose();
+      manager.enqueue('b');
+      await settle();
+      expect(client.started.containsKey('b'), isTrue);
+    },
+  );
+}
+
+class _FakeArt extends ArtStore {
+  _FakeArt(super.dir);
+
+  final List<String> fetched = [];
+
+  @override
+  Future<void> fetch(String sha) async {
+    fetched.add(sha);
+  }
 }

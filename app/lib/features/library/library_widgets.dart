@@ -211,6 +211,7 @@ class ArtThumb extends StatelessWidget {
         : ArtworkPlaceholder(borderRadius: borderRadius);
     return Artwork(
       url: sha == null ? null : artUrlFor(sha!),
+      artSha: sha,
       size: size,
       borderRadius: borderRadius,
       fallback: generated,

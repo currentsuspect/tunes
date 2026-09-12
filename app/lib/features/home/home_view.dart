@@ -330,6 +330,7 @@ class _DynamicRail extends StatelessWidget {
                         height: 132,
                         child: Artwork(
                           url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                          artSha: t.artSha,
                           size: 132,
                           fallback: GeneratedArtwork.fromTrack(
                             t,
@@ -409,6 +410,7 @@ class _JustAddedCarousel extends StatelessWidget {
                     children: [
                       Artwork(
                         url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                        artSha: t.artSha,
                         size: 132,
                         height: 100,
                         fallback: GeneratedArtwork(
@@ -772,6 +774,7 @@ class _ArtistsRail extends StatelessWidget {
                     children: [
                       Artwork(
                         url: artSha == null ? null : artUrlFor(artSha),
+                        artSha: artSha,
                         size: 64,
                         borderRadius: 32,
                         fallback: InitialsAvatar(name: e.key, size: 64),
@@ -835,6 +838,7 @@ class _AlbumsRail extends StatelessWidget {
                     children: [
                       Artwork(
                         url: r.artSha == null ? null : artUrlFor(r.artSha!),
+                        artSha: r.artSha,
                         size: 130,
                         fallback: GeneratedArtwork(
                           title: r.title,

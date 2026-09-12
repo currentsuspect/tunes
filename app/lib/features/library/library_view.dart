@@ -419,6 +419,7 @@ class _LibraryViewState extends State<LibraryView> {
                       url: r.artSha == null
                           ? null
                           : widget.artUrlFor(r.artSha!),
+                      artSha: r.artSha,
                       shared: true,
                       fallback: GeneratedArtwork(
                         title: r.title,
@@ -496,6 +497,7 @@ class _LibraryViewState extends State<LibraryView> {
                     tag: 'artist-$name',
                     child: Artwork(
                       url: photo == null ? null : widget.artUrlFor(photo),
+                      artSha: photo,
                       size: 48,
                       borderRadius: 24,
                       shared: true,

@@ -539,6 +539,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                       children: [
                         Artwork(
                           url: art == null ? null : artUrlFor(art),
+                          artSha: art,
                           size: 72,
                           borderRadius: 36,
                           fallback: InitialsAvatar(name: name, size: 72),
@@ -582,6 +583,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                       children: [
                         Artwork(
                           url: art == null ? null : artUrlFor(art),
+                          artSha: art,
                           size: 124,
                           borderRadius: RadiusTokens.control,
                           fallback: const ArtworkPlaceholder(

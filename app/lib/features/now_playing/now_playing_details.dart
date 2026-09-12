@@ -241,6 +241,7 @@ class _PersonRow extends StatelessWidget {
           children: [
             Artwork(
               url: sha == null ? null : artUrlFor(sha),
+              artSha: sha,
               size: 44,
               borderRadius: 22,
               fallback: InitialsAvatar(name: name, size: 44),
@@ -301,6 +302,7 @@ class _AlbumRow extends StatelessWidget {
           children: [
             Artwork(
               url: sha == null ? null : artUrlFor(sha),
+              artSha: sha,
               size: 44,
               borderRadius: 6,
               fallback: const ArtworkPlaceholder(borderRadius: 6),
