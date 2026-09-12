@@ -127,3 +127,45 @@ jobs:
             --notes "$(git log -1 --pretty=%s ${{ github.sha }})
 
           Commit: ${{ github.sha }}"
+
+  app-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: app
+
+      - name: Generate drift code
+        run: dart run build_runner build --delete-conflicting-outputs
+        working-directory: app
+
+      # Release bundle for the box. No install flow: the daemon serves the
+      # phone APK via /update/apk, and shipping a Linux tarball there is a
+      # product decision, not a CI default — artifact only.
+      - name: Release Linux bundle builds
+        working-directory: app
+        run: |
+          flutter build linux --release \
+            --dart-define=TUNESD_URL=http://192.168.100.6:4780 \
+            --dart-define=GIT_COMMIT=${{ github.sha }} \
+            --dart-define=BUILD_NUMBER=${{ github.run_number }} \
+            --dart-define=CHANNEL=dev
+
+      - name: Upload Linux bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunes-linux
+          path: app/build/linux/x64/release/bundle
+          retention-days: 30

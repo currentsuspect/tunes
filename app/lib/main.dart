@@ -769,6 +769,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Never throws and never blocks anything: an app that fails to start
   /// because it could not check for updates has its priorities backwards.
   Future<void> _checkForUpdate() async {
+    // APK self-update is Android-only. The Linux bundle is delivered by CI
+    // artifacts, and offering an APK download there would be a dead button
+    // behind a permission prompt that can never be granted.
+    if (!Platform.isAndroid) return;
     try {
       final available = await widget.client.fetchUpdate();
       if (!mounted) return;
