@@ -83,3 +83,56 @@ export async function publishCloud(opts: {
     return null;
   }
 }
+
+/** Which audio files still need backfilling to R2, in reference order.
+ *
+ * Same shape as the art selector, minus the cap: a backfill is a bounded
+ * one-shot run, not a per-cycle trickle, so the caller pages it instead.
+ * Priority ordering (dead pockets first) belongs to the caller: put those
+ * shas first in `referenced` and they stay first here. */
+export function selectAudioToBackfill(
+  referenced: (string | null | undefined)[],
+  published: Record<string, string>,
+  present: (sha: string) => boolean,
+): string[] {
+  return selectArtToPublish(referenced, published, present, Number.MAX_SAFE_INTEGER);
+}
+
+/** PUTs one audio file to the edge audio route. True on acceptance.
+ *
+ * Best effort: a rejection or transport error logs and returns false, and
+ * the sha stays off the ledger so a later run retries it. Oversize files
+ * are refused client-side before any bytes move. Never throws for
+ * edge/transport failures. */
+export async function publishAudioFile(opts: {
+  baseUrl: string;
+  key: string;
+  sha: string;
+  bytes: Uint8Array;
+  log: Log;
+  fetchFn?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const { baseUrl, key, sha, bytes, log } = opts;
+  if (!SHA_RE.test(sha)) return false;
+  if (bytes.length === 0 || bytes.length > 64 * 1024 * 1024) return false;
+  try {
+    const res = await (opts.fetchFn ?? fetch)(`${baseUrl}/audio/${sha}`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/octet-stream",
+      },
+      body: bytes as BodyInit,
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 300_000),
+    });
+    if (!res.ok) {
+      log.warn({ event: "AUDIO_PUBLISH_REJECTED", status: res.status });
+      return false;
+    }
+    return true;
+  } catch (e) {
+    log.warn({ event: "AUDIO_PUBLISH_FAILED", err: String(e).slice(0, 200) });
+    return false;
+  }
+}
