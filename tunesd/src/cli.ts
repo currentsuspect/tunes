@@ -25,7 +25,7 @@ import { ManifestServer } from "./serve.js";
 import { publishCloud } from "./cloudpublish.js";
 import { publishAudioFile, selectAudioToBackfill, selectNewRows } from "./cloudpublish.js";
 import { AudioPusher } from "./audiopush.js";
-import { coalesce, Wake } from "./ingest.js";
+import { coalesce, playableOnly, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
@@ -1156,6 +1156,7 @@ async function main(): Promise<void> {
       }
     };
 
+    let lastDropped = -1;
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
@@ -1184,8 +1185,20 @@ async function main(): Promise<void> {
           membership: e.membership,
         });
       }
-      return buildManifest(
+      // Only list what can be played: held here, or sourced from a channel we
+      // still ingest from. Hidden, never deleted (see playableOnly).
+      const liveShas = new Set(state.sightingsFor(channelIds).map((r) => r.sha));
+      const { kept: playableProbes, dropped } = playableOnly(
         [...probeCache.values()],
+        (sha) => store.has(sha),
+        liveShas
+      );
+      if (dropped !== lastDropped) {
+        lastDropped = dropped;
+        log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
+      }
+      return buildManifest(
+        playableProbes,
         metaBySha,
         enrichForManifest,
         objects,
@@ -1210,13 +1223,7 @@ async function main(): Promise<void> {
       try {
         const manifest = await manifestBuilder();
         const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
-        // Every channel ever seen, not just the configured ones: tracks ingested
-        // from a retired channel were never given a Telegram source in the
-        // cloud, so they 404ed there ("skips until one lands").
-        const { rows, watermark } = selectNewRows(
-          state.sightingsFor([...new Set([...channelIds, ...state.channelIdsSeen()])]),
-          rowsSince
-        );
+        const { rows, watermark } = selectNewRows(state.sightingsFor(channelIds), rowsSince);
         const manifestChanged = typeof integrity === "string" && integrity !== lastIntegrity;
         if (rows.length === 0 && !manifestChanged) return;
         const done = await publishCloud({

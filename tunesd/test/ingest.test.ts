@@ -102,3 +102,21 @@ describe("coalesce", () => {
     expect(n).toBe(2);
   });
 });
+
+import { playableOnly } from "../src/ingest.js";
+
+describe("playableOnly", () => {
+  const items = [{ sha: "a" }, { sha: "b" }, { sha: "c" }];
+  it("keeps what is held or has a live source, and counts the rest", () => {
+    const r = playableOnly(items, (s) => s === "a", new Set(["b"]));
+    expect(r.kept.map((i) => i.sha)).toEqual(["a", "b"]);
+    expect(r.dropped).toBe(1);
+  });
+  it("drops nothing when everything is playable", () => {
+    expect(playableOnly(items, () => true, new Set()).dropped).toBe(0);
+  });
+  it("does not mutate its input", () => {
+    playableOnly(items, () => false, new Set());
+    expect(items).toHaveLength(3);
+  });
+});

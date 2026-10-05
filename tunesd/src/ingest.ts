@@ -125,3 +125,21 @@ export function coalesce(
     },
   };
 }
+
+/**
+ * Keeps only what can actually be played: held on the box, or still
+ * reachable at a Telegram source the fetcher can read. Tracks ingested from a
+ * retired channel the fetcher cannot open were listed anyway, and the player
+ * skipped from one dead entry to the next until a playable one came up.
+ *
+ * Hiding is not deleting: state.json, the probe cache and any files stay as
+ * they are, so a channel that becomes readable again brings its tracks back.
+ */
+export function playableOnly<T extends { sha: string }>(
+  items: T[],
+  heldLocally: (sha: string) => boolean,
+  liveShas: Set<string>
+): { kept: T[]; dropped: number } {
+  const kept = items.filter((i) => heldLocally(i.sha) || liveShas.has(i.sha));
+  return { kept, dropped: items.length - kept.length };
+}
