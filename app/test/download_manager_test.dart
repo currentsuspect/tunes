@@ -60,6 +60,94 @@ void main() {
     if (await tmp.exists()) await tmp.delete(recursive: true);
   });
 
+  group('a whole burst, as one progress', () {
+    test('counts the batch and how much of it is done', () async {
+      manager.enqueue('a');
+      manager.enqueue('b');
+      manager.enqueue('c');
+      expect(manager.batchTotal, 3);
+      expect(manager.batchDone, 0);
+
+      client.finish('a');
+      await settle();
+      expect(manager.batchDone, 1);
+      expect(manager.batchTotal, 3);
+    });
+
+    test(
+      'overall progress is finished songs plus the part that has come',
+      () async {
+        manager.enqueue('a');
+        manager.enqueue('b');
+        await settle();
+        client.progressOf['a']!(50, 100);
+
+        // Half of one song of two.
+        expect(manager.overallProgress, closeTo(0.25, 1e-9));
+        client.finish('a');
+        await settle();
+        client.progressOf['b']!(100, 100);
+        expect(manager.overallProgress, closeTo(1.0, 1e-9));
+      },
+    );
+
+    test('is null when nothing is in flight, and a size not known counts for nothing yet', () async {
+      expect(manager.overallProgress, isNull);
+      manager.enqueue('a');
+      await settle();
+      client.progressOf['a']!(500, 0); // no content-length
+      expect(manager.overallProgress, 0.0);
+    });
+
+    test('cancelling a waiting song takes it out of the batch', () async {
+      manager.enqueue('a');
+      manager.enqueue('b');
+      manager.enqueue('c');
+      await settle();
+      manager.cancel('c'); // still waiting behind the two running
+      expect(manager.batchTotal, 2);
+    });
+
+    test('a new burst starts from nothing once the last one is over', () async {
+      manager.enqueue('a');
+      await settle();
+      client.finish('a');
+      await settle();
+      expect(manager.activeCount, 0);
+
+      manager.enqueue('b');
+      expect(manager.batchTotal, 1);
+      expect(manager.batchDone, 0);
+    });
+
+    test('says how many are running, waiting and failed', () async {
+      manager.enqueue('a');
+      manager.enqueue('b');
+      manager.enqueue('c');
+      await settle();
+      expect(manager.runningCount, 2);
+      expect(manager.queuedCount, 1);
+
+      client.fail('a', Exception('nope'));
+      await settle();
+      expect(manager.failedCount, 1);
+    });
+  });
+
+  test('progress notifications are thinned, starts and ends are not', () async {
+    var notes = 0;
+    manager.addListener(() => notes += 1);
+    manager.enqueue('a');
+    await settle();
+    final before = notes;
+    for (var i = 1; i <= 200; i++) {
+      client.progressOf['a']!(i, 200);
+    }
+    // Two hundred chunks inside a few milliseconds must not be two hundred
+    // rebuilds of every row on screen.
+    expect(notes - before, lessThan(10));
+  });
+
   test('a second tap on the same track does not start a second transfer', () {
     manager.enqueue('a');
     manager.enqueue('a');

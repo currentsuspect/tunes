@@ -90,10 +90,13 @@ class _LyricPreviewState extends State<LyricPreview> {
     final lrc = _lrc;
     Widget content;
     if (lrc == null || (!lrc.hasTimedLines && lrc.untimed.isEmpty)) {
-      content = const Text(
-        'No lyrics yet — tap to add',
-        style: TypeScale.caption,
-        textAlign: TextAlign.center,
+      content = Text(
+        'No lyrics yet. Tap to add them.',
+        style: TypeScale.note.copyWith(
+          fontSize: 14,
+          color: Tones.textMuted.withValues(alpha: 0.7),
+        ),
+        textAlign: TextAlign.start,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
@@ -108,9 +111,11 @@ class _LyricPreviewState extends State<LyricPreview> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onOpen,
+        // Just the words. An accent bar and an indent used to frame them as a
+        // quotation; they now sit on the page like the title above them.
         child: SizedBox(
           height: _kPreviewHeight,
-          child: Center(child: content),
+          child: Align(alignment: Alignment.centerLeft, child: content),
         ),
       ),
     );
@@ -121,8 +126,8 @@ class _LyricPreviewState extends State<LyricPreview> {
     final excerpt = lrc.untimed.take(2).join('\n');
     return Text(
       excerpt,
-      style: TypeScale.body,
-      textAlign: TextAlign.center,
+      style: TypeScale.note.copyWith(fontSize: 14, color: Tones.textMuted),
+      textAlign: TextAlign.start,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
     );
@@ -154,6 +159,7 @@ class _LyricPreviewState extends State<LyricPreview> {
       child: Column(
         key: ValueKey<int?>(active),
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _dimLine(prev != null && prev >= 0 ? lines[prev].text : ''),
           const SizedBox(height: 4),
@@ -175,10 +181,11 @@ class _LyricPreviewState extends State<LyricPreview> {
       // wider than a phone, so clipping them was the common case, not the edge.
       child: FittedBox(
         fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
         child: Text(
           text,
-          style: TypeScale.body.copyWith(color: Tones.textMuted),
-          textAlign: TextAlign.center,
+          style: TypeScale.note.copyWith(fontSize: 13, color: Tones.textMuted),
+          textAlign: TextAlign.start,
           maxLines: 1,
         ),
       ),
@@ -198,19 +205,23 @@ class _LyricPreviewState extends State<LyricPreview> {
     // size; the long ones wrap, and only a genuinely enormous line scales down.
     return SizedBox(
       height: _kActiveLineHeight,
-      child: Center(
+      child: Align(
+        alignment: Alignment.centerLeft,
         child: ListenableBuilder(
           listenable: widget.player,
           builder: (context, _) {
             final position = widget.player.position;
             final parts = lyricWordParts(lrc, active);
             final wordIndex = lyricActiveWordIndex(lrc, active, position);
-            final style = TypeScale.title.copyWith(fontWeight: FontWeight.w600);
+            final style = TypeScale.display.copyWith(
+              fontSize: 19,
+              height: 1.15,
+            );
             final Widget line = (parts == null || wordIndex == null)
                 ? Text(
                     lrc.lines[active].text,
                     style: style,
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.start,
                     maxLines: 2,
                   )
                 : Text.rich(
@@ -218,10 +229,14 @@ class _LyricPreviewState extends State<LyricPreview> {
                       children: _wordSpans(parts, wordIndex),
                       style: style,
                     ),
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.start,
                     maxLines: 2,
                   );
-            return FittedBox(fit: BoxFit.scaleDown, child: line);
+            return FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: line,
+            );
           },
         ),
       ),

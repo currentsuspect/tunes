@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
+import '../../core/data/playlist_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/nav/nav_controller.dart';
@@ -10,12 +11,16 @@ import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/like_button.dart';
+import '../../core/data/reachability.dart';
+import '../../core/ui/cover_tint.dart';
 import '../../core/ui/shared_sleeve.dart';
+import '../../core/ui/source_pill.dart';
 import '../player/scrubber.dart';
 import '../../domain/manifest.dart';
 import '../album/album_page.dart';
 import '../artist/artist_page.dart';
 import '../lyrics/lyrics_sheet.dart';
+import '../playlists/add_to_playlist_sheet.dart';
 import '../queue/queue_sheet.dart';
 import 'lyric_preview.dart';
 import 'now_playing_details.dart';
@@ -32,7 +37,12 @@ class NowPlayingPage extends StatefulWidget {
     required this.artUrlFor,
     required this.manifestStore,
     this.queueStore,
+    this.reachability,
   });
+
+  /// Live, so the source tag follows the connection rather than what it was
+  /// when the page opened. Falls back to [offline] when absent.
+  final Reachability? reachability;
 
   final TunePlayer player;
   final TunesManifest manifest;
@@ -213,22 +223,23 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: widget.player,
-          builder: (context, _) {
-            final current = widget.player.current;
-            if (current == null) {
-              return const Center(
-                child: Text('Nothing playing', style: TypeScale.body),
-              );
-            }
-            final duration = widget.player.duration.inMilliseconds > 0
-                ? widget.player.duration
-                : Duration(milliseconds: current.durationMs ?? 0);
-            final downloaded = widget.store.pathFor(current.sha) != null;
+      body: ListenableBuilder(
+        listenable: widget.player,
+        builder: (context, _) {
+          final current = widget.player.current;
+          if (current == null) {
+            return const Center(
+              child: Text('Nothing playing', style: TypeScale.body),
+            );
+          }
+          final duration = widget.player.duration.inMilliseconds > 0
+              ? widget.player.duration
+              : Duration(milliseconds: current.durationMs ?? 0);
+          final downloaded = widget.store.pathFor(current.sha) != null;
 
-            return SafeArea(
+          return _Backdrop(
+            artSha: current.artSha,
+            child: SafeArea(
               // The widget.player keeps a whole viewport to itself so nothing about
               // it changes; the details are a scroll away rather than a
               // squeeze. A fixed height also keeps the Expanded artwork
@@ -261,11 +272,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       color: Tones.textMuted,
                                     ),
                                   ),
-                                  const Expanded(
-                                    child: Text(
-                                      'Now Playing',
-                                      textAlign: TextAlign.center,
-                                      style: TypeScale.caption,
+                                  Expanded(
+                                    child: Center(
+                                      child: _SourceTag(
+                                        held: downloaded,
+                                        offline: widget.offline,
+                                        reachability: widget.reachability,
+                                      ),
                                     ),
                                   ),
                                   PopupMenuButton<String>(
@@ -296,6 +309,17 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           break;
                                         case 'album':
                                           _openAlbum(context, current);
+                                          break;
+                                        case 'playlist':
+                                          final playlists =
+                                              PlaylistScope.maybeOf(context);
+                                          if (playlists != null) {
+                                            AddToPlaylistSheet.show(
+                                              context,
+                                              store: playlists,
+                                              shas: [current.sha],
+                                            );
+                                          }
                                           break;
                                         case 'download':
                                           if (downloaded) {
@@ -340,6 +364,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           style: TypeScale.body,
                                         ),
                                       ),
+                                      const PopupMenuItem(
+                                        value: 'playlist',
+                                        child: Text(
+                                          'Add to playlist',
+                                          style: TypeScale.body,
+                                        ),
+                                      ),
                                       PopupMenuItem(
                                         value: 'download',
                                         child: Text(
@@ -375,18 +406,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 ],
                               ),
                             ),
-                            // Sleeve and words are one centred unit. They
-                            // used to be separate children of this column,
-                            // with an Expanded between them that handed all
-                            // the slack to the gap -- so the title floated a
-                            // long way under the record it names. The slack
-                            // now sits outside the pair, above and below.
+                            // The sleeve is the subject, lit from behind by its
+                            // own colour. Title and artist sit under it, left
+                            // aligned, with the heart at the end of the title
+                            // line: the heart is a statement about this track,
+                            // not a way of moving through it.
                             Expanded(
                               child: Padding(
-                                // lg, not xl: the sleeve is the subject of
-                                // this screen and forty points of margin a
-                                // side was giving away sixty-four points of
-                                // it to nothing.
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: Space.lg,
                                   vertical: Space.sm,
@@ -394,62 +420,93 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Flexible(
-                                      child: SharedSleeve(
-                                        tag: 'sleeve-${current.sha}',
-                                        child: _Artwork(
-                                          track: current,
-                                          artUrlFor: widget.artUrlFor,
-                                          playing: widget.player.playing,
+                                      child: Center(
+                                        child: SharedSleeve(
+                                          tag: 'sleeve-${current.sha}',
+                                          child: _Artwork(
+                                            track: current,
+                                            artUrlFor: widget.artUrlFor,
+                                            playing: widget.player.playing,
+                                          ),
                                         ),
                                       ),
                                     ),
                                     const SizedBox(height: Space.lg),
-                                    Text(
-                                      current.title,
-                                      style: TypeScale.wordmark,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                current.title,
+                                                style: TypeScale.display,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: Space.xs),
+                                              GestureDetector(
+                                                onTap: () => _openArtist(
+                                                  context,
+                                                  current.artistDisplay,
+                                                ),
+                                                child: Text(
+                                                  current.artistDisplay,
+                                                  style: TypeScale.body
+                                                      .copyWith(fontSize: 15),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (current.albumLabel != null)
+                                                Text(
+                                                  current.albumLabel!,
+                                                  style: TypeScale.mono,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                        LikeButton(sha: current.sha, size: 26),
+                                      ],
                                     ),
-                                    const SizedBox(height: Space.sm),
-                                    Text(
-                                      current.artistDisplay,
-                                      style: TypeScale.title,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (current.albumLabel != null)
-                                      Text(
-                                        current.albumLabel!,
-                                        style: TypeScale.body,
-                                        textAlign: TextAlign.center,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
                                   ],
                                 ),
                               ),
                             ),
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: Space.lg,
+                                horizontal: Space.md,
                               ),
                               child: Scrubber(
                                 player: widget.player,
                                 duration: duration,
                               ),
                             ),
+                            // Five controls on one line: the two switches that
+                            // change how the queue behaves at the edges, and
+                            // the transport between them. The play button is
+                            // paper on ink, not the accent, so it stays the
+                            // calmest thing on a screen already full of light.
                             Padding(
-                              padding: const EdgeInsets.only(
-                                top: Space.sm,
-                                bottom: Space.sm,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: Space.lg,
+                                vertical: Space.xs,
                               ),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
+                                  _ShuffleButton(player: widget.player),
                                   IconButton(
                                     onPressed: widget.player.previous,
                                     iconSize: 36,
@@ -459,29 +516,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     ),
                                     tooltip: 'Previous',
                                   ),
-                                  const SizedBox(width: Space.md),
-                                  InkWell(
-                                    onTap: widget.player.playing
-                                        ? widget.player.pause
-                                        : widget.player.play,
-                                    borderRadius: BorderRadius.circular(40),
-                                    child: Container(
-                                      width: 72,
-                                      height: 72,
-                                      decoration: BoxDecoration(
-                                        color: Tones.primary,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        widget.player.playing
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                        size: 40,
-                                        color: Tones.onPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: Space.md),
+                                  _PlayButton(player: widget.player),
                                   IconButton(
                                     onPressed: widget.player.next,
                                     iconSize: 36,
@@ -491,44 +526,24 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     ),
                                     tooltip: 'Next',
                                   ),
+                                  _RepeatButton(player: widget.player),
                                 ],
                               ),
                             ),
-                            // The line being sung, right under the transport.
-                            // A reactive surface, not a control: it shows
-                            // where the words are and opens the full view on
-                            // tap. The drawer below still holds the whole
-                            // lyric -- this is the glance, that is the read.
+                            // The line being sung. A reactive surface, not a
+                            // control: it shows where the words are and opens
+                            // the full view on tap. With no lyrics it is one
+                            // quiet line offering to add them, at the same
+                            // height, so the sleeve, title and controls sit
+                            // exactly where they do for a song that has them.
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: Space.xl,
+                                horizontal: Space.lg,
                               ),
                               child: LyricPreview(
                                 lyrics: current.lyrics,
                                 player: widget.player,
                                 onOpen: () => _openLyrics(context, current),
-                              ),
-                            ),
-                            // One cluster, centred under the transport,
-                            // rather than two icons shoved to opposite
-                            // edges with a void between them. Shuffle and
-                            // repeat belong together -- they are the two
-                            // switches that change how the queue behaves --
-                            // and the heart sits with them because it is a
-                            // toggle too, not a way of moving through a
-                            // track. The play button keeps the centre line
-                            // to itself.
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: Space.xs),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  _ShuffleButton(player: widget.player),
-                                  const SizedBox(width: Space.lg),
-                                  LikeButton(sha: current.sha, size: 24),
-                                  const SizedBox(width: Space.lg),
-                                  _RepeatButton(player: widget.player),
-                                ],
                               ),
                             ),
                             // Says there is something below, which a scroll view on a
@@ -593,8 +608,93 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                   ),
                 ),
               ),
-            );
-          },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The page's room: ink wall, with the cover's colour pouring in from the top.
+class _Backdrop extends StatelessWidget {
+  const _Backdrop({required this.artSha, required this.child});
+
+  final String? artSha;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TintBuilder(
+      artSha: artSha,
+      builder: (context, tint) => Stack(
+        fit: StackFit.expand,
+        children: [
+          AmbientGlow(tint: tint),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+/// "held offline", "streaming" or "not on this phone yet", following the
+/// connection live when it can.
+class _SourceTag extends StatelessWidget {
+  const _SourceTag({
+    required this.held,
+    required this.offline,
+    required this.reachability,
+  });
+
+  final bool held;
+  final bool offline;
+  final Reachability? reachability;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = reachability;
+    if (r == null) {
+      return SourcePill(
+        source: sourceFor(held: held, offline: offline),
+      );
+    }
+    return ListenableBuilder(
+      listenable: r,
+      builder: (context, _) => SourcePill(
+        source: sourceFor(held: held, offline: r.offline),
+      ),
+    );
+  }
+}
+
+/// Paper on ink. The accent belongs to the line and the light; this is just
+/// the thing you press.
+class _PlayButton extends StatelessWidget {
+  const _PlayButton({required this.player});
+
+  final TunePlayer player;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: player.playing ? 'Pause' : 'Play',
+      child: InkWell(
+        onTap: player.playing ? player.pause : player.play,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 68,
+          height: 68,
+          decoration: const BoxDecoration(
+            color: Tones.text,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            player.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            size: 38,
+            color: Tones.base,
+          ),
         ),
       ),
     );
@@ -662,6 +762,7 @@ class _Artwork extends StatelessWidget {
           url: track.artSha == null ? null : artUrlFor(track.artSha!),
           artSha: track.artSha,
           size: side,
+          borderRadius: 16,
           // Same decode as the mini bar's copy, so the flight has nothing
           // left to load when it arrives.
           shared: true,
@@ -669,21 +770,35 @@ class _Artwork extends StatelessWidget {
             title: track.title,
             artist: track.artistDisplay,
             size: side,
+            borderRadius: 16,
           ),
         );
-        // Subtle "alive" motion: slow rotation while playing, snap-back on
-        // pause. It is the only thing in the app that moves continuously, so
-        // it is also the only animation with a switch of its own.
-        // Off by choice, or off because the system asked for less motion.
-        // A sleeve that turns for thirty seconds at a time is exactly what
-        // that setting exists to stop.
-        final wanted = SettingsScope.maybeOf(context)?.animatedArtwork ?? true;
-        if (!wanted || MediaQuery.disableAnimationsOf(context)) return art;
+        // Lit by its own colour: the glow under the sleeve is the same tint
+        // as the wash behind it, so the cover looks like the lamp.
+        final lit = DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AccentScope.of(context).withValues(alpha: 0.55),
+                blurRadius: 48,
+                spreadRadius: -8,
+                offset: const Offset(0, 22),
+              ),
+            ],
+          ),
+          child: art,
+        );
+        // Off unless asked for, and off whenever the system asks for less
+        // motion. A square sleeve turning for thirty seconds at a time is a
+        // choice, not a default.
+        final wanted = SettingsScope.maybeOf(context)?.animatedArtwork ?? false;
+        if (!wanted || MediaQuery.disableAnimationsOf(context)) return lit;
         return AnimatedRotation(
           turns: playing ? 1 : 0,
           duration: const Duration(seconds: 30),
           curve: Curves.linear,
-          child: art,
+          child: lit,
         );
       },
     );
@@ -704,7 +819,7 @@ class _ShuffleButton extends StatelessWidget {
           tooltip: 'Shuffle',
           icon: Icon(
             Icons.shuffle_rounded,
-            color: on ? Tones.primary : Tones.textMuted,
+            color: on ? AccentScope.of(context) : Tones.textMuted,
           ),
           onPressed: () => player.setShuffle(!on),
         );
@@ -735,7 +850,10 @@ class _RepeatButton extends StatelessWidget {
             PlaybackRepeat.all => 'Repeat: all',
             PlaybackRepeat.one => 'Repeat: one',
           },
-          icon: Icon(icon, color: isActive ? Tones.primary : Tones.textMuted),
+          icon: Icon(
+            icon,
+            color: isActive ? AccentScope.of(context) : Tones.textMuted,
+          ),
           onPressed: () {
             final next = switch (mode) {
               PlaybackRepeat.off => PlaybackRepeat.all,

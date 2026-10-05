@@ -30,7 +30,15 @@ class RadioSession {
   /// wanders off and takes a dozen tracks to come back.
   double _exploration = 0.2;
 
-  double get exploration => _exploration;
+  /// The listener's own dial, 0 (familiar) to 1 (further out). It shifts the
+  /// whole range: the session still adapts to skips and finished songs, but
+  /// around a centre the listener chose. At [defaultReach] it changes nothing.
+  double reach = defaultReach;
+
+  static const double defaultReach = 0.2;
+
+  double get exploration =>
+      (_exploration + (reach - defaultReach)).clamp(0.0, 1.0);
   List<String> get recentShas => List.unmodifiable(_recentShas);
   List<String> get recentArtists => List.unmodifiable(_recentArtists);
 

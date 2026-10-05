@@ -1,18 +1,22 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../domain/manifest.dart';
 import '../../features/library/library_widgets.dart';
+import '../theme/tokens.dart';
 
-/// A deterministic gradient + initial-tile artwork for tracks that
-/// have no artSha. The same input always produces the same colors
-/// and label, so the visual identity stays stable across app
-/// restarts and devices.
+/// A sleeve drawn from a name, for tracks that have no cover on this phone.
 ///
-/// We pick two colours from a fixed palette by hashing the title,
-/// gradient them diagonally, and overlay the first letter of the
-/// primary artist (or the first letter of the title if no artist).
-/// Callers showing several records by one act pass [label] instead,
-/// so the tiles do not all draw the same initial.
+/// The same title and artist always draw the same sleeve, so the identity is
+/// stable across restarts and devices. Two hues are derived from a hash and
+/// laid on a diagonal wash, with one shape in the complementary hue (a sun,
+/// a horizon, or a tilted frame) and the initial set small in the corner, the
+/// way a record sleeve carries its name. It is meant to look chosen, so a
+/// library with gaps still looks like a shelf and not a list of placeholders.
+///
+/// Callers showing several records by one act pass [label] instead, so the
+/// tiles do not all draw the same initial.
 class GeneratedArtwork extends StatelessWidget {
   const GeneratedArtwork({
     super.key,
@@ -48,55 +52,51 @@ class GeneratedArtwork extends StatelessWidget {
   ///
   /// The default is the artist's initial, which is what identifies a tile in
   /// a mixed list of tracks. In a rail of one act's records that makes every
-  /// card read the same — six Yeat albums all showing "Y" — so those callers
+  /// card read the same -- six Yeat albums all showing "Y" -- so those callers
   /// pass the album's initials instead. The colours already vary, because the
   /// seed includes the title.
   final String? label;
 
-  static const _palette = <Color>[
-    Color(0xFF8E44AD),
-    Color(0xFF2C3E50),
-    Color(0xFF16A085),
-    Color(0xFFD35400),
-    Color(0xFF7F8C8D),
-    Color(0xFF2C82C9),
-    Color(0xFFE74C3C),
-    Color(0xFF27AE60),
-    Color(0xFFB7950B),
-  ];
+  /// The drawing for a name. Public so a test can say two tiles agree without
+  /// reaching into paint calls.
+  static SleeveSpec specFor(String title, String artist) =>
+      SleeveSpec._(_seedFor(title, artist));
 
   @override
   Widget build(BuildContext context) {
-    final seed = _seedFor(title, artist);
-    final a = _palette[seed % _palette.length];
-    final b = _palette[(seed ~/ _palette.length) % _palette.length];
+    final spec = specFor(title, artist);
     final letter =
         label ??
         _initial(
           artist.isNotEmpty && artist != 'unknown artist' ? artist : title,
         );
+    final tiny = size < 56;
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
-      child: Container(
+      child: SizedBox(
         width: size,
         height: size,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [a, b],
-          ),
-        ),
-        child: Center(
-          child: Text(
-            letter,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.92),
-              // Two letters at the one-letter size overflow a small tile.
-              fontSize: size * (letter.characters.length > 1 ? 0.30 : 0.45),
-              fontWeight: FontWeight.w600,
-              height: 1.0,
-              letterSpacing: -0.5,
+        child: CustomPaint(
+          painter: _SleevePainter(spec),
+          child: Padding(
+            padding: EdgeInsets.all(size * 0.09),
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Text(
+                letter,
+                maxLines: 1,
+                style: TextStyle(
+                  fontFamily: Faces.display,
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w500,
+                  fontVariations: const [FontVariation('wght', 500)],
+                  color: Tones.text.withValues(alpha: 0.9),
+                  // Two letters at the one-letter size overflow a small tile.
+                  fontSize: size * (letter.characters.length > 1 ? 0.24 : 0.32),
+                  height: 1.0,
+                  letterSpacing: tiny ? 0 : -0.4,
+                ),
+              ),
             ),
           ),
         ),
@@ -107,20 +107,110 @@ class GeneratedArtwork extends StatelessWidget {
   String _initial(String s) {
     final trimmed = s.trim();
     if (trimmed.isEmpty) return '?';
-    // First grapheme cluster — handles "É" / "Ł" / etc. without
+    // First grapheme cluster -- handles "E" / "L" with accents without
     // splitting surrogate pairs.
     final first = trimmed.characters.first;
     return first.toUpperCase();
   }
 
-  int _seedFor(String t, String a) {
-    final s = '$t|$a';
-    var h = 0;
-    for (final code in s.codeUnits) {
-      h = (h * 31 + code) & 0x7fffffff;
+  /// FNV-1a over UTF-16 code units: stable across platforms and runs, unlike
+  /// String.hashCode.
+  static int _seedFor(String t, String a) {
+    var h = 0x811c9dc5;
+    for (final code in '$t|$a'.codeUnits) {
+      h ^= code;
+      h = (h * 0x01000193) & 0xffffffff;
     }
     return h;
   }
+}
+
+/// What a sleeve looks like, derived entirely from its seed.
+@immutable
+class SleeveSpec {
+  const SleeveSpec._(this.seed);
+
+  final int seed;
+
+  double get hue => (seed % 360).toDouble();
+  double get hue2 => (hue + 40 + ((seed >> 8) % 80)) % 360;
+  double get shapeHue => (hue + 180) % 360;
+  int get shape => (seed >> 4) % 3;
+
+  Color get from => HSLColor.fromAHSL(1, hue, 0.45, 0.32).toColor();
+  Color get to => HSLColor.fromAHSL(1, hue2, 0.50, 0.18).toColor();
+  Color get accent => HSLColor.fromAHSL(1, shapeHue, 0.55, 0.68).toColor();
+
+  @override
+  bool operator ==(Object other) => other is SleeveSpec && other.seed == seed;
+
+  @override
+  int get hashCode => seed.hashCode;
+}
+
+class _SleevePainter extends CustomPainter {
+  const _SleevePainter(this.spec);
+
+  final SleeveSpec spec;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final u = w / 100;
+    final h = spec.seed;
+    final rect = Offset.zero & size;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [spec.from, spec.to],
+        ).createShader(rect),
+    );
+    final accent = Paint()..color = spec.accent.withValues(alpha: 0.82);
+    switch (spec.shape) {
+      case 0:
+        canvas.drawCircle(
+          Offset((30 + (h >> 3) % 40) * u, (35 + (h >> 6) % 30) * u),
+          (22 + (h >> 9) % 16) * u,
+          accent,
+        );
+      case 1:
+        final path = Path()
+          ..moveTo(0, (60 + (h >> 3) % 25) * u)
+          ..quadraticBezierTo(
+            50 * u,
+            (30 + (h >> 6) % 30) * u,
+            w,
+            (55 + (h >> 9) % 30) * u,
+          )
+          ..lineTo(w, w)
+          ..lineTo(0, w)
+          ..close();
+        canvas.drawPath(path, accent);
+      default:
+        canvas.save();
+        canvas.translate(50 * u, 50 * u);
+        canvas.rotate(((h >> 5) % 40) * math.pi / 180);
+        canvas.translate(-50 * u, -50 * u);
+        canvas.drawRect(
+          Rect.fromLTWH(
+            (15 + (h >> 3) % 30) * u,
+            (15 + (h >> 6) % 30) * u,
+            (34 + (h >> 9) % 20) * u,
+            (34 + (h >> 11) % 20) * u,
+          ),
+          accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 5 * u,
+        );
+        canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SleevePainter old) => old.spec != spec;
 }
 
 /// Drop-in for places that want art-or-generated, picking the

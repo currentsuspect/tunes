@@ -2126,8 +2126,20 @@ class $ArtistsTable extends Artists with TableInfo<$ArtistsTable, Artist> {
     requiredDuringInsert: false,
     defaultValue: const Constant(''),
   );
+  static const VerificationMeta _tagsJsonMeta = const VerificationMeta(
+    'tagsJson',
+  );
   @override
-  List<GeneratedColumn> get $columns => [name, artSha, searchText];
+  late final GeneratedColumn<String> tagsJson = GeneratedColumn<String>(
+    'tags_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [name, artSha, searchText, tagsJson];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2160,6 +2172,12 @@ class $ArtistsTable extends Artists with TableInfo<$ArtistsTable, Artist> {
         searchText.isAcceptableOrUnknown(data['search_text']!, _searchTextMeta),
       );
     }
+    if (data.containsKey('tags_json')) {
+      context.handle(
+        _tagsJsonMeta,
+        tagsJson.isAcceptableOrUnknown(data['tags_json']!, _tagsJsonMeta),
+      );
+    }
     return context;
   }
 
@@ -2181,6 +2199,10 @@ class $ArtistsTable extends Artists with TableInfo<$ArtistsTable, Artist> {
         DriftSqlType.string,
         data['${effectivePrefix}search_text'],
       )!,
+      tagsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tags_json'],
+      )!,
     );
   }
 
@@ -2194,7 +2216,17 @@ class Artist extends DataClass implements Insertable<Artist> {
   final String name;
   final String? artSha;
   final String searchText;
-  const Artist({required this.name, this.artSha, required this.searchText});
+
+  /// The artist's crowd tags from the box (genres: "trap", "cloud rap"), as a
+  /// JSON array. Kept so mixes can tell what a library is made of; an artist the
+  /// providers had nothing on has an empty list, which is the truth.
+  final String tagsJson;
+  const Artist({
+    required this.name,
+    this.artSha,
+    required this.searchText,
+    required this.tagsJson,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2203,6 +2235,7 @@ class Artist extends DataClass implements Insertable<Artist> {
       map['art_sha'] = Variable<String>(artSha);
     }
     map['search_text'] = Variable<String>(searchText);
+    map['tags_json'] = Variable<String>(tagsJson);
     return map;
   }
 
@@ -2213,6 +2246,7 @@ class Artist extends DataClass implements Insertable<Artist> {
           ? const Value.absent()
           : Value(artSha),
       searchText: Value(searchText),
+      tagsJson: Value(tagsJson),
     );
   }
 
@@ -2225,6 +2259,7 @@ class Artist extends DataClass implements Insertable<Artist> {
       name: serializer.fromJson<String>(json['name']),
       artSha: serializer.fromJson<String?>(json['artSha']),
       searchText: serializer.fromJson<String>(json['searchText']),
+      tagsJson: serializer.fromJson<String>(json['tagsJson']),
     );
   }
   @override
@@ -2234,6 +2269,7 @@ class Artist extends DataClass implements Insertable<Artist> {
       'name': serializer.toJson<String>(name),
       'artSha': serializer.toJson<String?>(artSha),
       'searchText': serializer.toJson<String>(searchText),
+      'tagsJson': serializer.toJson<String>(tagsJson),
     };
   }
 
@@ -2241,10 +2277,12 @@ class Artist extends DataClass implements Insertable<Artist> {
     String? name,
     Value<String?> artSha = const Value.absent(),
     String? searchText,
+    String? tagsJson,
   }) => Artist(
     name: name ?? this.name,
     artSha: artSha.present ? artSha.value : this.artSha,
     searchText: searchText ?? this.searchText,
+    tagsJson: tagsJson ?? this.tagsJson,
   );
   Artist copyWithCompanion(ArtistsCompanion data) {
     return Artist(
@@ -2253,6 +2291,7 @@ class Artist extends DataClass implements Insertable<Artist> {
       searchText: data.searchText.present
           ? data.searchText.value
           : this.searchText,
+      tagsJson: data.tagsJson.present ? data.tagsJson.value : this.tagsJson,
     );
   }
 
@@ -2261,49 +2300,56 @@ class Artist extends DataClass implements Insertable<Artist> {
     return (StringBuffer('Artist(')
           ..write('name: $name, ')
           ..write('artSha: $artSha, ')
-          ..write('searchText: $searchText')
+          ..write('searchText: $searchText, ')
+          ..write('tagsJson: $tagsJson')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(name, artSha, searchText);
+  int get hashCode => Object.hash(name, artSha, searchText, tagsJson);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Artist &&
           other.name == this.name &&
           other.artSha == this.artSha &&
-          other.searchText == this.searchText);
+          other.searchText == this.searchText &&
+          other.tagsJson == this.tagsJson);
 }
 
 class ArtistsCompanion extends UpdateCompanion<Artist> {
   final Value<String> name;
   final Value<String?> artSha;
   final Value<String> searchText;
+  final Value<String> tagsJson;
   final Value<int> rowid;
   const ArtistsCompanion({
     this.name = const Value.absent(),
     this.artSha = const Value.absent(),
     this.searchText = const Value.absent(),
+    this.tagsJson = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ArtistsCompanion.insert({
     required String name,
     this.artSha = const Value.absent(),
     this.searchText = const Value.absent(),
+    this.tagsJson = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : name = Value(name);
   static Insertable<Artist> custom({
     Expression<String>? name,
     Expression<String>? artSha,
     Expression<String>? searchText,
+    Expression<String>? tagsJson,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (name != null) 'name': name,
       if (artSha != null) 'art_sha': artSha,
       if (searchText != null) 'search_text': searchText,
+      if (tagsJson != null) 'tags_json': tagsJson,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2312,12 +2358,14 @@ class ArtistsCompanion extends UpdateCompanion<Artist> {
     Value<String>? name,
     Value<String?>? artSha,
     Value<String>? searchText,
+    Value<String>? tagsJson,
     Value<int>? rowid,
   }) {
     return ArtistsCompanion(
       name: name ?? this.name,
       artSha: artSha ?? this.artSha,
       searchText: searchText ?? this.searchText,
+      tagsJson: tagsJson ?? this.tagsJson,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2334,6 +2382,9 @@ class ArtistsCompanion extends UpdateCompanion<Artist> {
     if (searchText.present) {
       map['search_text'] = Variable<String>(searchText.value);
     }
+    if (tagsJson.present) {
+      map['tags_json'] = Variable<String>(tagsJson.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2346,6 +2397,7 @@ class ArtistsCompanion extends UpdateCompanion<Artist> {
           ..write('name: $name, ')
           ..write('artSha: $artSha, ')
           ..write('searchText: $searchText, ')
+          ..write('tagsJson: $tagsJson, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5671,12 +5723,14 @@ typedef $$ArtistsTableCreateCompanionBuilder = ArtistsCompanion Function({
   required String name,
   Value<String?> artSha,
   Value<String> searchText,
+  Value<String> tagsJson,
   Value<int> rowid,
 });
 typedef $$ArtistsTableUpdateCompanionBuilder = ArtistsCompanion Function({
   Value<String> name,
   Value<String?> artSha,
   Value<String> searchText,
+  Value<String> tagsJson,
   Value<int> rowid,
 });
 
@@ -5701,6 +5755,11 @@ class $$ArtistsTableFilterComposer
 
   ColumnFilters<String> get searchText => $composableBuilder(
     column: $table.searchText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tagsJson => $composableBuilder(
+    column: $table.tagsJson,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5728,6 +5787,11 @@ class $$ArtistsTableOrderingComposer
     column: $table.searchText,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get tagsJson => $composableBuilder(
+    column: $table.tagsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ArtistsTableAnnotationComposer
@@ -5749,6 +5813,9 @@ class $$ArtistsTableAnnotationComposer
     column: $table.searchText,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get tagsJson =>
+      $composableBuilder(column: $table.tagsJson, builder: (column) => column);
 }
 
 class $$ArtistsTableTableManager
@@ -5782,11 +5849,13 @@ class $$ArtistsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String?> artSha = const Value.absent(),
                 Value<String> searchText = const Value.absent(),
+                Value<String> tagsJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ArtistsCompanion(
                 name: name,
                 artSha: artSha,
                 searchText: searchText,
+                tagsJson: tagsJson,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5794,11 +5863,13 @@ class $$ArtistsTableTableManager
                 required String name,
                 Value<String?> artSha = const Value.absent(),
                 Value<String> searchText = const Value.absent(),
+                Value<String> tagsJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ArtistsCompanion.insert(
                 name: name,
                 artSha: artSha,
                 searchText: searchText,
+                tagsJson: tagsJson,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

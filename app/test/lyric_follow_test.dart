@@ -363,7 +363,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('No lyrics yet — tap to add'), findsOneWidget);
+      expect(find.text('No lyrics yet. Tap to add them.'), findsOneWidget);
     });
   });
 
@@ -471,6 +471,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(pillCount(tester), 0);
       expect(find.text('Line 15'), findsOneWidget);
+      expect(pixels(tester), greaterThan(300));
+    });
+
+    testWidgets('opening late in a song lands on the line being sung', (
+      tester,
+    ) async {
+      // Line 18 of 20 is nowhere near the first screenful, so the lazy list has
+      // not built it when the sheet opens. It used to stay at the top, with
+      // the music many lines ahead of the words.
+      await pumpSheet(tester, position: const Duration(seconds: 92));
+      expect(find.text('Line 18'), findsOneWidget);
       expect(pixels(tester), greaterThan(300));
     });
 

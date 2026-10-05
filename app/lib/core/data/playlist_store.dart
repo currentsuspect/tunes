@@ -154,6 +154,38 @@ class PlaylistStore extends ChangeNotifier {
   ///
   /// Indexed rather than keyed on the sha, because the same track may appear
   /// more than once and removing all of them is not what was asked.
+  /// Puts [sha] at [index], pushing what was there down. For undoing a removal:
+  /// the entry goes back where it was rather than to the end of the list.
+  Future<void> insertAt(int playlistId, String sha, int index) async {
+    await _db.transaction(() async {
+      final rows =
+          await (_db.select(_db.playlistItems)
+                ..where((i) => i.playlistId.equals(playlistId))
+                ..orderBy([(i) => OrderingTerm.asc(i.position)]))
+              .get();
+      final at = index.clamp(0, rows.length);
+      // Everything from the slot onward moves down one, from the back so no two
+      // rows ever share a position part-way through.
+      for (var i = rows.length - 1; i >= at; i--) {
+        await (_db.update(_db.playlistItems)
+              ..where((it) => it.id.equals(rows[i].id)))
+            .write(PlaylistItemsCompanion(position: Value(i + 1)));
+      }
+      await _db
+          .into(_db.playlistItems)
+          .insert(
+            PlaylistItemsCompanion.insert(
+              playlistId: playlistId,
+              sha: sha,
+              position: at,
+              addedAt: _now,
+            ),
+          );
+      await _touch(playlistId);
+    });
+    notifyListeners();
+  }
+
   Future<void> removeAt(int playlistId, int index) async {
     await _db.transaction(() async {
       final rows =

@@ -34,6 +34,24 @@ ManifestTrack _track(String sha, {DateTime? addedAt}) => ManifestTrack(
 );
 
 void main() {
+  group('ManifestArtist.fromJson', () {
+    test('reads tags and drops anything that is not a non-empty string', () {
+      final a = ManifestArtist.fromJson({
+        'name': 'X',
+        'tags': ['trap', ' hip hop ', '', 7, null],
+      });
+      expect(a.tags, ['trap', 'hip hop']);
+    });
+
+    test('a box that predates tags gives none', () {
+      expect(ManifestArtist.fromJson({'name': 'X'}).tags, isEmpty);
+      expect(
+        ManifestArtist.fromJson({'name': 'X', 'tags': null}).tags,
+        isEmpty,
+      );
+    });
+  });
+
   group('ManifestStore.applyEditsStatic', () {
     ManifestTrack base({
       String title = 'T',
@@ -220,6 +238,55 @@ void main() {
         expect(artists.map((a) => a.name), ['Artist A']);
       },
     );
+
+    test('artist tags are kept through a sync and read back', () async {
+      final db = _newDb();
+      addTearDown(db.close);
+      final store = ManifestStore(db);
+      await store.apply(
+        _manifest(
+          tracks: [_track('a' * 64)],
+          artists: const [
+            ManifestArtist(
+              name: 'Artist A',
+              artSha: null,
+              tags: ['trap', 'cloud rap'],
+            ),
+            ManifestArtist(name: 'Artist B', artSha: null),
+          ],
+        ),
+      );
+
+      final back = {for (final a in await store.allArtists()) a.name: a.tags};
+      expect(back['Artist A'], ['trap', 'cloud rap']);
+      // An act the providers had nothing on has no tags, not a made-up one.
+      expect(back['Artist B'], isEmpty);
+    });
+
+    test('a later sync replaces the tags rather than piling on', () async {
+      final db = _newDb();
+      addTearDown(db.close);
+      final store = ManifestStore(db);
+      ManifestArtist a(List<String> tags) =>
+          ManifestArtist(name: 'Artist A', artSha: null, tags: tags);
+      await store.apply(
+        _manifest(
+          tracks: [_track('a' * 64)],
+          artists: [
+            a(['trap']),
+          ],
+        ),
+      );
+      await store.apply(
+        _manifest(
+          tracks: [_track('a' * 64)],
+          artists: [
+            a(['phonk']),
+          ],
+        ),
+      );
+      expect((await store.allArtists()).single.tags, ['phonk']);
+    });
 
     test(
       'tracks inserted with null addedAt survive a read-back without throwing',

@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
+import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/artwork.dart';
+import '../../core/ui/cover_tint.dart';
+import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import 'karaoke_line.dart';
 import 'lyric_follow.dart';
@@ -34,7 +39,7 @@ class LyricsSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: Tones.base,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -135,45 +140,56 @@ class _LyricsSheetState extends State<LyricsSheet> {
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
-      initialChildSize: 0.85,
+      initialChildSize: 0.93,
       minChildSize: 0.4,
-      maxChildSize: 0.95,
+      maxChildSize: 0.97,
       expand: false,
       builder: (context, scrollController) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Column(
-              children: [
-                _Header(
-                  track: widget.track,
-                  editing: _editing,
-                  saving: _saving,
-                  kind: _LyricsKind.of(_lyrics),
-                  onClose: () => Navigator.of(context).pop(),
-                  onSync: _lyrics.trim().isEmpty ? null : _openSync,
-                  onEdit: _startEdit,
-                  onCancel: _cancelEdit,
-                  onSave: _save,
+        // The sheet is a route of its own, outside the player's tint, so it
+        // lights itself: the record's colour pouring in from the top, as on
+        // Now Playing.
+        return TintBuilder(
+          artSha: widget.track.artSha,
+          builder: (context, tint) => Stack(
+            fit: StackFit.expand,
+            children: [
+              AmbientGlow(tint: tint, strength: 0.32),
+              SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).viewInsets.bottom,
+                  ),
+                  child: Column(
+                    children: [
+                      _Header(
+                        track: widget.track,
+                        editing: _editing,
+                        saving: _saving,
+                        kind: _LyricsKind.of(_lyrics),
+                        onClose: () => Navigator.of(context).pop(),
+                        onSync: _lyrics.trim().isEmpty ? null : _openSync,
+                        onEdit: _startEdit,
+                        onCancel: _cancelEdit,
+                        onSave: _save,
+                      ),
+                      Expanded(
+                        child: _editing
+                            ? _Editor(
+                                controller: _controller,
+                                scrollController: scrollController,
+                              )
+                            : _View(
+                                lyrics: _lyrics,
+                                player: widget.player,
+                                scrollController: scrollController,
+                                onAddLyrics: _startEdit,
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
-                const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
-                Expanded(
-                  child: _editing
-                      ? _Editor(
-                          controller: _controller,
-                          scrollController: scrollController,
-                        )
-                      : _View(
-                          lyrics: _lyrics,
-                          player: widget.player,
-                          scrollController: scrollController,
-                          onAddLyrics: _startEdit,
-                        ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
@@ -236,6 +252,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = SettingsScope.maybeOf(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         Space.sm,
@@ -253,13 +270,25 @@ class _Header extends StatelessWidget {
             ),
             tooltip: 'Close',
           ),
+          Artwork(
+            url: null,
+            artSha: track.artSha,
+            size: 40,
+            borderRadius: 8,
+            fallback: GeneratedArtwork.fromTrack(
+              track,
+              size: 40,
+              borderRadius: 8,
+            ),
+          ),
+          const SizedBox(width: Space.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   track.title,
-                  style: TypeScale.title,
+                  style: TypeScale.display.copyWith(fontSize: 18, height: 1.15),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -278,7 +307,7 @@ class _Header extends StatelessWidget {
                     // screen failing to highlight anything.
                     if (!editing && kind.label != null) ...[
                       const SizedBox(width: Space.sm),
-                      _Badge(kind.label!),
+                      _Badge(kind.label!, lit: kind == _LyricsKind.wordSynced),
                     ],
                   ],
                 ),
@@ -302,6 +331,19 @@ class _Header extends StatelessWidget {
             else
               TextButton(onPressed: onSave, child: const Text('Save')),
           ] else ...[
+            if (settings != null && kind != _LyricsKind.none)
+              IconButton(
+                onPressed: () =>
+                    settings.setLyricSize((settings.lyricSize + 1) % 3),
+                tooltip: 'Text size',
+                icon: Text(
+                  'Aa',
+                  style: TypeScale.display.copyWith(
+                    fontSize: 15 + settings.lyricSize * 2.5,
+                    color: Tones.textMuted,
+                  ),
+                ),
+              ),
             if (onSync != null)
               IconButton(
                 onPressed: onSync,
@@ -321,20 +363,28 @@ class _Header extends StatelessWidget {
 }
 
 class _Badge extends StatelessWidget {
-  const _Badge(this.text);
+  const _Badge(this.text, {this.lit = false});
   final String text;
+
+  /// Word-synced is the best a lyric gets, so it is the one badge that takes
+  /// the record's colour.
+  final bool lit;
 
   @override
   Widget build(BuildContext context) {
+    final accent = AccentScope.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       decoration: BoxDecoration(
-        color: Tones.surfaceRaised,
-        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: lit ? accent : Tones.hairline),
+        borderRadius: BorderRadius.circular(99),
       ),
       child: Text(
         text,
-        style: TypeScale.caption.copyWith(color: Tones.textMuted),
+        style: TypeScale.mono.copyWith(
+          fontSize: 10,
+          color: lit ? accent : Tones.textMuted,
+        ),
       ),
     );
   }
@@ -441,12 +491,28 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     }
   }
 
-  void _scrollToActive({required bool animated}) {
+  void _scrollToActive({required bool animated, bool retry = true}) {
     if (!mounted) return;
     final idx = _follow.activeIndex;
     if (idx == null || idx < 0 || idx >= _lineKeys.length) return;
     final ctx = _lineKeys[idx].currentContext;
-    if (ctx == null) return;
+    if (ctx == null) {
+      // The list is lazy, so a line far from the screen has not been built and
+      // has nowhere to scroll to. Jump to where it ought to be by proportion,
+      // which builds it, then settle exactly on the next frame. Without this,
+      // opening the lyrics late in a song left them at the top while the music
+      // was many lines ahead, and following never caught up.
+      final c = widget.scrollController;
+      if (!retry || !c.hasClients || _lineKeys.isEmpty) return;
+      final pos = c.position;
+      final total = pos.maxScrollExtent + pos.viewportDimension;
+      final guess = total * (idx / _lineKeys.length);
+      c.jumpTo(guess.clamp(0.0, pos.maxScrollExtent));
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollToActive(animated: animated, retry: false),
+      );
+      return;
+    }
     Scrollable.ensureVisible(
       ctx,
       alignment: 0.35,
@@ -504,7 +570,11 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 64),
         child: Text(
           lrc.untimed.join('\n'),
-          style: TypeScale.body.copyWith(height: 1.6),
+          style: TypeScale.display.copyWith(
+            fontSize: _restingSize(context),
+            height: 1.55,
+            fontWeight: FontWeight.w400,
+          ),
         ),
       );
     }
@@ -538,7 +608,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                 icon: const Icon(Icons.my_location_rounded, size: 16),
                 label: const Text('Back to current line'),
                 style: TextButton.styleFrom(
-                  foregroundColor: Tones.primary,
+                  foregroundColor: AccentScope.of(context),
                   backgroundColor: Tones.surfaceRaised,
                   padding: const EdgeInsets.symmetric(
                     horizontal: Space.md,
@@ -553,8 +623,28 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     );
   }
 
+  /// The size lyrics rest at: small, medium or large, from Settings.
+  static double _restingSize(BuildContext context) {
+    final step = SettingsScope.maybeOf(context)?.lyricSize ?? 1;
+    return const [20.0, 24.0, 30.0][step];
+  }
+
+  /// How bright a line is by where it sits relative to the one being sung.
+  /// Lines already sung drop away; the next few stay readable so the eye can
+  /// run ahead; the rest recede.
+  static double _opacityFor(int distance) {
+    if (distance < 0) return 0.3;
+    return switch (distance) {
+      0 => 1.0,
+      1 => 0.62,
+      2 => 0.44,
+      _ => 0.3,
+    };
+  }
+
   Widget _timedList(Lrc lrc) {
     final activeIdx = _activeIndex ?? -1;
+    final rest = _restingSize(context);
     // Timed lines first, then anything still untimed. Rendering only the timed
     // ones meant that syncing a single line of a forty-line lyric hid the
     // other thirty-nine: the words were still stored, but the screen looked
@@ -562,9 +652,9 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     final untimedOffset = lrc.lines.length;
     return ListView.separated(
       controller: widget.scrollController,
-      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 64),
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 120),
       itemCount: untimedOffset + lrc.untimed.length,
-      separatorBuilder: (_, _) => const SizedBox(height: Space.md),
+      separatorBuilder: (_, _) => const SizedBox(height: Space.lg),
       itemBuilder: (context, i) {
         if (i >= untimedOffset) {
           // Not timed yet, so there is nothing to seek to and nothing to
@@ -572,21 +662,39 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
           // part is not synced" rather than as a different kind of content.
           return Text(
             lrc.untimed[i - untimedOffset],
-            style: TypeScale.title.copyWith(
-              color: Tones.text.withValues(alpha: 0.55),
-              height: 1.3,
+            style: TypeScale.display.copyWith(
+              fontSize: rest,
+              color: Tones.text.withValues(alpha: 0.4),
+              height: 1.25,
+              fontWeight: FontWeight.w400,
             ),
           );
         }
         final line = lrc.lines[i];
         final isActive = i == activeIdx;
         final isPast = i < activeIdx;
+        final opacity = activeIdx < 0 ? 0.62 : _opacityFor(i - activeIdx);
+        // The line being sung is set larger than the rest, so it is the thing
+        // you read and the others are the context around it.
+        final size = isActive ? rest * 1.22 : rest;
         // The key is what _scrollToActive and _resumeIfActiveVisible resolve
         // through, so it wraps the whole row rather than the text inside it.
         return KeyedSubtree(
           key: _lineKeys[i],
           child: GestureDetector(
             onTap: () => widget.player.seek(line.timestamp),
+            // Hold a line to copy it: a lyric you love is a thing you want to
+            // send to someone, and this needs no sharing plugin.
+            onLongPress: () {
+              HapticFeedback.selectionClick();
+              Clipboard.setData(ClipboardData(text: line.text));
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                const SnackBar(
+                  content: Text('Line copied'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
             child: line.hasWordTiming
                 // Word-synced: sweep the highlight across the word being sung.
                 ? KaraokeLine(
@@ -596,17 +704,16 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                     trackEnd: widget.player.duration,
                     isActive: isActive,
                     isPast: isPast,
+                    restOpacity: opacity,
+                    style: TypeScale.display.copyWith(fontSize: size),
                   )
                 : AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 200),
-                    style: TypeScale.title.copyWith(
-                      color: isActive
-                          ? Tones.text
-                          : isPast
-                          ? Tones.textMuted.withValues(alpha: 0.6)
-                          : Tones.text.withValues(alpha: 0.85),
-                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                      height: 1.3,
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    style: TypeScale.display.copyWith(
+                      fontSize: size,
+                      color: Tones.text.withValues(alpha: opacity),
+                      height: 1.25,
                     ),
                     child: Text(line.text),
                   ),
@@ -629,20 +736,21 @@ class _Empty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lyrics_outlined, size: 40, color: Tones.textMuted),
-            const SizedBox(height: Space.md),
             Text(
               'No lyrics yet',
-              style: TypeScale.title,
+              style: TypeScale.display.copyWith(fontSize: 28),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: Space.xs),
+            const SizedBox(height: Space.md),
             Text(
               'Paste an LRC file to follow along with the track, or paste '
-              'plain text to just read it.\n\n'
-              'Lyrics live in the local database and survive syncs.',
+              'plain text to just read it. Lyrics live on this phone and '
+              'survive syncs.',
               textAlign: TextAlign.center,
-              style: TypeScale.body.copyWith(color: Tones.textMuted),
+              style: TypeScale.note.copyWith(
+                fontSize: 15,
+                color: Tones.textMuted,
+              ),
             ),
             const SizedBox(height: Space.lg),
             // The Edit control is a small word in the corner. On the one
@@ -652,6 +760,10 @@ class _Empty extends StatelessWidget {
               onPressed: onAddLyrics,
               icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text('Add lyrics'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Tones.text,
+                foregroundColor: Tones.base,
+              ),
             ),
           ],
         ),
@@ -676,7 +788,11 @@ class _Editor extends StatelessWidget {
         maxLines: null,
         expands: true,
         textAlignVertical: TextAlignVertical.top,
-        style: TypeScale.body.copyWith(height: 1.4),
+        style: TypeScale.mono.copyWith(
+          fontSize: 14,
+          height: 1.5,
+          color: Tones.text,
+        ),
         decoration: InputDecoration(
           hintText:
               '[00:00.00]Paste LRC here, or just plain text\n'

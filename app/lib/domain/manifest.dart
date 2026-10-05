@@ -289,15 +289,28 @@ class SearchResults {
 }
 
 class ManifestArtist {
-  const ManifestArtist({required this.name, required this.artSha});
+  const ManifestArtist({
+    required this.name,
+    required this.artSha,
+    this.tags = const [],
+  });
 
   final String name;
   final String? artSha;
+
+  /// Crowd tags for the act: what kind of music it is called ("trap", "cloud
+  /// rap"). Empty when the providers had nothing for it, or the box predates the
+  /// field.
+  final List<String> tags;
 
   factory ManifestArtist.fromJson(Map<String, dynamic> json) {
     return ManifestArtist(
       name: (json['name'] as String?) ?? '',
       artSha: json['artSha'] as String?,
+      tags: [
+        for (final t in (json['tags'] as List<dynamic>? ?? const []))
+          if (t is String && t.trim().isNotEmpty) t.trim(),
+      ],
     );
   }
 }
@@ -312,6 +325,46 @@ class TunesManifest {
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
   final List<ManifestArtist> artists;
+
+  /// The library as it is without a connection: only the songs [held] says are
+  /// on the phone, the records that have any of them left, and each record cut
+  /// to those songs.
+  ///
+  /// A record's total is dropped rather than kept. "5 of 12, 7 missing" would be
+  /// true of the library but not of the phone, and offline the question is only
+  /// what can be played.
+  TunesManifest onlyHeld(bool Function(String sha) held) {
+    final kept = [
+      for (final t in tracks)
+        if (held(t.sha)) t,
+    ];
+    final shas = {for (final t in kept) t.sha};
+    final cut = <ManifestRelease>[];
+    for (final r in releases) {
+      final here = [
+        for (final sha in r.trackShas)
+          if (shas.contains(sha)) sha,
+      ];
+      if (here.isEmpty) continue;
+      cut.add(
+        ManifestRelease(
+          id: r.id,
+          title: r.title,
+          artist: r.artist,
+          year: r.year,
+          artSha: r.artSha,
+          type: r.type,
+          totalTracks: null,
+          trackShas: here,
+          tracks: [
+            for (final rt in r.tracks)
+              if (shas.contains(rt.sha)) rt,
+          ],
+        ),
+      );
+    }
+    return TunesManifest(tracks: kept, releases: cut, artists: artists);
+  }
 
   String? artistArt(String name) {
     for (final a in artists) {

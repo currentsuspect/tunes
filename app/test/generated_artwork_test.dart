@@ -37,23 +37,23 @@ void main() {
     expect(find.text('B'), findsOneWidget);
   });
 
-  testWidgets('the same input always draws the same colours', (tester) async {
+  test('the same input always draws the same sleeve', () {
     // Stability across restarts is the whole point of a generated cover.
-    await _pump(
-      tester,
-      const Row(
-        children: [
-          GeneratedArtwork(title: 'Lyfë', artist: 'Yeat', size: 40),
-          GeneratedArtwork(title: 'Lyfë', artist: 'Yeat', size: 40),
-        ],
-      ),
+    expect(
+      GeneratedArtwork.specFor('Lyfë', 'Yeat'),
+      GeneratedArtwork.specFor('Lyfë', 'Yeat'),
     );
-    final boxes = tester
-        .widgetList<Container>(find.byType(Container))
-        .map((c) => (c.decoration as BoxDecoration?)?.gradient)
-        .whereType<Gradient>()
-        .toList();
-    expect(boxes, hasLength(2));
-    expect(boxes[0], equals(boxes[1]));
+    expect(
+      GeneratedArtwork.specFor('Lyfë', 'Yeat'),
+      isNot(GeneratedArtwork.specFor('Afterlyfe', 'Yeat')),
+    );
+  });
+
+  test('the seed does not depend on String.hashCode', () {
+    // Pinned value: if this moves, every generated sleeve changes colour.
+    expect(
+      GeneratedArtwork.specFor('Continuum', 'John Mayer').seed,
+      3260763654,
+    );
   });
 }

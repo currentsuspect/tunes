@@ -324,4 +324,43 @@ void main() {
       expect(scored.reasons, contains('alternation'));
     });
   });
+
+  group('the reach dial', () {
+    test('changes nothing at its resting place', () {
+      final s = RadioSession();
+      expect(s.exploration, closeTo(0.2, 1e-9));
+      s.completed(t('a'));
+      expect(s.exploration, closeTo(0.26, 1e-9));
+    });
+
+    test('moves how far the radio wanders, and still adapts', () {
+      final s = RadioSession()..reach = 1.0;
+      expect(s.exploration, greaterThan(0.9));
+      final tight = RadioSession()..reach = 0.0;
+      expect(tight.exploration, 0.0);
+      tight.completed(t('a'));
+      expect(tight.exploration, greaterThan(0.0));
+      expect(tight.exploration, lessThan(0.2));
+    });
+
+    test('a high dial samples wider than a low one', () {
+      final lib = [for (var i = 0; i < 40; i++) t('s$i', artist: 'X$i')];
+      final seen = <String>{};
+      for (final reach in [0.0, 1.0]) {
+        final picks = <String>{};
+        for (var seed = 0; seed < 60; seed++) {
+          final e = RadioEngine(random: Random(seed));
+          final pick = e.next(
+            library: lib,
+            session: RadioSession()..reach = reach,
+            taste: noTaste,
+            current: null,
+          );
+          picks.add(pick!.sha);
+        }
+        if (reach == 0.0) seen.addAll(picks);
+        if (reach == 1.0) expect(picks.length, greaterThan(seen.length));
+      }
+    });
+  });
 }

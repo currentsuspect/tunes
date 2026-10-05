@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'generated_artwork.dart';
 
 String initialsFor(String name) {
   final words = name
@@ -29,6 +30,9 @@ Color colorFor(String name) {
   return palette[h % palette.length];
 }
 
+/// A circle for someone with no photo: the same deterministic wash the sleeves
+/// use, with their initials set in the serif. Drawn from the name, so the same
+/// person always looks the same.
 class InitialsAvatar extends StatelessWidget {
   const InitialsAvatar({super.key, required this.name, this.size = 40});
 
@@ -37,17 +41,29 @@ class InitialsAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final spec = GeneratedArtwork.specFor(name, '');
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(color: colorFor(name), shape: BoxShape.circle),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [spec.from, spec.to],
+        ),
+      ),
       alignment: Alignment.center,
       child: Text(
         initialsFor(name),
         style: TextStyle(
-          color: Tones.onPrimary,
-          fontSize: size * 0.34,
-          fontWeight: FontWeight.w700,
+          fontFamily: Faces.display,
+          fontStyle: FontStyle.italic,
+          fontWeight: FontWeight.w500,
+          fontVariations: const [FontVariation('wght', 500)],
+          color: Tones.text.withValues(alpha: 0.92),
+          fontSize: size * 0.4,
+          height: 1,
         ),
       ),
     );

@@ -113,6 +113,11 @@ class Artwork extends StatelessWidget {
         if (path != null && File(path).existsSync()) {
           return _painted(context, FileImage(File(path)));
         }
+        // Not on this phone yet. Ask for it, so the sleeve heals itself the
+        // next time the server answers instead of staying a fallback until a
+        // restart. The store dedupes, and pauses after a failure, so asking on
+        // every build is safe.
+        WidgetsBinding.instance.addPostFrameCallback((_) => store.fetch(sha));
         return _network(context, src);
       },
     );

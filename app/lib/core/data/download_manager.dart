@@ -85,6 +85,49 @@ class DownloadManager extends ChangeNotifier {
   final Queue<String> _waiting = Queue<String>();
   int _running = 0;
 
+  /// What the current burst of downloading adds up to, so the whole of it can
+  /// be shown as one progress ("3 of 12") however many songs it is. Resets when
+  /// the queue goes quiet.
+  int _batchTotal = 0;
+  int _batchDone = 0;
+
+  int get batchTotal => _batchTotal;
+  int get batchDone => _batchDone;
+
+  /// Waiting or running, not failed.
+  int get queuedCount =>
+      _jobs.values.where((j) => j.phase == DownloadPhase.queued).length;
+  int get runningCount =>
+      _jobs.values.where((j) => j.phase == DownloadPhase.running).length;
+  int get failedCount =>
+      _jobs.values.where((j) => j.phase == DownloadPhase.failed).length;
+
+  /// How far through the whole batch, 0 to 1: finished songs plus the part of
+  /// each running one that has arrived. Null when nothing is in flight. A
+  /// running song whose size is unknown counts for nothing until it finishes,
+  /// rather than being guessed at.
+  double? get overallProgress {
+    if (_batchTotal <= 0 || activeCount == 0) return null;
+    var partial = 0.0;
+    for (final j in _jobs.values) {
+      if (j.phase == DownloadPhase.running) partial += j.progress ?? 0;
+    }
+    return ((_batchDone + partial) / _batchTotal).clamp(0.0, 1.0);
+  }
+
+  DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Progress arrives per chunk, hundreds of times a song, and every listening
+  /// row rebuilds on each. Ten a second is smooth to the eye and a fraction of
+  /// the work. Anything that changes what is shown, like starting or finishing,
+  /// still notifies at once.
+  void _notifyProgress() {
+    final now = DateTime.now();
+    if (now.difference(_lastNotify) < const Duration(milliseconds: 100)) return;
+    _lastNotify = now;
+    notifyListeners();
+  }
+
   /// Snapshot of everything queued, running or failed.
   Map<String, DownloadJob> get jobs => Map.unmodifiable(_jobs);
 
@@ -110,6 +153,11 @@ class DownloadManager extends ChangeNotifier {
     }
     if (store.contains(sha)) return;
     if (isActive(sha)) return;
+    if (activeCount == 0) {
+      _batchTotal = 0;
+      _batchDone = 0;
+    }
+    _batchTotal += 1;
     _jobs[sha] = DownloadJob(sha: sha, phase: DownloadPhase.queued);
     _waiting.add(sha);
     notifyListeners();
@@ -123,6 +171,7 @@ class DownloadManager extends ChangeNotifier {
     _waiting.remove(sha);
     if (_jobs[sha]?.phase == DownloadPhase.queued) {
       _jobs.remove(sha);
+      if (_batchTotal > 0) _batchTotal -= 1;
     }
     notifyListeners();
   }
@@ -169,14 +218,16 @@ class DownloadManager extends ChangeNotifier {
           final job = _jobs[sha];
           if (job == null) return;
           _jobs[sha] = job.copyWith(received: received, total: total);
-          notifyListeners();
+          _notifyProgress();
         },
       );
       await store.add(sha, path);
       _jobs.remove(sha);
+      _batchDone += 1;
     } on DownloadCancelled {
       // Not a failure: the user asked for this. Leave no trace.
       _jobs.remove(sha);
+      if (_batchTotal > 0) _batchTotal -= 1;
     } catch (e) {
       _jobs[sha] =
           (_jobs[sha] ?? DownloadJob(sha: sha, phase: DownloadPhase.running))

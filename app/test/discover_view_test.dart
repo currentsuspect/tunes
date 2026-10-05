@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/ui/shelf_widgets.dart';
 import 'package:tunes/domain/collection_gaps.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/domain/manifest.dart';
@@ -60,16 +61,16 @@ void main() {
   ) async {
     await pump(tester, [_missing('Yeat', 'Lyfë', owned: 5, total: 18)]);
     expect(find.textContaining('5 of 18 releases'), findsOneWidget);
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byType(ProgressRing), findsOneWidget);
   });
 
-  testWidgets('draws no progress bar when completion is unknown', (
+  testWidgets('draws no progress ring when completion is unknown', (
     tester,
   ) async {
-    // An older daemon sends no counts. A bar at zero would claim the library
+    // An older daemon sends no counts. A ring at zero would claim the library
     // holds none of this act, which is a different statement from silence.
     await pump(tester, [_missing('Yeat', 'Lyfë')]);
-    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.byType(ProgressRing), findsNothing);
     // The whole subtitle, not a fragment of it: the point is that no
     // "0 of something" clause was invented to fill the space.
     expect(find.text('1 missing'), findsOneWidget);

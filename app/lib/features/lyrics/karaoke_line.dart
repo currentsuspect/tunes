@@ -21,6 +21,7 @@ class KaraokeLine extends StatelessWidget {
     required this.isActive,
     required this.isPast,
     this.style,
+    this.restOpacity,
   });
 
   final Lrc lrc;
@@ -30,6 +31,11 @@ class KaraokeLine extends StatelessWidget {
   final bool isActive;
   final bool isPast;
   final TextStyle? style;
+
+  /// How bright this line is when it is not the one being sung. Null keeps the
+  /// old past/upcoming defaults; the lyrics screen passes a value that fades
+  /// with distance from the current line.
+  final double? restOpacity;
 
   static const _litOpacity = 1.0;
   static const _dimOpacity = 0.35;
@@ -46,7 +52,9 @@ class KaraokeLine extends StatelessWidget {
       return Text(
         line.text,
         style: base.copyWith(
-          color: isPast
+          color: restOpacity != null
+              ? Tones.text.withValues(alpha: restOpacity)
+              : isPast
               ? Tones.textMuted.withValues(alpha: 0.6)
               : Tones.text.withValues(alpha: 0.85),
           fontWeight: FontWeight.w400,

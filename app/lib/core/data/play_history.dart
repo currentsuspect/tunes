@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/widgets.dart';
 
 import '../audio/tune_player.dart';
+import '../../domain/mixes.dart' show PlayStamp;
 import 'database.dart';
 
 /// Records what was actually listened to.
@@ -150,18 +151,36 @@ class PlayHistory extends ChangeNotifier {
         .toList();
   }
 
-  /// The tracks played most, heaviest first.
+  /// What is on repeat right now: played through at least [minPlays] times in
+  /// the last [window], heaviest first.
   ///
-  /// [minPlays] defaults to two because "most played" over a set of things
-  /// played once each is not a ranking, it is an arbitrary order wearing the
-  /// word "most". Below the threshold the section is absent rather than
-  /// filled with noise.
-  Future<List<String>> topShas({int limit = 20, int minPlays = 2}) async {
+  /// This used to count every play ever made, so "on repeat" was the listener's
+  /// all-time favourites and never changed once the history was long. It is now
+  /// a window onto today, a day by default, so it follows what is actually on:
+  /// a track you loved last spring does not stay on it, and what you have been
+  /// looping since this morning does.
+  ///
+  /// [minPlays] stays at two because "most played" over a set of things played
+  /// once each is not a ranking, it is an arbitrary order wearing the word
+  /// "most". Below the threshold the section is absent rather than filled with
+  /// noise. [now] is injectable so the window can be tested.
+  Future<List<String>> topShas({
+    int limit = 20,
+    int minPlays = 2,
+    Duration window = const Duration(hours: 24),
+    DateTime? now,
+  }) async {
+    final since = (now ?? DateTime.now())
+        .subtract(window)
+        .millisecondsSinceEpoch;
     final count = _db.playEvents.id.count();
     final rows =
         await (_db.selectOnly(_db.playEvents)
               ..addColumns([_db.playEvents.sha, count])
-              ..where(_db.playEvents.completed.equals(true))
+              ..where(
+                _db.playEvents.completed.equals(true) &
+                    _db.playEvents.startedAt.isBiggerOrEqualValue(since),
+              )
               ..groupBy([
                 _db.playEvents.sha,
               ], having: count.isBiggerOrEqualValue(minPlays))
@@ -177,41 +196,84 @@ class PlayHistory extends ChangeNotifier {
         .toList();
   }
 
-  /// Tracks that were played properly, but are not what is being played now.
+  /// Songs you played properly a while back and have not played since.
   ///
-  /// Defined by rank rather than by calendar age. "Nothing in three weeks"
-  /// is the natural definition and it is useless on a young history -- it
-  /// would return nothing at all until the app had been in use for three
-  /// weeks. Skipping the [skipRecent] most recent tracks instead means the
-  /// section works from the first day and still says the same thing: things
-  /// you liked, that are not in current rotation.
+  /// A track qualifies when it was last played between [within] and [quietFor]
+  /// ago: not in the last fortnight, and not so long ago that it is a different
+  /// listener's taste. Ranked by how much it was played in total, so the ones
+  /// you really had on heavy rotation come first. [exclude] keeps anything that
+  /// is on repeat out of it, though the windows cannot overlap by construction.
+  ///
+  /// This used to take every track ever played, drop the ten most recent and
+  /// sort the rest by play count, which is to say it ranked all-time favourites
+  /// just as On repeat did, and the two lists were the same songs.
   Future<List<String>> listenAgainShas({
     int limit = 20,
-    int skipRecent = 10,
+    Duration quietFor = const Duration(days: 14),
+    Duration within = const Duration(days: 180),
+    Set<String> exclude = const {},
+    DateTime? now,
   }) async {
+    final at = now ?? DateTime.now();
+    final newest = at.subtract(quietFor).millisecondsSinceEpoch;
+    final oldest = at.subtract(within).millisecondsSinceEpoch;
     final count = _db.playEvents.id.count();
     final last = _db.playEvents.startedAt.max();
     final rows =
         await (_db.selectOnly(_db.playEvents)
               ..addColumns([_db.playEvents.sha, count, last])
               ..where(_db.playEvents.completed.equals(true))
-              ..groupBy([_db.playEvents.sha])
-              ..orderBy([OrderingTerm.desc(last)]))
+              ..groupBy([_db.playEvents.sha]))
             .get();
-    // The set is at most one row per track ever played, so ordering it in
-    // memory costs nothing and keeps the "skip the current rotation" rule in
-    // one readable place rather than in a window function.
-    final older = rows.skip(skipRecent).toList()
-      ..sort((a, b) {
-        final byCount = (b.read(count) ?? 0).compareTo(a.read(count) ?? 0);
-        if (byCount != 0) return byCount;
-        return (b.read(last) ?? 0).compareTo(a.read(last) ?? 0);
-      });
-    return older
+    // At most one row per track ever played, so doing the window and the
+    // ordering in memory costs nothing and keeps the rule in one readable place.
+    final quiet =
+        [
+          for (final r in rows)
+            if ((r.read(last) ?? 0) <= newest &&
+                (r.read(last) ?? 0) >= oldest &&
+                !exclude.contains(r.read(_db.playEvents.sha)))
+              r,
+        ]..sort((a, b) {
+          final byCount = (b.read(count) ?? 0).compareTo(a.read(count) ?? 0);
+          if (byCount != 0) return byCount;
+          return (b.read(last) ?? 0).compareTo(a.read(last) ?? 0);
+        });
+    return quiet
         .take(limit)
         .map((r) => r.read(_db.playEvents.sha))
         .whereType<String>()
         .toList();
+  }
+
+  /// Every finished play in the last [within], newest first, with when it
+  /// started. What the mixes are built from: not a total per song but the times,
+  /// so "what you play on Fridays" and "what you play after dark" can be asked.
+  ///
+  /// Capped at [limit] rows so a very long history cannot make this slow; the
+  /// newest are the ones that say what you are into now.
+  Future<List<PlayStamp>> playStamps({
+    Duration within = const Duration(days: 365),
+    int limit = 20000,
+    DateTime? now,
+  }) async {
+    final since = (now ?? DateTime.now())
+        .subtract(within)
+        .millisecondsSinceEpoch;
+    final rows =
+        await (_db.select(_db.playEvents)
+              ..where(
+                (e) =>
+                    e.completed.equals(true) &
+                    e.startedAt.isBiggerOrEqualValue(since),
+              )
+              ..orderBy([(e) => OrderingTerm.desc(e.startedAt)])
+              ..limit(limit))
+            .get();
+    return [
+      for (final r in rows)
+        PlayStamp(r.sha, DateTime.fromMillisecondsSinceEpoch(r.startedAt)),
+    ];
   }
 
   /// How many times each track was played, for the tracks that were.

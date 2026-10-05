@@ -146,6 +146,7 @@ class ManifestStore {
                 name: a.name,
                 artSha: Value(a.artSha),
                 searchText: Value(a.name.toLowerCase()),
+                tagsJson: Value(jsonEncode(a.tags)),
               ),
             );
       }
@@ -330,8 +331,25 @@ class ManifestStore {
     );
   }
 
+  static List<String> _tagsFrom(String json) {
+    try {
+      final v = jsonDecode(json);
+      if (v is List) {
+        return [
+          for (final t in v)
+            if (t is String) t,
+        ];
+      }
+    } catch (_) {}
+    return const [];
+  }
+
   ManifestArtist _artistFromRow(Artist row) {
-    return ManifestArtist(name: row.name, artSha: row.artSha);
+    return ManifestArtist(
+      name: row.name,
+      artSha: row.artSha,
+      tags: _tagsFrom(row.tagsJson),
+    );
   }
 
   // --- User edits --------------------------------------------------------

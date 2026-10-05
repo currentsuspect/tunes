@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/ui/playing_bars.dart';
+import 'package:tunes/core/ui/tunes_refresh.dart';
+import 'package:tunes/features/now_playing/now_playing_page.dart';
 import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/art_store.dart';
@@ -20,6 +23,7 @@ import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/core/net/update_check.dart';
 import 'package:tunes/domain/manifest.dart';
+import 'package:tunes/domain/whats_new.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
 import 'package:tunes/features/artist/artist_page.dart';
@@ -191,6 +195,9 @@ class _FakeClient implements TunesClient {
 
   @override
   Future<bool> ping() async => true;
+
+  @override
+  Future<void> warm(String sha) async {}
 
   @override
   Future<void> downloadTrack(
@@ -458,6 +465,9 @@ void main() {
     queueStore = _TestQueueStore(db);
     settings = SettingsStore(db);
     await settings.load();
+    // The What's new page covers the app on a first open. Tests are not on a
+    // first open unless they say so, so it is marked as seen.
+    await settings.setWhatsNewSeen(kWhatsNewId);
     likes = LikesStore(db);
     await likes.load();
     playlists = PlaylistStore(db);
@@ -480,6 +490,12 @@ void main() {
     // Un-enrolled, which is what these tests want: the library UI must render
     // from the local store without any credential.
     final auth = TunesAuth(post: client.postJson, store: MemoryTokenStore());
+    // Reduced motion, as a user can ask for. The bars on the playing song, and
+    // the pulse on a queued download, move for ever by design, and a test that
+    // waits for the screen to settle would wait for ever with them.
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await tester.pumpWidget(
       TunesApp(
         client: client,
@@ -538,7 +554,7 @@ void main() {
     // Fling the feed itself. The library line moved into the static header,
     // and pulling something that does not scroll refreshes nothing.
     await tester.fling(
-      find.byType(RefreshIndicator),
+      find.byType(TunesRefreshList),
       const Offset(0, 320),
       1000,
     );
@@ -618,7 +634,9 @@ void main() {
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
   });
 
-  testWidgets('playing records recents on the home tab', (tester) async {
+  testWidgets('playing records recents, shown above the library list', (
+    tester,
+  ) async {
     final player = FakeTunePlayer();
     await pumpApp(
       tester,
@@ -626,21 +644,19 @@ void main() {
       player,
     );
     await goToLibrary(tester);
+    // Nothing played yet, so no rail.
+    expect(find.text('Recently played'), findsNothing);
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
     expect(player.playQueueCalls, 1);
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
 
+    // Home no longer carries it: it was a long scroll from where anyone looks.
     await tester.tap(find.text('Home'));
     await tester.pumpAndSettle();
+    expect(find.text('Recently played'), findsNothing);
 
-    await tester.scrollUntilVisible(
-      find.text('Recently played'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-
+    await goToLibrary(tester);
     expect(find.text('Recently played'), findsOneWidget);
     expect(find.text('Bassline'), findsWidgets);
   });
@@ -691,7 +707,9 @@ void main() {
     await tester.tap(find.text('HARDSTONE PSYCHO').first);
     await tester.pumpAndSettle();
     expect(find.text('09'), findsOneWidget);
-    expect(find.textContaining('/19 tracks'), findsOneWidget);
+    // The count says how many of how many; what is missing is its own mark.
+    expect(find.text('1 of 19 songs'), findsOneWidget);
+    expect(find.text('18 missing'), findsOneWidget);
   });
 
   testWidgets('search queries the database and surfaces albums and artists', (
@@ -732,7 +750,7 @@ void main() {
 
     await tester.tap(find.text('Nightdrive (Remaster)'));
     await tester.pumpAndSettle();
-    expect(find.text('Album'), findsWidgets);
+    expect(find.byType(AlbumPage), findsOneWidget);
   });
 
   testWidgets(
@@ -818,7 +836,7 @@ void main() {
     await tester.tap(find.text('OCTANE'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Artist'), findsOneWidget);
+    expect(find.byType(ArtistPage), findsOneWidget);
     expect(find.text('OCTANE'), findsOneWidget);
   });
 
@@ -898,13 +916,24 @@ void main() {
 
     await tester.tap(find.text('Artists').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Don Toliver'));
+    // The name also appears under the part-owned album above the rail; the rail
+    // is the later of the two.
+    await tester.tap(find.text('Don Toliver').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Discography · 1 of 3 in your library'), findsOneWidget);
+    // The facts line carries how much of the catalogue is held.
+    expect(find.textContaining('1 of 3 in your library'), findsOneWidget);
+    // Part-owned records and wholly missing ones are told apart.
+    expect(find.text('FINISH THESE'), findsOneWidget);
+    expect(find.text('NOT YET YOURS'), findsOneWidget);
+    expect(find.text('1 of 19  ·  18 to go'), findsOneWidget);
     expect(find.text('OCTANE'), findsOneWidget);
     expect(find.text('Love Sick'), findsOneWidget);
-    expect(find.text('not in library'), findsNWidgets(2));
+    // And the songs you own come before any of it. Each label appears twice:
+    // once on its jump chip, once as the section heading, which is the later.
+    final songs = tester.getTopLeft(find.text('Songs you have').last).dy;
+    final missing = tester.getTopLeft(find.text('Not in your library').last).dy;
+    expect(songs, lessThan(missing));
   });
 
   testWidgets('home surfaces a part-owned album and released-this-year', (
@@ -976,6 +1005,77 @@ void main() {
     expect(find.byType(Image), findsWidgets); // photo on the artist page too
   });
 
+  group('the dock', () {
+    Future<FakeTunePlayer> openArtistWithMusic(WidgetTester tester) async {
+      final player = FakeTunePlayer();
+      final track = _track('One', 'flac', 950000, artist: 'Vax');
+      await pumpApp(
+        tester,
+        _FakeClient(() async => _manifestOf([track])),
+        player,
+      );
+      player.playQueue([track], 0);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vax').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(ArtistPage), findsOneWidget);
+      return player;
+    }
+
+    testWidgets('the tabs stay on screen inside an artist page', (
+      tester,
+    ) async {
+      await openArtistWithMusic(tester);
+      for (final label in ['Home', 'Discover', 'Search', 'Library']) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+    });
+
+    testWidgets('there is one mini bar, not one per page', (tester) async {
+      await openArtistWithMusic(tester);
+      expect(find.byType(MiniPlayerBar), findsOneWidget);
+    });
+
+    testWidgets('tapping another tab leaves the page for that tab', (
+      tester,
+    ) async {
+      await openArtistWithMusic(tester);
+
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ArtistPage), findsNothing);
+      expect(find.text('Albums'), findsWidgets); // the Library's own tabs
+    });
+
+    testWidgets('tapping the tab you are on goes back to its top', (
+      tester,
+    ) async {
+      await openArtistWithMusic(tester);
+
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ArtistPage), findsNothing);
+    });
+
+    testWidgets('the player covers the tabs, and Back brings them back', (
+      tester,
+    ) async {
+      await openArtistWithMusic(tester);
+
+      await tester.tap(find.byType(MiniPlayerBar));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingPage), findsOneWidget);
+      expect(find.text('Discover'), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_down_rounded));
+      await tester.pumpAndSettle();
+      expect(find.byType(ArtistPage), findsOneWidget);
+      expect(find.text('Discover'), findsOneWidget);
+    });
+  });
+
   testWidgets('artist on home opens the artist page', (tester) async {
     await pumpApp(
       tester,
@@ -988,9 +1088,10 @@ void main() {
     await tester.tap(find.text('Vax').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Artist'), findsOneWidget);
-    expect(find.text('Play all'), findsOneWidget);
-    expect(find.text('Vax'), findsOneWidget); // page title
+    expect(find.byType(ArtistPage), findsOneWidget);
+    expect(find.text('Songs you have'), findsOneWidget);
+    expect(find.text('Shuffle'), findsOneWidget);
+    expect(find.text('Vax'), findsWidgets); // page title
   });
 
   TunesManifest albumManifest() {
@@ -1035,16 +1136,20 @@ void main() {
 
     await tester.tap(find.text('Travis Scott').first);
     await tester.pumpAndSettle();
-    expect(find.text('Play all'), findsOneWidget);
+    expect(find.byType(ArtistPage), findsOneWidget);
 
+    // The dock is on screen now, so the card can sit below the fold of a
+    // short test surface, as it would on a small phone: scroll to it first.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
-    expect(find.text('Album'), findsOneWidget);
+    expect(find.byType(AlbumPage), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
-    expect(find.text('Play all'), findsOneWidget);
-    expect(find.text('Album'), findsNothing);
+    expect(find.byType(ArtistPage), findsOneWidget);
+    expect(find.byType(AlbumPage), findsNothing);
   });
 
   testWidgets('revisiting panels keeps one instance each', (tester) async {
@@ -1058,6 +1163,10 @@ void main() {
     );
 
     await tester.tap(find.text('Travis Scott').first);
+    await tester.pumpAndSettle();
+    // The dock is on screen now, so the card can sit below the fold of a
+    // short test surface, as it would on a small phone: scroll to it first.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
@@ -1143,12 +1252,18 @@ void main() {
     );
     await pumpApp(tester, _FakeClient(() async => manifest), player);
 
+    // The dock is on screen now, so the card can sit below the fold of a
+    // short test surface, as it would on a small phone: scroll to it first.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Album'), findsOneWidget);
+    expect(find.byType(AlbumPage), findsOneWidget);
     expect(find.text('Play'), findsOneWidget);
     expect(find.text('MAFIA'), findsOneWidget);
+    // The second track is below the fold of a short surface with the dock up.
+    await tester.scrollUntilVisible(find.text('ESCAPE PLAN'), 120);
     expect(find.text('ESCAPE PLAN'), findsOneWidget);
 
     await tester.tap(find.text('MAFIA'));
@@ -1200,7 +1315,69 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('ESCAPE PLAN / MAFIA'), findsOneWidget);
-    expect(find.text('Travis Scott · 2'), findsOneWidget);
+    // The artist and the facts are separate lines now: the artist in the body
+    // voice, the year and size of the record in mono.
+    expect(find.text('Travis Scott'), findsOneWidget);
+    expect(find.text('2021  ·  2 songs'), findsOneWidget);
+  });
+
+  testWidgets('the track list says how many and can shuffle them all', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(
+        () async => _manifestOf([
+          // Distinct shas: the library keys tracks by sha, so three that share
+          // the default would be one track.
+          _track('One', 'flac', 950000, sha: '1' * 64),
+          _track('Two', 'flac', 950000, sha: '2' * 64),
+          _track('Three', 'flac', 950000, sha: '3' * 64),
+        ]),
+      ),
+      player,
+    );
+    await goToLibrary(tester);
+
+    expect(find.text('3 songs'), findsOneWidget);
+    await tester.tap(find.text('Shuffle'));
+    await tester.pump();
+
+    expect(player.playQueueCalls, 1);
+    expect(player.queue.map((t) => t.title).toSet(), {'One', 'Two', 'Three'});
+  });
+
+  testWidgets('the first open of a release says what is new, once', (
+    tester,
+  ) async {
+    await tester.runAsync(() => settings.setWhatsNewSeen(''));
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      FakeTunePlayer(),
+    );
+
+    expect(find.text('The Birthday Pack'), findsOneWidget);
+    expect(find.text('A new look'), findsOneWidget);
+    // Recorded as shown straight away, so an interruption does not bring it back.
+    expect(settings.whatsNewSeen, kWhatsNewId);
+
+    await tester.tap(find.text('Let\'s go'));
+    await tester.pumpAndSettle();
+    expect(find.text('The Birthday Pack'), findsNothing);
+    // The app is there underneath.
+    expect(find.text('Home'), findsOneWidget);
+  });
+
+  testWidgets('and not again on the next open', (tester) async {
+    // setUp has marked this pack as seen, which is what a second open looks like.
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      FakeTunePlayer(),
+    );
+    expect(find.text('The Birthday Pack'), findsNothing);
   });
 
   testWidgets('settings open from the avatar', (tester) async {
@@ -1221,7 +1398,8 @@ void main() {
     expect(find.text('Gapless playback'), findsOneWidget);
     expect(find.text('Stop when the app closes'), findsOneWidget);
     expect(find.text('Keep playing with radio'), findsOneWidget);
-    expect(find.text('Display name'), findsOneWidget);
+    // The name field says what it is for, in the hint, until a name is typed.
+    expect(find.text('What should it call you?'), findsOneWidget);
 
     // The developer section is hidden until asked for.
     expect(find.text('Developer'), findsNothing);
@@ -1240,10 +1418,11 @@ void main() {
       expect(find.text(label), findsOneWidget, reason: 'never reached $label');
     }
 
-    await reveal('Tap offset');
-    await reveal('Made by');
-    await reveal('Daemon');
+    // In the order they appear, since the helper only scrolls down.
+    await reveal('Tap timing');
+    await reveal('Server address');
     await reveal('http://fake:4780');
+    await reveal('Made by Aestra Studios');
   });
 
   testWidgets('mini bar is minimal: art, title, play only', (tester) async {
@@ -1290,7 +1469,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpAndSettle();
 
-    expect(find.text('Bassline'), findsNWidgets(2)); // row + mini bar
+    // The row, the mini bar, and the recently played rail above the list.
+    expect(find.text('Bassline'), findsNWidgets(3));
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
     expect(player.playQueueCalls, 1);
   });
@@ -1334,7 +1514,7 @@ void main() {
     await tester.tap(find.text('Bassline').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Now Playing'), findsOneWidget);
+    expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(find.text('Up next'), findsNothing); // queue is a secondary surface
     expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
   });
@@ -1390,7 +1570,7 @@ void main() {
     // mini-player (the last one in the tree) to open Now Playing.
     await tester.tap(find.text('Bassline').last);
     await tester.pumpAndSettle();
-    expect(find.text('Now Playing'), findsOneWidget);
+    expect(find.byType(NowPlayingPage), findsOneWidget);
 
     // Open the Now Playing page's menu and tap "Queue".
     await tester.tap(find.byIcon(Icons.more_horiz_rounded));
@@ -1467,12 +1647,12 @@ void main() {
     );
     await goToLibrary(tester);
 
-    expect(find.byIcon(Icons.graphic_eq_rounded), findsNothing);
+    expect(find.byType(PlayingBars), findsNothing);
 
     await tester.tap(find.text('Bassline'));
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+    expect(find.byType(PlayingBars), findsOneWidget);
   });
 
   testWidgets('album rows highlight the active track compactly', (
@@ -1518,9 +1698,15 @@ void main() {
     await goToLibrary(tester);
     await tester.tap(find.text('Albums').last);
     await tester.pumpAndSettle();
+    // The dock is on screen now, so the card can sit below the fold of a
+    // short test surface, as it would on a small phone: scroll to it first.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('MAFIA').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('MAFIA').first);
     await tester.pumpAndSettle();
 
@@ -1570,15 +1756,16 @@ void main() {
     );
     await goToLibrary(tester);
 
-    expect(find.byIcon(Icons.download_rounded), findsNWidgets(2));
+    expect(find.byIcon(Icons.arrow_circle_down_outlined), findsNWidgets(2));
 
     await tester.runAsync(() async {
-      await tester.tap(find.byIcon(Icons.download_rounded).first);
+      await tester.tap(find.byIcon(Icons.arrow_circle_down_outlined).first);
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.offline_pin_rounded), findsOneWidget);
+    // On the phone now: the green tick, where the arrow was.
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     expect(store.contains('a' * 64), isTrue);
     expect(File(store.pathFor('a' * 64)!).existsSync(), isTrue);
   });
@@ -1620,10 +1807,11 @@ void main() {
     reach.setOffline(true);
     await tester.pumpAndSettle();
 
-    expect(find.text('Offline — playing downloads only'), findsOneWidget);
+    expect(find.text('Showing what is on this phone'), findsOneWidget);
 
-    await tester.tap(find.text('Bassline'), warnIfMissed: false);
-    await tester.pumpAndSettle();
+    // Offline the library is what is on the phone: a song that was never
+    // downloaded is not offered at all, rather than shown and dead.
+    expect(find.text('Bassline'), findsNothing);
     expect(player.playQueueCalls, 0);
 
     await tester.tap(find.text('Nightdrive'));
@@ -1642,11 +1830,11 @@ void main() {
     );
     reach.setOffline(true);
     await tester.pumpAndSettle();
-    expect(find.text('Offline — playing downloads only'), findsOneWidget);
+    expect(find.text('Showing what is on this phone'), findsOneWidget);
 
     reach.setOffline(false);
     await tester.pumpAndSettle();
-    expect(find.text('Offline — playing downloads only'), findsNothing);
+    expect(find.text('Showing what is on this phone'), findsNothing);
   });
 
   testWidgets(
@@ -1682,7 +1870,7 @@ void main() {
       );
       await tester.tap(find.text('OVERSTUFFED').first);
       await tester.pumpAndSettle();
-      expect(find.textContaining('3 tracks'), findsOneWidget);
+      expect(find.text('3 songs'), findsOneWidget);
       expect(find.textContaining('3/2'), findsNothing);
       expect(find.textContaining('complete'), findsNothing);
     },

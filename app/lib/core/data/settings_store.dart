@@ -23,6 +23,9 @@ class SettingsStore extends ChangeNotifier {
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
+  static const _lyricSize = 'lyrics.size';
+  static const _radioReach = 'radio.reach';
+  static const _whatsNewSeen = 'app.whatsNewSeen';
   static const _serverUrl = 'server.url';
   static const _lastPlayedSha = 'playback.lastPlayedSha';
   static const _lastPositionMs = 'playback.lastPositionMs';
@@ -100,11 +103,41 @@ class SettingsStore extends ChangeNotifier {
 
   /// Whether the sleeve turns slowly while a track plays.
   ///
-  /// On by default because it is what the player already did, and the whole
-  /// point of putting it here is that it can now be turned off -- it is the
-  /// one piece of motion in the app that runs continuously.
-  bool get animatedArtwork => _bool(_animatedArtwork, fallback: true);
+  /// Off by default: a square sleeve turning for thirty seconds at a time is a
+  /// choice, not a default. It was on before the redesign, which is why the
+  /// switch exists at all -- it is the one piece of motion in the app that
+  /// runs continuously.
+  bool get animatedArtwork => _bool(_animatedArtwork, fallback: false);
   Future<void> setAnimatedArtwork(bool v) => _put(_animatedArtwork, '$v');
+
+  /// The id of the last What's new pack that was shown, so each is shown once.
+  String? get whatsNewSeen {
+    final v = _cache[_whatsNewSeen];
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  Future<void> setWhatsNewSeen(String id) => _put(_whatsNewSeen, id);
+
+  /// How large the lyrics are set: 0 small, 1 medium, 2 large.
+  int get lyricSize {
+    final v = int.tryParse(_cache[_lyricSize] ?? '');
+    return v == null ? 1 : v.clamp(0, 2);
+  }
+
+  Future<void> setLyricSize(int v) => _put(_lyricSize, '${v.clamp(0, 2)}');
+
+  /// How far out the radio is allowed to go, 0 (familiar) to 1 (further out).
+  ///
+  /// The listener's own dial for what plays when the queue runs out. The
+  /// session still narrows after skips and widens after songs heard through;
+  /// this moves where that starts and how far it can go.
+  double get radioReach {
+    final v = double.tryParse(_cache[_radioReach] ?? '');
+    return v == null ? kDefaultRadioReach : v.clamp(0.0, 1.0);
+  }
+
+  Future<void> setRadioReach(double v) =>
+      _put(_radioReach, v.clamp(0.0, 1.0).toStringAsFixed(2));
 
   /// The track that was playing when the app was last closed.
   ///
@@ -183,6 +216,9 @@ class SettingsStore extends ChangeNotifier {
 /// Published above the Navigator, like [DownloadScope], so pushed routes can
 /// read it too — the mistake that made download progress invisible on album
 /// pages was putting a scope below the Navigator.
+/// Where the radio dial rests until it is moved.
+const double kDefaultRadioReach = 0.2;
+
 class SettingsScope extends InheritedNotifier<SettingsStore> {
   const SettingsScope({
     super.key,

@@ -439,5 +439,11 @@ The standard is: **"Would Dylan keep this on his phone and open it before anythi
   superseding the blanket "no recommendation engine" this replaced) — but it
   runs on the listener's own play history, on their own device, and nothing
   about it leaves the phone. An explicit queue is never reordered by it.
+  **Mixes** (playlists the app builds, like "Feel Good Friday", and pointing at
+  albums already in the library that were never played) are allowed on the same
+  terms, specified in `docs/MIXES.md` (decision recorded 2026-10-05, by the
+  owner): built only from the listener's own history, likes and library tags,
+  on the device; a section with too little to say is not drawn; and still no
+  charts, no popularity, no other people's listening.
 - No podcasting, no video, no lyrics-first features
 - No re-encoding anywhere in the default pipeline

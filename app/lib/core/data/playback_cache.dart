@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -114,10 +115,10 @@ class StreamCache {
 /// Resolves a track to playable bytes: download first, stream cache second,
 /// signed URL last.
 ///
-/// The URL fallback also enqueues a background cache of the same bytes, so
-/// the second play of anything is a disk read. Enqueueing is idempotent --
-/// completed and in-flight shas are skipped -- so resolving a whole queue at
-/// open prefetches it without ever doubling a transfer.
+/// Resolving never starts a transfer. It used to enqueue a background copy of
+/// every queue entry as the queue opened, and those copies raced the stream
+/// the listener was waiting on for the same bytes. Caching is now
+/// [StreamFollower]'s job, and starts only once playback has.
 class TrackResolver {
   TrackResolver({
     required this.store,
@@ -139,15 +140,73 @@ class TrackResolver {
     if (local != null && File(local).existsSync()) return local;
     final cached = cache.pathFor(sha);
     if (cached != null) return cached;
-    caching.enqueue(sha);
     // Read live, not captured: changing servers repoints the client, and a
     // URL baked at startup would keep streaming from the old address.
     //
-    // Origin /track/ for now: the cloud /t/ path is suspected in the
-    // mpv/opener crashes and is being bisected out. Explicit downloads never
-    // moved. Revert to /t/ when the opener is exonerated.
+    // Streams ride /t/ (cloud fetch path: DO + R2 + Telegram), same host,
+    // same device grant shape. Explicit downloads stay on origin /track.
     final baseUrl = client.baseUrl;
-    final signed = grants.urlFor('/track/$sha');
-    return '$baseUrl${signed ?? '/track/$sha'}';
+    final signed = grants.urlFor('/t/$sha');
+    return '$baseUrl${signed ?? '/t/$sha'}';
+  }
+
+  /// Whether the bytes for [track] are already on this phone, either way.
+  bool isLocal(ManifestTrack track) =>
+      store.pathFor(track.sha) != null || cache.pathFor(track.sha) != null;
+
+  /// Keep a copy of a track that is already playing, so the next play is a
+  /// disk read. Idempotent: finished and in-flight shas are skipped.
+  void keep(ManifestTrack track) {
+    if (!isLocal(track)) caching.enqueue(track.sha);
+  }
+
+  /// Ask the server to have a cold track ready for when it is reached.
+  void warm(ManifestTrack track) {
+    if (!isLocal(track)) unawaited(client.warm(track.sha));
+  }
+}
+
+/// Decides when a streamed track is worth keeping and what to warm up next.
+///
+/// Fed the player's state on every tick. Nothing happens until the current
+/// track has actually played for [after]: by then its stream is established
+/// and a second transfer of the same bytes cannot slow it. Then the track is
+/// kept, and the next [ahead] tracks in the queue are warmed, once each, so
+/// they start without a wait when reached.
+class StreamFollower {
+  StreamFollower({
+    required this.keep,
+    required this.warm,
+    this.after = const Duration(seconds: 8),
+    this.ahead = 2,
+  });
+
+  final void Function(ManifestTrack) keep;
+  final void Function(ManifestTrack) warm;
+  final Duration after;
+  final int ahead;
+
+  String? _sha;
+  bool _started = false;
+  final Set<String> _warmed = {};
+
+  void tick({
+    required List<ManifestTrack> queue,
+    required int index,
+    required Duration position,
+    required bool playing,
+  }) {
+    if (index < 0 || index >= queue.length) return;
+    final current = queue[index];
+    if (current.sha != _sha) {
+      _sha = current.sha;
+      _started = false;
+    }
+    if (_started || !playing || position < after) return;
+    _started = true;
+    keep(current);
+    for (var i = index + 1; i <= index + ahead && i < queue.length; i++) {
+      if (_warmed.add(queue[i].sha)) warm(queue[i]);
+    }
   }
 }

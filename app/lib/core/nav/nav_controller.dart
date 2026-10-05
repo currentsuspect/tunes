@@ -58,6 +58,11 @@ abstract final class TunesPanels {
   static String album(String id) => 'tunes/album/$id';
   static String artist(String name) => 'tunes/artist/$name';
   static String playlist(int id) => 'tunes/playlist/$id';
+
+  /// A mix the app built. Keyed by what is in it as well as what it is called,
+  /// because the same mix is a different list next week and a retained panel
+  /// would otherwise keep showing last week's.
+  static String mix(String id) => 'tunes/mix/$id';
 }
 
 /// One pane per identity; one history entry per identity.
@@ -98,15 +103,38 @@ class NavController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Lets go of every pane that is not in the history.
+  ///
+  /// Panes are kept for the session so going back to one is instant, and each was
+  /// built from whatever the library looked like when it opened. When that
+  /// changes under them, as it does when the connection comes or goes (offline
+  /// the library is only what is downloaded), a kept pane would show the old
+  /// picture. Dropping them means the next visit builds a fresh one.
+  void forgetUnused() {
+    final live = {
+      for (final d in _history)
+        if (d is PanelDest) d.id,
+    };
+    _instances.removeWhere((id, _) => !live.contains(id));
+  }
+
   /// Switches the tab root. Replaces rather than pushes: tabs are places,
   /// not a trail -- Back from a tab must not walk other tabs.
+  ///
+  /// From inside a page (an artist, an album, a playlist) the tabs are still
+  /// on screen, so a tap on another tab lands here with panels above it. Those
+  /// are dropped: leaving them in history made Back from the new tab walk into
+  /// a page that had been left on purpose. The registry still holds their
+  /// instances, so opening one again re-activates it.
   void selectTab(int index) {
     final top = _history.last;
     if (top is TabDest && top.index == index) return;
     if (top is TabDest) {
       _history[_history.length - 1] = TabDest(index);
     } else {
-      _history.add(TabDest(index));
+      _history
+        ..clear()
+        ..add(TabDest(index));
     }
     notifyListeners();
   }

@@ -13,6 +13,7 @@ import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/initials.dart';
+import '../../core/ui/shelf_widgets.dart';
 import '../../domain/manifest.dart';
 import '../playlists/playlist_page.dart';
 import 'library_widgets.dart';
@@ -34,7 +35,12 @@ class LibraryView extends StatefulWidget {
     required this.onAlbumTap,
     this.queueStore,
     this.manifestStore,
+    this.recents = const [],
   });
+
+  /// Newest first. Shown above the track list: it used to sit at the bottom of
+  /// Home, a long scroll from where anyone looks for what they just played.
+  final List<ManifestTrack> recents;
 
   final List<ManifestTrack> tracks;
   final List<ManifestRelease> releases;
@@ -58,13 +64,27 @@ class LibraryView extends StatefulWidget {
 class _LibraryViewState extends State<LibraryView> {
   int _segment = 0;
 
+  /// Only what is on this phone: the songs that play with no connection. A
+  /// choice while online; offline the shell has already cut the library to this.
+  bool _onPhone = false;
+
+  int get _heldCount =>
+      widget.tracks.where((t) => widget.store.pathFor(t.sha) != null).length;
+
   bool get _hasActions =>
       widget.queueStore != null && widget.manifestStore != null;
 
   List<ManifestTrack> get _filtered {
     final f = widget.filter.trim().toLowerCase();
-    if (f.isEmpty) return widget.tracks;
-    return widget.tracks
+    var base = widget.tracks;
+    if (_onPhone) {
+      base = [
+        for (final t in base)
+          if (widget.store.pathFor(t.sha) != null) t,
+      ];
+    }
+    if (f.isEmpty) return base;
+    return base
         .where(
           (t) =>
               t.title.toLowerCase().contains(f) ||
@@ -91,36 +111,160 @@ class _LibraryViewState extends State<LibraryView> {
             Space.lg,
             Space.xs,
           ),
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('Tracks')),
-              ButtonSegment(value: 1, label: Text('Albums')),
-              ButtonSegment(value: 2, label: Text('Artists')),
-              ButtonSegment(value: 3, label: Text('Playlists')),
-            ],
-            selected: {_segment},
-            onSelectionChanged: (s) => setState(() => _segment = s.first),
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              textStyle: WidgetStatePropertyAll(TypeScale.body),
-            ),
+          child: _LibraryTabs(
+            labels: const ['Tracks', 'Albums', 'Artists', 'Playlists'],
+            selected: _segment,
+            onSelect: (i) => setState(() => _segment = i),
           ),
         ),
+        if (_segment != 3 && !widget.offline)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+            child: ListenableBuilder(
+              listenable: widget.store,
+              builder: (context, _) => Row(
+                children: [
+                  _FilterChip(
+                    label: 'All',
+                    selected: !_onPhone,
+                    onTap: () => setState(() => _onPhone = false),
+                  ),
+                  const SizedBox(width: Space.sm),
+                  _FilterChip(
+                    icon: Icons.offline_pin_rounded,
+                    label: 'On this phone',
+                    count: _heldCount,
+                    selected: _onPhone,
+                    onTap: () => setState(() => _onPhone = true),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(child: _buildBody(filtered)),
       ],
     );
   }
 
-  Widget _trackList(List<ManifestTrack> tracks) {
+  /// How many, and a way to hear them in a random order. Above every list of
+  /// songs, so the library has a shuffle that is always one tap away.
+  Widget _countBar(List<ManifestTrack> tracks, {bool play = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${tracks.length} ${tracks.length == 1 ? 'song' : 'songs'}',
+              style: TypeScale.mono,
+            ),
+          ),
+          if (play) ...[
+            PlayPill(onTap: () => _play(tracks, 0)),
+            const SizedBox(width: Space.sm),
+          ],
+          PlayPill(
+            label: 'Shuffle',
+            icon: Icons.shuffle_rounded,
+            onTap: () => widget.player.shufflePlay(tracks),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// What you played last, as a rail of sleeves above the list.
+  Widget _recentRail() {
+    final recents = widget.recents.take(12).toList();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.sm),
+            child: Text(
+              'Recently played',
+              style: TypeScale.heading.copyWith(fontSize: 20),
+            ),
+          ),
+          SizedBox(
+            height: 136,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: recents.length,
+              separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+              itemBuilder: (context, i) {
+                final t = recents[i];
+                return SizedBox(
+                  width: 92,
+                  child: InkWell(
+                    onTap: () => _play(recents, i),
+                    borderRadius: BorderRadius.circular(RadiusTokens.control),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Artwork(
+                          url: t.artSha == null
+                              ? null
+                              : widget.artUrlFor(t.artSha!),
+                          artSha: t.artSha,
+                          size: 92,
+                          borderRadius: 12,
+                          fallback: GeneratedArtwork.fromTrack(
+                            t,
+                            size: 92,
+                            borderRadius: 12,
+                          ),
+                        ),
+                        const SizedBox(height: Space.xs),
+                        Text(
+                          t.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: cardTitleStyle().copyWith(fontSize: 12.5),
+                        ),
+                        Text(
+                          t.artistDisplay,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TypeScale.caption.copyWith(fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _trackList(List<ManifestTrack> tracks, {bool play = false}) {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(
         horizontal: Space.lg,
         vertical: Space.md,
       ),
-      itemCount: tracks.length,
-      separatorBuilder: (_, _) => const Divider(),
-      itemBuilder: (context, i) {
+      // One extra item at the top for the count and shuffle.
+      itemCount: tracks.length + 1,
+      // Air between rows rather than a rule under each one: the sleeves and the
+      // type already separate them.
+      separatorBuilder: (_, _) => const SizedBox(height: 2),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.recents.isNotEmpty && widget.filter.trim().isEmpty)
+                _recentRail(),
+              _countBar(tracks, play: play),
+            ],
+          );
+        }
+        final i = index - 1;
         final t = tracks[i];
         return TrackRow(
           player: widget.player,
@@ -226,7 +370,7 @@ class _LibraryViewState extends State<LibraryView> {
                   'likes are kept in case it comes back.',
             );
           }
-          return _trackList(tracks);
+          return _trackList(tracks, play: true);
         },
       ),
     );
@@ -373,6 +517,15 @@ class _LibraryViewState extends State<LibraryView> {
       // Two different situations were sharing one sentence. "Your library is
       // empty or your filter matched nothing" tells someone who typed three
       // letters that their whole library might be gone.
+      if (_onPhone && widget.filter.trim().isEmpty) {
+        return const EmptyState(
+          icon: Icons.offline_pin_outlined,
+          title: 'Nothing on this phone yet',
+          body:
+              'Tap the arrow beside a song to download it. Downloaded songs '
+              'play with no connection, and are all you see when offline.',
+        );
+      }
       return widget.tracks.isEmpty
           ? const EmptyState(
               icon: Icons.library_music_outlined,
@@ -395,56 +548,111 @@ class _LibraryViewState extends State<LibraryView> {
       final entries = widget.releases
           .where((r) => available.contains(r.id))
           .toList();
-      return GridView.builder(
-        padding: const EdgeInsets.all(Space.lg),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 220,
-          childAspectRatio: 0.78,
-          mainAxisSpacing: Space.lg,
-          crossAxisSpacing: Space.md,
-        ),
-        itemCount: entries.length,
-        itemBuilder: (context, i) {
-          final r = entries[i];
-          return InkWell(
-            onTap: () => widget.onAlbumTap(r),
-            borderRadius: BorderRadius.circular(RadiusTokens.card),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: SharedSleeve(
-                    tag: 'album-${r.id}',
-                    child: Artwork.fill(
-                      url: r.artSha == null
-                          ? null
-                          : widget.artUrlFor(r.artSha!),
-                      artSha: r.artSha,
-                      shared: true,
-                      fallback: GeneratedArtwork(
-                        title: r.title,
-                        artist: r.artist,
-                      ),
+      return ListenableBuilder(
+        listenable: widget.store,
+        builder: (context, _) => GridView.builder(
+          padding: const EdgeInsets.all(Space.lg),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220,
+            childAspectRatio: 0.76,
+            mainAxisSpacing: Space.lg,
+            crossAxisSpacing: Space.md,
+          ),
+          itemCount: entries.length,
+          itemBuilder: (context, i) {
+            final r = entries[i];
+            final held = r.trackShas
+                .where((sha) => widget.store.pathFor(sha) != null)
+                .length;
+            final all = r.trackShas.isNotEmpty && held == r.trackShas.length;
+            return InkWell(
+              onTap: () => widget.onAlbumTap(r),
+              borderRadius: BorderRadius.circular(RadiusTokens.card),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        SharedSleeve(
+                          tag: 'album-${r.id}',
+                          child: Artwork.fill(
+                            url: r.artSha == null
+                                ? null
+                                : widget.artUrlFor(r.artSha!),
+                            artSha: r.artSha,
+                            shared: true,
+                            borderRadius: 14,
+                            fallback: GeneratedArtwork(
+                              title: r.title,
+                              artist: r.artist,
+                              borderRadius: 14,
+                            ),
+                          ),
+                        ),
+                        // On the phone: a green tick when all of it is, a small
+                        // count when some is. Nothing when none is, so the mark
+                        // always means "this plays with no connection".
+                        if (held > 0)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Tones.base.withValues(alpha: 0.78),
+                                borderRadius: BorderRadius.circular(99),
+                                border: Border.all(color: Tones.held),
+                              ),
+                              child: all
+                                  ? const Icon(
+                                      Icons.check_rounded,
+                                      size: 12,
+                                      color: Tones.held,
+                                    )
+                                  : Text(
+                                      '$held/${r.trackShas.length}',
+                                      style: TypeScale.mono.copyWith(
+                                        fontSize: 10,
+                                        color: Tones.held,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: Space.xs),
-                Text(
-                  r.title,
-                  style: TypeScale.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  '${r.artist} · ${r.trackShas.length}',
-                  style: TypeScale.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          );
-        },
+                  const SizedBox(height: Space.sm),
+                  Text(
+                    r.title,
+                    style: cardTitleStyle(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    r.artist,
+                    style: TypeScale.caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    [
+                      if (r.year != null) r.year!.split('-').first,
+                      '${r.trackShas.length} ${r.trackShas.length == 1 ? 'song' : 'songs'}',
+                    ].join('  ·  '),
+                    style: TypeScale.mono.copyWith(fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       );
     }
     // Group by the act, not the raw credit line: one album otherwise lands
@@ -468,66 +676,193 @@ class _LibraryViewState extends State<LibraryView> {
         if (byCount != 0) return byCount;
         return a.key.toLowerCase().compareTo(b.key.toLowerCase());
       });
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Space.lg,
-        vertical: Space.md,
+    return GridView.builder(
+      padding: const EdgeInsets.all(Space.lg),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.74,
+        mainAxisSpacing: Space.lg,
+        crossAxisSpacing: Space.md,
       ),
       itemCount: entries.length,
-      separatorBuilder: (_, _) => const Divider(),
       itemBuilder: (context, i) {
         final name = entries[i].key;
         final tracks = entries[i].value;
+        String? photo;
+        for (final a in widget.artists) {
+          if (a.name == name) photo = a.artSha;
+        }
         return InkWell(
           onTap: () => widget.onArtistTap(name),
           borderRadius: BorderRadius.circular(RadiusTokens.control),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              vertical: Space.sm,
-              horizontal: Space.xs,
-            ),
-            child: Row(
-              children: [
-                () {
-                  String? photo;
-                  for (final a in widget.artists) {
-                    if (a.name == name) photo = a.artSha;
-                  }
-                  return SharedSleeve(
+          child: LayoutBuilder(
+            builder: (context, c) {
+              final face = c.maxWidth - Space.sm;
+              return Column(
+                children: [
+                  SharedSleeve(
                     tag: 'artist-$name',
                     child: Artwork(
                       url: photo == null ? null : widget.artUrlFor(photo),
                       artSha: photo,
-                      size: 48,
-                      borderRadius: 24,
+                      size: face,
+                      borderRadius: face / 2,
                       shared: true,
-                      fallback: InitialsAvatar(name: name, size: 48),
+                      fallback: InitialsAvatar(name: name, size: face),
                     ),
-                  );
-                }(),
-                const SizedBox(width: Space.md),
-                Expanded(
+                  ),
+                  const SizedBox(height: Space.sm),
+                  Text(
+                    name,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TypeScale.caption.copyWith(
+                      color: Tones.text,
+                      height: 1.2,
+                    ),
+                  ),
+                  Text(
+                    '${tracks.length} ${tracks.length == 1 ? 'song' : 'songs'}',
+                    style: TypeScale.mono.copyWith(fontSize: 10.5),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// A small choice above a list: All, or only what is on this phone.
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.count,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? Tones.surfaceRaised : Colors.transparent,
+        borderRadius: BorderRadius.circular(99),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(99),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Space.md,
+              vertical: Space.sm - 2,
+            ),
+            decoration: BoxDecoration(
+              border: Border.all(color: selected ? Tones.held : Tones.hairline),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: 15,
+                    color: selected ? Tones.held : Tones.textMuted,
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  label,
+                  style: TypeScale.caption.copyWith(
+                    color: selected ? Tones.text : Tones.textMuted,
+                  ),
+                ),
+                if (count != null) ...[
+                  const SizedBox(width: 6),
+                  Text('$count', style: TypeScale.mono.copyWith(fontSize: 11)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Library's sections as words with a line under the one you are on.
+///
+/// The stock segmented control was a bordered pill of four equal boxes, the one
+/// heavy thing on a screen of light type. This is the serif and a short accent
+/// rule that slides to the chosen word.
+class _LibraryTabs extends StatelessWidget {
+  const _LibraryTabs({
+    required this.labels,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final still = MediaQuery.disableAnimationsOf(context);
+    final fade = still ? Duration.zero : const Duration(milliseconds: 200);
+    return Row(
+      children: [
+        for (var i = 0; i < labels.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: Space.lg),
+            child: Semantics(
+              button: true,
+              selected: i == selected,
+              child: InkWell(
+                onTap: () => onSelect(i),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: Space.xs),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        name,
-                        style: TypeScale.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      AnimatedDefaultTextStyle(
+                        duration: fade,
+                        style: TypeScale.display.copyWith(
+                          fontSize: 19,
+                          color: i == selected ? Tones.text : Tones.textMuted,
+                        ),
+                        child: Text(labels[i]),
                       ),
-                      Text(
-                        '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'}',
-                        style: TypeScale.body,
+                      const SizedBox(height: 4),
+                      AnimatedContainer(
+                        duration: fade,
+                        width: i == selected ? 18 : 0,
+                        height: 2,
+                        decoration: BoxDecoration(
+                          color: Tones.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        );
-      },
+      ],
     );
   }
 }

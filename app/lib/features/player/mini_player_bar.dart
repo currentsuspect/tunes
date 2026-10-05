@@ -3,7 +3,11 @@ import 'package:flutter/services.dart';
 
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
+import '../../core/data/download_manager.dart';
+import '../../core/data/reachability.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/cover_tint.dart';
+import '../../core/ui/source_pill.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -50,22 +54,64 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
       builder: (context, _) {
         final current = widget.player.current;
         if (current == null) return const SizedBox.shrink();
-        return Container(
-          // No border of its own: the bar and the navigation share one
-          // surface now, and the top edge is drawn once by the container
-          // that holds both. Two hairlines a pixel apart read as a seam.
-          decoration: const BoxDecoration(color: Tones.surface),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ProgressSeekBar(player: widget.player, playhead: _playhead),
-              _SwipeableBody(
-                player: widget.player,
-                onTap: widget.onTap,
-                artUrlFor: widget.artUrlFor,
-                track: current,
+        // Where the sound comes from, said on the second line. Read from the
+        // scopes so the bar needs nothing handed to it, and follows a
+        // download finishing or the connection dropping as it happens.
+        final held =
+            DownloadScope.maybeOf(context)?.store.pathFor(current.sha) != null;
+        final offline = ReachabilityScope.maybeOf(context)?.offline ?? false;
+        final source = sourceFor(held: held, offline: offline);
+        return TintBuilder(
+          artSha: current.artSha,
+          builder: (context, tint) => Padding(
+            // A raised card floating above the tabs, not a strip bolted to
+            // them: the bar is the one thing always on screen, so it gets to
+            // be an object.
+            padding: const EdgeInsets.fromLTRB(
+              Space.sm + 2,
+              Space.sm,
+              Space.sm + 2,
+              Space.xs,
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Tones.surfaceRaised,
+                borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+                border: Border.all(color: Tones.hairline),
+                boxShadow: [
+                  BoxShadow(
+                    color: tint.withValues(alpha: 0.28),
+                    blurRadius: 26,
+                    spreadRadius: -6,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-            ],
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+                child: Stack(
+                  children: [
+                    _SwipeableBody(
+                      player: widget.player,
+                      onTap: widget.onTap,
+                      artUrlFor: widget.artUrlFor,
+                      track: current,
+                      source: source,
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _ProgressSeekBar(
+                        player: widget.player,
+                        playhead: _playhead,
+                        accent: tint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
       },
@@ -76,7 +122,13 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
 /// Thin progress / seek bar across the top of the mini-player. Tap or
 /// drag to seek. Renders zero-height when nothing is loaded.
 class _ProgressSeekBar extends StatelessWidget {
-  const _ProgressSeekBar({required this.player, required this.playhead});
+  const _ProgressSeekBar({
+    required this.player,
+    required this.playhead,
+    required this.accent,
+  });
+
+  final Color accent;
 
   final TunePlayer player;
 
@@ -85,8 +137,11 @@ class _ProgressSeekBar extends StatelessWidget {
   /// rather than moves.
   final PlayheadClock playhead;
 
-  static const _trackHeight = 3.0;
-  static const _swipeSeekThresholdDp = 24.0;
+  static const _trackHeight = 2.5;
+
+  /// The touch target is taller than the line it draws, and sits over the
+  /// bottom edge of the card, so the visible bar stays a hairline.
+  static const _swipeSeekThresholdDp = 14.0;
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +168,7 @@ class _ProgressSeekBar extends StatelessWidget {
               child: SizedBox(
                 height: _trackHeight + _swipeSeekThresholdDp,
                 child: Stack(
-                  alignment: Alignment.center,
+                  alignment: Alignment.bottomCenter,
                   children: [
                     SizedBox(
                       height: _trackHeight,
@@ -127,10 +182,10 @@ class _ProgressSeekBar extends StatelessWidget {
                           final ratio = total > 0 ? pos / total : 0.0;
                           return Stack(
                             children: [
-                              Container(color: Tones.surfaceRaised),
+                              Container(color: Tones.hairline),
                               FractionallySizedBox(
                                 widthFactor: ratio.clamp(0.0, 1.0),
-                                child: Container(color: Tones.primary),
+                                child: Container(color: accent),
                               ),
                             ],
                           );
@@ -166,12 +221,14 @@ class _SwipeableBody extends StatefulWidget {
     required this.onTap,
     required this.artUrlFor,
     required this.track,
+    required this.source,
   });
 
   final TunePlayer player;
   final VoidCallback onTap;
   final String Function(String sha)? artUrlFor;
   final ManifestTrack track;
+  final TrackSource source;
 
   @override
   State<_SwipeableBody> createState() => _SwipeableBodyState();
@@ -233,10 +290,10 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
       },
       child: Container(
         padding: const EdgeInsets.fromLTRB(
-          Space.md,
           Space.sm,
-          Space.md,
           Space.sm,
+          Space.sm,
+          Space.sm + 2,
         ),
         child: Row(
           children: [
@@ -256,15 +313,15 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                       ? widget.artUrlFor!(track.artSha!)
                       : null,
                   artSha: track.artSha,
-                  size: 44,
-                  borderRadius: 8,
+                  size: 42,
+                  borderRadius: 9,
                   // The same generated tile the list rows use. A blank
                   // square in the one bar that is always on screen made
                   // tracks without a cover look like a failed load.
                   fallback: GeneratedArtwork.fromTrack(
                     track,
-                    size: 44,
-                    borderRadius: 8,
+                    size: 42,
+                    borderRadius: 9,
                   ),
                 ),
               ),
@@ -276,6 +333,12 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
               // change, short enough that it never delays the next tap.
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
+                // The default stacks its children centred, which floated the
+                // title to the middle of the bar instead of beside the sleeve.
+                layoutBuilder: (current, previous) => Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [...previous, ?current],
+                ),
                 child: Column(
                   key: ValueKey(track.sha),
                   mainAxisSize: MainAxisSize.min,
@@ -283,13 +346,29 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                   children: [
                     Text(
                       track.title,
-                      style: TypeScale.title,
+                      style: TypeScale.title.copyWith(
+                        fontSize: 14,
+                        fontVariations: const [FontVariation('wght', 500)],
+                        fontWeight: FontWeight.w500,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      track.artistDisplay,
+                    // Artist, then where the sound is coming from. The second
+                    // part is the only coloured thing in the bar, so a track
+                    // that will not play is noticed before it is tapped.
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: track.artistDisplay),
+                          const TextSpan(text: '  ·  '),
+                          TextSpan(
+                            text: widget.source.label,
+                            style: TextStyle(color: widget.source.color),
+                          ),
+                        ],
+                      ),
                       style: TypeScale.caption,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -346,16 +425,26 @@ class _TransportButtonState extends State<_TransportButton> {
           duration: const Duration(milliseconds: 90),
           curve: Curves.easeOut,
           child: Padding(
-            padding: const EdgeInsets.all(Space.sm),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 140),
-              transitionBuilder: (child, animation) =>
-                  ScaleTransition(scale: animation, child: child),
-              child: Icon(
-                widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                key: ValueKey(widget.playing),
-                size: 30,
-                color: Tones.primary,
+            padding: const EdgeInsets.all(Space.xs),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: Tones.text,
+                shape: BoxShape.circle,
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 140),
+                transitionBuilder: (child, animation) =>
+                    ScaleTransition(scale: animation, child: child),
+                child: Icon(
+                  widget.playing
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  key: ValueKey(widget.playing),
+                  size: 22,
+                  color: Tones.base,
+                ),
               ),
             ),
           ),

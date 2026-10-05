@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/cover_tint.dart';
 
 /// Where you are in a track, and how you move it.
 ///
@@ -61,63 +62,70 @@ class _ScrubberState extends State<Scrubber>
       builder: (context, live, _) {
         final ms = _dragMs ?? live.inMilliseconds.toDouble();
         final shown = ms.clamp(0, maxMs).toDouble();
-        return Row(
+        final accent = AccentScope.of(context);
+        final times = TypeScale.mono.copyWith(
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+        return Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              // Reads the dragged position, not the playing one: a scrubber
-              // whose label lags the thumb makes you aim by feel.
-              _label(Duration(milliseconds: shown.round())),
-              style: TypeScale.caption.copyWith(
-                color: dragging ? Tones.text : null,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            SliderTheme(
+              data: SliderThemeData(
+                trackHeight: dragging ? 5 : 3,
+                activeTrackColor: accent,
+                // A bare Slider inherits a rail colour invisible on this
+                // background, so the rail is set outright.
+                inactiveTrackColor: Tones.hairline,
+                thumbColor: Tones.text,
+                overlayColor: accent.withValues(alpha: 0.15),
+                // Nothing but the line at rest; a thumb appears under a
+                // finger. The touch target never was the thin part -- Slider
+                // claims its full height regardless.
+                thumbShape: RoundSliderThumbShape(
+                  enabledThumbRadius: dragging ? 8 : 0,
+                  elevation: 0,
+                  pressedElevation: 0,
+                ),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+                trackShape: const RoundedRectSliderTrackShape(),
+              ),
+              child: Slider(
+                // Position can briefly exceed duration on a stream; Slider
+                // asserts if it does.
+                value: shown,
+                max: maxMs,
+                onChangeStart: (v) => setState(() => _dragMs = v),
+                onChanged: (v) => setState(() => _dragMs = v),
+                // Seek once, on release. Seeking every frame of a drag
+                // restarts the decoder dozens of times and, on a streamed
+                // track, refetches as many ranges -- the thumb is smooth
+                // either way, and this way the audio is too.
+                onChangeEnd: (v) {
+                  // On release, where the seek commits -- not during the
+                  // drag, which would buzz continuously.
+                  HapticFeedback.selectionClick();
+                  widget.player.seek(Duration(milliseconds: v.round()));
+                  setState(() => _dragMs = null);
+                },
               ),
             ),
-            Expanded(
-              child: SliderTheme(
-                data: SliderThemeData(
-                  trackHeight: dragging ? 5 : 3,
-                  activeTrackColor: Tones.primary,
-                  // A bare Slider inherits a rail colour invisible on this
-                  // background, so at 0:00 the thumb looked like a dot
-                  // floating between two timestamps with no track at all.
-                  inactiveTrackColor: Tones.surfaceRaised,
-                  thumbColor: Tones.primary,
-                  overlayColor: Tones.primary.withValues(alpha: 0.15),
-                  // Small at rest, larger under a finger. The visible control
-                  // stays thin; the touch target never was the thin part --
-                  // Slider claims its full height regardless.
-                  thumbShape: RoundSliderThumbShape(
-                    enabledThumbRadius: dragging ? 9 : 6,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.md),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    // Reads the dragged position, not the playing one: a
+                    // scrubber whose label lags the thumb makes you aim by
+                    // feel.
+                    _label(Duration(milliseconds: shown.round())),
+                    style: times.copyWith(color: dragging ? Tones.text : null),
                   ),
-                  overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 18,
+                  Text(
+                    '-${_label(Duration(milliseconds: (maxMs - shown).round()))}',
+                    style: times,
                   ),
-                ),
-                child: Slider(
-                  // Position can briefly exceed duration on a stream; Slider
-                  // asserts if it does.
-                  value: shown,
-                  max: maxMs,
-                  onChangeStart: (v) => setState(() => _dragMs = v),
-                  onChanged: (v) => setState(() => _dragMs = v),
-                  // Seek once, on release. Seeking every frame of a drag
-                  // restarts the decoder dozens of times and, on a streamed
-                  // track, refetches as many ranges -- the thumb is smooth
-                  // either way, and this way the audio is too.
-                  onChangeEnd: (v) {
-                    // On release, where the seek commits -- not during the
-                    // drag, which would buzz continuously.
-                    HapticFeedback.selectionClick();
-                    widget.player.seek(Duration(milliseconds: v.round()));
-                    setState(() => _dragMs = null);
-                  },
-                ),
-              ),
-            ),
-            Text(
-              _label(widget.duration),
-              style: TypeScale.caption.copyWith(
-                fontFeatures: const [FontFeature.tabularFigures()],
+                ],
               ),
             ),
           ],

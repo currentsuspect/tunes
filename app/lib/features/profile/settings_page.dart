@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/art_store.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/play_history.dart';
 import '../../core/data/storage_usage.dart';
@@ -36,8 +37,12 @@ class SettingsPage extends StatefulWidget {
     required this.history,
     required this.onResync,
     required this.onServerChanged,
+    this.onWhatsNew,
     this.supportDir,
   });
+
+  /// Opens the What's new page again. Absent where there is nothing to open.
+  final VoidCallback? onWhatsNew;
 
   final SettingsStore settings;
 
@@ -72,6 +77,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _name;
   final _avatars = AvatarStore();
   StorageUsage? _usage;
+  ({int count, int bytes})? _covers;
 
   /// Seven taps on the build line. Hidden rather than absent: these controls
   /// are for whoever is debugging the app, and putting them in front of
@@ -232,6 +238,16 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadEnrolment();
   }
 
+  /// The saved covers, found once the widget is in the tree rather than looked
+  /// up by context after an await.
+  ArtStore? _art;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _art = ArtScope.maybeOf(context);
+  }
+
   Future<void> _measure() async {
     final usage = await StorageUsage.measure(
       store: widget.store,
@@ -240,7 +256,13 @@ class _SettingsPageState extends State<SettingsPage> {
           : '${widget.supportDir!.path}/manifest.json',
       logPath: DiagLog.path,
     );
-    if (mounted) setState(() => _usage = usage);
+    final covers = await _art?.usage();
+    if (mounted) {
+      setState(() {
+        _usage = usage;
+        _covers = covers;
+      });
+    }
   }
 
   @override
@@ -252,312 +274,386 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final s = widget.settings;
+    final art = ArtScope.maybeOf(context);
     return Scaffold(
-      backgroundColor: Tones.surface,
-      appBar: AppBar(
-        backgroundColor: Tones.surface,
-        title: const Text('Settings', style: TypeScale.heading),
-        leading: IconButton(
-          onPressed: () => NavScope.of(context).back(),
-          icon: const Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
-        ),
-      ),
-      body: ListenableBuilder(
-        listenable: s,
-        builder: (context, _) => ListView(
-          padding: const EdgeInsets.only(bottom: Space.xl),
+      backgroundColor: Tones.base,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _SectionLabel('You'),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Space.lg,
-                vertical: Space.sm,
-              ),
-              child: Row(
-                children: [
-                  _AvatarButton(
-                    name: s.displayName,
-                    path: s.avatarPath,
-                    onTap: _editAvatar,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.xs,
+                  Space.sm,
+                  Space.sm,
+                  0,
+                ),
+                child: IconButton(
+                  onPressed: () => NavScope.of(context).back(),
+                  tooltip: 'Back',
+                  icon: const Icon(
+                    Icons.arrow_back_rounded,
+                    color: Tones.textMuted,
                   ),
-                  const SizedBox(width: Space.md),
-                  Expanded(
-                    child: TextField(
-                      controller: _name,
-                      style: TypeScale.body,
-                      decoration: const InputDecoration(
-                        labelText: 'Display name',
-                        hintText: 'What should the app call you?',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      textInputAction: TextInputAction.done,
-                      // Written on every keystroke: a name that only saves on
-                      // a button nobody pressed is a name that gets lost.
-                      onChanged: s.setDisplayName,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: s,
+                builder: (context, _) => ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    0,
+                    Space.lg,
+                    Space.xl,
+                  ),
+                  children: [
+                    Text(
+                      'Settings',
+                      style: TypeScale.display.copyWith(fontSize: 34),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-              child: Text(
-                'Your name and picture stay on this device. Sharing needs '
-                'this device to be enrolled, below.',
-                style: TypeScale.caption,
-              ),
-            ),
+                    const SizedBox(height: Space.lg),
+                    _Profile(
+                      name: s.displayName,
+                      path: s.avatarPath,
+                      controller: _name,
+                      onAvatar: _editAvatar,
+                      onName: s.setDisplayName,
+                    ),
 
-            const _SectionLabel('Playback'),
-            SwitchListTile(
-              value: s.gapless,
-              title: const Text('Gapless playback', style: TypeScale.body),
-              subtitle: const Text(
-                'Joins tracks with no silence between them. Normally only '
-                'happens when two files share a format.',
-                style: TypeScale.caption,
-              ),
-              onChanged: (v) async {
-                await s.setGapless(v);
-                await widget.player.setGapless(v);
-              },
-            ),
-            SwitchListTile(
-              value: s.stopOnClose,
-              title: const Text(
-                'Stop when the app closes',
-                style: TypeScale.body,
-              ),
-              subtitle: const Text(
-                'Off means playback survives swiping the app away, with no '
-                'controls on screen to stop it.',
-                style: TypeScale.caption,
-              ),
-              onChanged: s.setStopOnClose,
-            ),
-            SwitchListTile(
-              value: s.radioAutoplay,
-              title: const Text(
-                'Keep playing with radio',
-                style: TypeScale.body,
-              ),
-              subtitle: const Text(
-                'When the queue runs out, picks what follows from your own '
-                'listening, on this device. Added after the queue, never '
-                'mixed into it.',
-                style: TypeScale.caption,
-              ),
-              onChanged: s.setRadioAutoplay,
-            ),
+                    _Group(
+                      title: 'Listening',
+                      children: [
+                        _SwitchTile(
+                          title: 'Gapless playback',
+                          detail:
+                              'No silence between songs. It only works when two '
+                              'files share a format.',
+                          value: s.gapless,
+                          onChanged: (v) async {
+                            await s.setGapless(v);
+                            await widget.player.setGapless(v);
+                          },
+                        ),
+                        _SwitchTile(
+                          title: 'Keep playing with radio',
+                          detail:
+                              'When the queue ends, pick what follows from your '
+                              'own listening, on this phone. Added after the '
+                              'queue, never mixed into it.',
+                          value: s.radioAutoplay,
+                          onChanged: s.setRadioAutoplay,
+                        ),
+                        _SwitchTile(
+                          title: 'Stop when the app closes',
+                          detail:
+                              'Off, the music carries on after you swipe the app '
+                              'away, with no controls on screen to stop it.',
+                          value: s.stopOnClose,
+                          onChanged: s.setStopOnClose,
+                        ),
+                        _SwitchTile(
+                          title: 'Turning artwork',
+                          detail:
+                              'The sleeve turns slowly while a song plays. The '
+                              'only thing in the app that moves all the time.',
+                          value: s.animatedArtwork,
+                          onChanged: s.setAnimatedArtwork,
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('Lyrics'),
-            ListTile(
-              title: const Text('Tap offset', style: TypeScale.body),
-              subtitle: Text(
-                'Marks land ${(s.lyricsTapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s '
-                'before the tap, to allow for how long it takes to react.',
-                style: TypeScale.caption,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    onPressed: () => _nudgeOffset(-50),
-                    icon: const Icon(Icons.remove_rounded),
-                  ),
-                  IconButton(
-                    onPressed: () => _nudgeOffset(50),
-                    icon: const Icon(Icons.add_rounded),
-                  ),
-                ],
-              ),
-            ),
+                    _Group(
+                      title: 'Lyrics',
+                      children: [
+                        _ChoiceTile(
+                          title: 'Text size',
+                          choices: const ['Small', 'Medium', 'Large'],
+                          selected: s.lyricSize,
+                          onChanged: s.setLyricSize,
+                        ),
+                        _StepperTile(
+                          title: 'Tap timing',
+                          detail:
+                              'When you sync lyrics by tapping, marks land '
+                              '${(s.lyricsTapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s '
+                              'before the tap, to allow for your reaction.',
+                          onMinus: () => _nudgeOffset(-50),
+                          onPlus: () => _nudgeOffset(50),
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('Now playing'),
-            SwitchListTile(
-              value: s.animatedArtwork,
-              title: const Text('Turning artwork', style: TypeScale.body),
-              subtitle: const Text(
-                'The sleeve rotates slowly while a track plays. The only '
-                'thing in the app that moves continuously.',
-                style: TypeScale.caption,
-              ),
-              onChanged: s.setAnimatedArtwork,
-            ),
+                    _Group(
+                      title: 'Storage',
+                      children: [
+                        _StorageBar(
+                          downloads: _usage?.downloadBytes ?? 0,
+                          covers: _covers?.bytes ?? 0,
+                          library: _usage?.manifestBytes ?? 0,
+                          loaded: _usage != null,
+                        ),
+                        _ValueTile(
+                          dot: Tones.held,
+                          label: 'Songs on this phone',
+                          value: _usage == null
+                              ? '—'
+                              : '${_usage!.downloadCount} · '
+                                    '${formatBytes(_usage!.downloadBytes)}',
+                        ),
+                        _ValueTile(
+                          dot: Tones.primary,
+                          label: 'Saved covers',
+                          value: _covers == null
+                              ? '—'
+                              : '${_covers!.count} · '
+                                    '${formatBytes(_covers!.bytes)}',
+                        ),
+                        _ValueTile(
+                          dot: Tones.textMuted,
+                          label: 'Library copy',
+                          value: _usage == null
+                              ? '—'
+                              : formatBytes(_usage!.manifestBytes),
+                        ),
+                        if (_usage != null && _usage!.missingDownloads > 0)
+                          _ValueTile(
+                            label: 'Gone missing',
+                            value:
+                                '${_usage!.missingDownloads} '
+                                '${_usage!.missingDownloads == 1 ? 'file' : 'files'}',
+                            valueColor: Tones.warn,
+                          ),
+                        if (art != null)
+                          _LinkTile(
+                            title: 'Clear saved covers',
+                            detail:
+                                'Covers are saved the first time they are seen, so '
+                                'the library looks the same offline. They download '
+                                'again when you next connect.',
+                            onTap: () async {
+                              await art.clear();
+                              await _measure();
+                            },
+                          ),
+                        _LinkTile(
+                          title: 'Remove all downloads',
+                          detail:
+                              'Takes every song off this phone. Your library and '
+                              'everything on the box is untouched.',
+                          destructive: true,
+                          onTap: _usage == null || _usage!.downloadCount == 0
+                              ? null
+                              : () => _confirm(
+                                  title: 'Remove all downloads?',
+                                  body:
+                                      'Every downloaded song is removed from this '
+                                      'phone. You can download them again.',
+                                  action: 'Remove',
+                                  run: () async {
+                                    for (final sha in widget.store.shas) {
+                                      await widget.store.remove(sha);
+                                    }
+                                    await _measure();
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('Storage'),
-            _Row(
-              label: 'Downloaded',
-              value: _usage == null
-                  ? '—'
-                  : '${_usage!.downloadCount} '
-                        '${_usage!.downloadCount == 1 ? 'track' : 'tracks'} · '
-                        '${formatBytes(_usage!.downloadBytes)}',
-            ),
-            if (_usage != null && _usage!.missingDownloads > 0)
-              _Row(
-                label: 'Gone missing',
-                value:
-                    '${_usage!.missingDownloads} downloaded '
-                    '${_usage!.missingDownloads == 1 ? 'file' : 'files'} '
-                    'no longer on disk',
-              ),
-            _Row(
-              label: 'Library cache',
-              value: _usage == null ? '—' : formatBytes(_usage!.manifestBytes),
-            ),
-            _Row(
-              label: 'Artwork in memory',
-              value: _usage == null
-                  ? '—'
-                  : '${_usage!.imageCount} images · '
-                        '${formatBytes(_usage!.imageBytes)}',
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, 0),
-              child: Text(
-                'There is no artwork cache on disk to clear. Covers are '
-                'fetched as they are shown and kept as decoded images in '
-                'memory, which the system reclaims on its own.',
-                style: TypeScale.caption,
-              ),
-            ),
-            _Action(
-              label: 'Free artwork memory',
-              detail:
-                  'Drops decoded covers. They are fetched again as you '
-                  'scroll, so this is worth doing only if the app feels heavy.',
-              onTap: () async {
-                PaintingBinding.instance.imageCache.clear();
-                PaintingBinding.instance.imageCache.clearLiveImages();
-                await _measure();
-              },
-            ),
+                    _Group(
+                      title: 'Your music box',
+                      children: [
+                        _ValueTile(
+                          dot: widget.offline ? Tones.warn : Tones.held,
+                          label: widget.offline
+                              ? 'Cannot reach it right now'
+                              : 'Connected',
+                          value: '${widget.trackCount} songs',
+                        ),
+                        _LinkTile(
+                          title: 'Server address',
+                          detail: widget.endpoint,
+                          onTap: _editServer,
+                        ),
+                        _LinkTile(
+                          title: 'Sync the whole library',
+                          detail:
+                              'Ask the box for everything again, not just what '
+                              'changed. Nothing on this phone is lost.',
+                          onTap: () async {
+                            widget.onResync();
+                            NavScope.of(context).back();
+                          },
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('Data'),
-            _Action(
-              label: 'Clear listening history',
-              detail:
-                  'Removes every play and skip this app recorded. '
-                  'Recently played, On repeat and Listen again go empty, and '
-                  'Discover falls back to ranking by what you own. Your '
-                  'music is not touched.',
-              destructive: true,
-              onTap: () => _confirm(
-                title: 'Clear listening history?',
-                body:
-                    'Everything the app learned about what you listen to '
-                    'is discarded. It starts learning again from your next '
-                    'play. No files are removed.',
-                action: 'Clear',
-                run: widget.history.clear,
-              ),
-            ),
-            _Action(
-              label: 'Refetch the library',
-              detail:
-                  'Asks the daemon for the whole library again, rather '
-                  'than the changes since last time. Nothing local is lost.',
-              onTap: () async {
-                widget.onResync();
-                NavScope.of(context).back();
-              },
-            ),
+                    _Group(
+                      title: 'This phone',
+                      children: [
+                        _ValueTile(
+                          dot: _deviceId == null ? Tones.warn : Tones.held,
+                          label: _deviceId == null
+                              ? 'Not signed in'
+                              : 'Signed in',
+                          value: '',
+                        ),
+                        _LinkTile(
+                          title: _enrolling
+                              ? 'Signing in...'
+                              : _deviceId == null
+                              ? 'Enter an invite code'
+                              : 'Sign in again with a new code',
+                          detail: _deviceId == null
+                              ? 'Without this, the box will not send music to '
+                                    'this phone. Songs already downloaded keep '
+                                    'playing.'
+                              : 'Replaces the key on this phone. The old one '
+                                    'stops working.',
+                          onTap: _enrolling ? null : _enrolDevice,
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('This device'),
-            _Row(
-              label: 'Enrolment',
-              value: _deviceId == null ? 'not enrolled' : 'enrolled',
-            ),
-            _Action(
-              label: _enrolling
-                  ? 'Enrolling...'
-                  : _deviceId == null
-                  ? 'Enter invite code'
-                  : 'Enrol again with a new code',
-              detail: _deviceId == null
-                  ? 'Without this, the server will not serve music to this '
-                        'device. Downloads already on the phone keep playing.'
-                  : 'Replaces the credential on this device. The old one stops '
-                        'working.',
-              onTap: _enrolling ? null : _enrolDevice,
-            ),
+                    _Group(
+                      title: 'Privacy',
+                      children: [
+                        _LinkTile(
+                          title: 'Clear listening history',
+                          detail:
+                              'Removes every play and skip the app recorded. On '
+                              'repeat, Listen again and your mixes go quiet '
+                              'until you listen again. Your music is not '
+                              'touched.',
+                          destructive: true,
+                          onTap: () => _confirm(
+                            title: 'Clear listening history?',
+                            body:
+                                'Everything the app learned about what you '
+                                'listen to is discarded. It starts learning '
+                                'again from your next play. No files are '
+                                'removed.',
+                            action: 'Clear',
+                            run: widget.history.clear,
+                          ),
+                        ),
+                      ],
+                    ),
 
-            const _SectionLabel('Library'),
-            _Row(label: 'Daemon', value: widget.offline ? 'offline' : 'online'),
-            _Action(
-              label: 'Server',
-              detail: widget.endpoint,
-              onTap: _editServer,
-            ),
-            _Row(label: 'Tracks', value: '${widget.trackCount}'),
-            _Row(label: 'Downloaded', value: '${widget.downloadCount}'),
+                    if (widget.onWhatsNew != null)
+                      _Group(
+                        title: 'About',
+                        children: [
+                          _LinkTile(
+                            title: 'What\'s new',
+                            detail:
+                                'The Birthday Pack: everything new in this '
+                                'release.',
+                            onTap: widget.onWhatsNew,
+                          ),
+                        ],
+                      ),
 
-            const _SectionLabel('About'),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('tunes', style: TypeScale.heading),
-                  SizedBox(height: 2),
-                  Text('A music player for our music.', style: TypeScale.body),
-                ],
-              ),
-            ),
-            InkWell(
-              // Seven taps, the old way in. Nothing here is dangerous enough
-              // to hide behind a password and nothing is useful enough to
-              // put in front of everyone.
-              onTap: () {
-                _versionTaps += 1;
-                if (_versionTaps >= 7 && !_developer) {
-                  setState(() => _developer = true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Developer section shown')),
-                  );
-                }
-              },
-              child: _Row(
-                label: 'Version',
-                value:
-                    '${widget.channel} · '
-                    '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit} · '
-                    'build ${widget.buildNumber}',
-              ),
-            ),
-            const _Row(label: 'Made by', value: 'Aestra Studios'),
+                    const SizedBox(height: Space.xl),
+                    Center(
+                      child: GestureDetector(
+                        // Seven taps, the old way in. Nothing here is dangerous
+                        // enough to hide behind a password and nothing is
+                        // useful enough to put in front of everyone.
+                        onTap: () {
+                          _versionTaps += 1;
+                          if (_versionTaps >= 7 && !_developer) {
+                            setState(() => _developer = true);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Developer section shown'),
+                              ),
+                            );
+                          }
+                        },
+                        child: Column(
+                          children: [
+                            Text(
+                              'tunes',
+                              style: TypeScale.wordmark.copyWith(fontSize: 30),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'A music player for our music.',
+                              style: TypeScale.note.copyWith(
+                                fontSize: 14,
+                                color: Tones.textMuted,
+                              ),
+                            ),
+                            const SizedBox(height: Space.sm),
+                            Text(
+                              '${widget.channel}  ·  '
+                              '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit}  ·  '
+                              'build ${widget.buildNumber}',
+                              style: TypeScale.mono,
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Made by Aestra Studios',
+                              style: TypeScale.mono,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
 
-            if (_developer) ...[
-              const _SectionLabel('Developer'),
-              _Row(label: 'Endpoint', value: widget.endpoint),
-              _Row(
-                label: 'Support dir',
-                value: widget.supportDir?.path ?? 'unknown',
+                    if (_developer)
+                      _Group(
+                        title: 'Developer',
+                        children: [
+                          _ValueTile(label: 'Endpoint', value: widget.endpoint),
+                          _ValueTile(
+                            label: 'Support dir',
+                            value: widget.supportDir?.path ?? 'unknown',
+                          ),
+                          _ValueTile(label: 'Commit', value: widget.commit),
+                          _ValueTile(
+                            label: 'Images in memory',
+                            value: _usage == null
+                                ? '—'
+                                : '${_usage!.imageCount} · '
+                                      '${formatBytes(_usage!.imageBytes)}',
+                          ),
+                          _ValueTile(
+                            label: 'Log file',
+                            value: _usage == null
+                                ? '—'
+                                : (DiagLog.path == null
+                                      ? 'not initialised'
+                                      : formatBytes(_usage!.logBytes)),
+                          ),
+                          _LinkTile(
+                            title: 'Free image memory',
+                            detail:
+                                'Drops decoded covers. They are decoded again as '
+                                'you scroll.',
+                            onTap: () async {
+                              PaintingBinding.instance.imageCache.clear();
+                              PaintingBinding.instance.imageCache
+                                  .clearLiveImages();
+                              await _measure();
+                            },
+                          ),
+                          _LinkTile(
+                            title: 'Re-measure storage',
+                            detail: 'Walks the download index again.',
+                            onTap: _measure,
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
-              _Row(label: 'Commit', value: widget.commit),
-              _Row(
-                label: 'Image cache',
-                value: _usage == null
-                    ? '—'
-                    : '${_usage!.imageCount} live · '
-                          '${formatBytes(_usage!.imageBytes)}',
-              ),
-              _Row(
-                label: 'Log file',
-                value: _usage == null
-                    ? '—'
-                    : (DiagLog.path == null
-                          ? 'not initialised'
-                          : formatBytes(_usage!.logBytes)),
-              ),
-              _Action(
-                label: 'Re-measure storage',
-                detail: 'Walks the download index again.',
-                onTap: _measure,
-              ),
-            ],
+            ),
           ],
         ),
       ),
@@ -707,50 +803,65 @@ class _AvatarButton extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-  final String text;
+/// You: the picture and the name, on one card at the top.
+class _Profile extends StatelessWidget {
+  const _Profile({
+    required this.name,
+    required this.path,
+    required this.controller,
+    required this.onAvatar,
+    required this.onName,
+  });
+
+  final String name;
+  final String? path;
+  final TextEditingController controller;
+  final VoidCallback onAvatar;
+  final ValueChanged<String> onName;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        Space.lg,
-        Space.lg,
-        Space.lg,
-        Space.sm,
+    return Container(
+      padding: const EdgeInsets.all(Space.md),
+      decoration: BoxDecoration(
+        color: Tones.surface,
+        borderRadius: BorderRadius.circular(RadiusTokens.card),
+        border: Border.all(color: Tones.hairline),
       ),
-      child: Text(
-        text.toUpperCase(),
-        style: TypeScale.caption.copyWith(
-          color: Tones.textMuted,
-          letterSpacing: 1.2,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 110, child: Text(label, style: TypeScale.caption)),
-          Expanded(
-            child: Text(
-              value,
-              style: TypeScale.body,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              _AvatarButton(name: name, path: path, onTap: onAvatar),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  style: TypeScale.display.copyWith(fontSize: 22),
+                  decoration: InputDecoration(
+                    hintText: 'What should it call you?',
+                    hintStyle: TypeScale.note.copyWith(
+                      fontSize: 17,
+                      color: Tones.textMuted,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  textInputAction: TextInputAction.done,
+                  // Written on every keystroke: a name that only saves on a
+                  // button nobody pressed is a name that gets lost.
+                  onChanged: onName,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.sm),
+          Text(
+            'Your name and picture stay on this phone. Home greets you with it.',
+            style: TypeScale.note.copyWith(
+              fontSize: 13,
+              color: Tones.textMuted,
             ),
           ),
         ],
@@ -759,46 +870,368 @@ class _Row extends StatelessWidget {
   }
 }
 
-/// A settings row that does something, with the sentence that says what.
-class _Action extends StatelessWidget {
-  const _Action({
+/// A titled card of related settings, rows divided by hairlines.
+class _Group extends StatelessWidget {
+  const _Group({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: Space.xs, bottom: Space.sm),
+            child: Text(
+              title.toUpperCase(),
+              style: TypeScale.mono.copyWith(letterSpacing: 1.3),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: Tones.surface,
+              borderRadius: BorderRadius.circular(RadiusTokens.card),
+              border: Border.all(color: Tones.hairline),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (var i = 0; i < children.length; i++) ...[
+                  if (i > 0)
+                    const Divider(
+                      height: 1,
+                      thickness: 0.5,
+                      color: Tones.hairline,
+                    ),
+                  children[i],
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+const _tilePadding = EdgeInsets.symmetric(
+  horizontal: Space.md + 2,
+  vertical: Space.md - 2,
+);
+
+TextStyle _tileTitle([Color color = Tones.text]) => TypeScale.title.copyWith(
+  fontSize: 15,
+  color: color,
+  fontVariations: const [FontVariation('wght', 500)],
+  fontWeight: FontWeight.w500,
+);
+
+class _SwitchTile extends StatelessWidget {
+  const _SwitchTile({
+    required this.title,
+    required this.detail,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String detail;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: _tilePadding,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: _tileTitle()),
+                  const SizedBox(height: 2),
+                  Text(detail, style: TypeScale.caption.copyWith(height: 1.4)),
+                ],
+              ),
+            ),
+            const SizedBox(width: Space.md),
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              activeThumbColor: Tones.base,
+              activeTrackColor: Tones.primary,
+              inactiveThumbColor: Tones.textMuted,
+              inactiveTrackColor: Tones.surfaceRaised,
+              trackOutlineColor: const WidgetStatePropertyAll(
+                Colors.transparent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Pick one of a few: text size, say.
+class _ChoiceTile extends StatelessWidget {
+  const _ChoiceTile({
+    required this.title,
+    required this.choices,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final String title;
+  final List<String> choices;
+  final int selected;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: _tilePadding,
+      child: Row(
+        children: [
+          Expanded(child: Text(title, style: _tileTitle())),
+          SegmentedButton<int>(
+            segments: [
+              for (var i = 0; i < choices.length; i++)
+                ButtonSegment(value: i, label: Text(choices[i])),
+            ],
+            selected: {selected},
+            onSelectionChanged: (v) => onChanged(v.first),
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepperTile extends StatelessWidget {
+  const _StepperTile({
+    required this.title,
+    required this.detail,
+    required this.onMinus,
+    required this.onPlus,
+  });
+
+  final String title;
+  final String detail;
+  final VoidCallback onMinus;
+  final VoidCallback onPlus;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: _tilePadding,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: _tileTitle()),
+                const SizedBox(height: 2),
+                Text(detail, style: TypeScale.caption.copyWith(height: 1.4)),
+              ],
+            ),
+          ),
+          IconButton.outlined(
+            onPressed: onMinus,
+            tooltip: 'Earlier',
+            icon: const Icon(Icons.remove_rounded, size: 18),
+            color: Tones.text,
+            style: IconButton.styleFrom(
+              side: const BorderSide(color: Tones.hairline),
+            ),
+          ),
+          const SizedBox(width: Space.xs),
+          IconButton.outlined(
+            onPressed: onPlus,
+            tooltip: 'Later',
+            icon: const Icon(Icons.add_rounded, size: 18),
+            color: Tones.text,
+            style: IconButton.styleFrom(
+              side: const BorderSide(color: Tones.hairline),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A fact: a label, with an optional coloured dot, and its value in mono.
+class _ValueTile extends StatelessWidget {
+  const _ValueTile({
     required this.label,
+    required this.value,
+    this.dot,
+    this.valueColor,
+  });
+
+  final String label;
+  final String value;
+  final Color? dot;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: _tilePadding,
+      child: Row(
+        children: [
+          if (dot != null) ...[
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: Space.sm + 2),
+          ],
+          Expanded(child: Text(label, style: _tileTitle())),
+          if (value.isNotEmpty)
+            Flexible(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                style: TypeScale.mono.copyWith(
+                  fontSize: 13,
+                  color: valueColor ?? Tones.textMuted,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A row that does something, with the sentence that says what.
+class _LinkTile extends StatelessWidget {
+  const _LinkTile({
+    required this.title,
     required this.detail,
     required this.onTap,
     this.destructive = false,
   });
 
-  final String label;
+  final String title;
   final String detail;
 
-  /// Null disables the row. InkWell already renders that as unresponsive, so
-  /// an action that is mid-flight can say so without a second widget.
+  /// Null disables the row, so one that is mid-flight can say so.
   final VoidCallback? onTap;
   final bool destructive;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = onTap != null;
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: Space.lg,
-          vertical: Space.sm,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TypeScale.body.copyWith(
-                color: destructive ? Tones.primary : Tones.text,
-                fontWeight: FontWeight.w600,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.45,
+        child: Padding(
+          padding: _tilePadding,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: _tileTitle(destructive ? Tones.warn : Tones.text),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      style: TypeScale.caption.copyWith(height: 1.4),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(detail, style: TypeScale.caption),
-          ],
+              const SizedBox(width: Space.sm),
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: Tones.textMuted,
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// What is taking the space, as one bar: songs, covers, the library copy.
+class _StorageBar extends StatelessWidget {
+  const _StorageBar({
+    required this.downloads,
+    required this.covers,
+    required this.library,
+    required this.loaded,
+  });
+
+  final int downloads;
+  final int covers;
+  final int library;
+  final bool loaded;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = downloads + covers + library;
+    return Padding(
+      padding: _tilePadding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            loaded ? formatBytes(total) : '—',
+            style: TypeScale.display.copyWith(fontSize: 26),
+          ),
+          Text('used on this phone', style: TypeScale.caption),
+          const SizedBox(height: Space.md),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 8,
+              child: total <= 0
+                  ? const ColoredBox(color: Tones.hairline)
+                  : Row(
+                      children: [
+                        if (downloads > 0)
+                          Expanded(
+                            flex: downloads,
+                            child: const ColoredBox(color: Tones.held),
+                          ),
+                        if (covers > 0)
+                          Expanded(
+                            flex: covers,
+                            child: const ColoredBox(color: Tones.primary),
+                          ),
+                        if (library > 0)
+                          Expanded(
+                            flex: library,
+                            child: const ColoredBox(color: Tones.textMuted),
+                          ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

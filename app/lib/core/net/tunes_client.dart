@@ -361,6 +361,26 @@ class TunesClient {
   /// against an authenticated server and report "offline" forever, on a
   /// daemon that is perfectly healthy -- which is exactly the class of bug
   /// where the message names the wrong thing.
+  /// Asks the server to have a cold track ready, without sending its audio.
+  ///
+  /// `GET /t/<sha>?warm=1` answers 204 once the bytes are in the server's
+  /// cache. A hint only: the server declines when it is busy with real
+  /// playback, and every failure here is swallowed, because the track still
+  /// plays when it is reached either way.
+  Future<void> warm(String sha) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final req = await client.getUrl(Uri.parse('$baseUrl/t/$sha?warm=1'));
+      await _authorize(req);
+      final res = await req.close().timeout(const Duration(seconds: 60));
+      await res.drain<void>();
+    } catch (_) {
+      // A hint, never a reason to bother the listener.
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<bool> ping() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {

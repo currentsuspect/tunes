@@ -80,6 +80,33 @@ void main() {
     },
   );
 
+  test('insertAt puts a removed entry back exactly where it was', () async {
+    final id = await store.create('x');
+    await store.addAll(id, ['a', 'b', 'c', 'd']);
+    await store.removeAt(id, 1);
+    expect(await store.itemsOf(id), ['a', 'c', 'd']);
+
+    await store.insertAt(id, 'b', 1);
+    expect(await store.itemsOf(id), ['a', 'b', 'c', 'd']);
+  });
+
+  test('insertAt handles the ends and clamps past them', () async {
+    final id = await store.create('x');
+    await store.addAll(id, ['a', 'b']);
+    await store.insertAt(id, 'front', 0);
+    await store.insertAt(id, 'back', 99);
+    await store.insertAt(id, 'neg', -5);
+    expect(await store.itemsOf(id), ['neg', 'front', 'a', 'b', 'back']);
+  });
+
+  test('insertAt keeps positions dense so a later move still lands', () async {
+    final id = await store.create('x');
+    await store.addAll(id, ['a', 'b', 'c']);
+    await store.insertAt(id, 'n', 1);
+    await store.move(id, 3, 0);
+    expect(await store.itemsOf(id), ['c', 'a', 'n', 'b']);
+  });
+
   test('adding appends after what is already there', () async {
     final id = await store.create('x');
     await store.addAll(id, ['a', 'b']);

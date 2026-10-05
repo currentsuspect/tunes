@@ -123,29 +123,54 @@ class _SearchViewState extends State<SearchView> {
             controller: _controller,
             autofocus: false,
             onChanged: _onChanged,
-            style: TypeScale.body,
+            style: TypeScale.body.copyWith(color: Tones.text, fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Search tracks, artists, albums',
-              hintStyle: TypeScale.body,
+              hintStyle: TypeScale.note.copyWith(
+                fontSize: 15,
+                color: Tones.textMuted,
+              ),
               prefixIcon: const Icon(
                 Icons.search_rounded,
                 color: Tones.textMuted,
                 size: 20,
               ),
               filled: true,
-              fillColor: Tones.surface,
+              fillColor: Tones.surfaceRaised,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(RadiusTokens.control),
-                borderSide: const BorderSide(color: Tones.hairline),
+                borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(RadiusTokens.control),
-                borderSide: const BorderSide(color: Tones.hairline),
+                borderSide: BorderSide.none,
               ),
-              contentPadding: const EdgeInsets.symmetric(vertical: Space.sm),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(RadiusTokens.control),
+                borderSide: const BorderSide(color: Tones.primary, width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: Space.md),
             ),
           ),
         ),
+        if (widget.offline)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.offline_pin_rounded,
+                  size: 14,
+                  color: Tones.held,
+                ),
+                const SizedBox(width: Space.sm),
+                Text(
+                  'Searching what is on this phone',
+                  style: TypeScale.mono.copyWith(fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: q.isEmpty
               ? _BrowseWhenEmpty(
@@ -162,7 +187,11 @@ class _SearchViewState extends State<SearchView> {
                   // Says how far it looked: "nothing found" from a search
                   // that only checked the device means something different
                   // from one that asked the daemon too.
-                  body: fromServer
+                  body: widget.offline
+                      ? 'Nothing downloaded to this phone matches '
+                            '"${_query.trim()}". Songs you have not downloaded '
+                            'cannot be found without a connection.'
+                      : fromServer
                       ? 'Nothing here or beyond your library matches '
                             '"${_query.trim()}".'
                       : 'Nothing in your library matches "${_query.trim()}". '
@@ -175,7 +204,7 @@ class _SearchViewState extends State<SearchView> {
                   ),
                   children: [
                     if (results.isNotEmpty) ...[
-                      const Text('Tracks', style: TypeScale.title),
+                      Text('Tracks', style: _sectionStyle()),
                       const SizedBox(height: Space.sm),
                       for (var i = 0; i < results.length; i++) ...[
                         TrackRow(
@@ -195,10 +224,7 @@ class _SearchViewState extends State<SearchView> {
                     ],
                     if (fromServer && _server!.externalReleases.isNotEmpty) ...[
                       const SizedBox(height: Space.md),
-                      const Text(
-                        'Albums on MusicBrainz',
-                        style: TypeScale.title,
-                      ),
+                      Text('Albums on MusicBrainz', style: _sectionStyle()),
                       const SizedBox(height: Space.sm),
                       for (final r in _server!.externalReleases) ...[
                         InkWell(
@@ -289,10 +315,7 @@ class _SearchViewState extends State<SearchView> {
                     ],
                     if (fromServer && _server!.externalArtists.isNotEmpty) ...[
                       const SizedBox(height: Space.md),
-                      const Text(
-                        'Artists on MusicBrainz',
-                        style: TypeScale.title,
-                      ),
+                      Text('Artists on MusicBrainz', style: _sectionStyle()),
                       const SizedBox(height: Space.sm),
                       for (final a in _server!.externalArtists) ...[
                         InkWell(
@@ -350,7 +373,7 @@ class _SearchViewState extends State<SearchView> {
                     if (fromServer) ...[
                       if (_server!.releases.isNotEmpty) ...[
                         const SizedBox(height: Space.md),
-                        const Text('Albums', style: TypeScale.title),
+                        Text('Albums', style: _sectionStyle()),
                         const SizedBox(height: Space.sm),
                         for (final r in _server!.releases) ...[
                           InkWell(
@@ -408,7 +431,7 @@ class _SearchViewState extends State<SearchView> {
                       ],
                       if (_server!.artists.isNotEmpty) ...[
                         const SizedBox(height: Space.md),
-                        const Text('Artists', style: TypeScale.title),
+                        Text('Artists', style: _sectionStyle()),
                         const SizedBox(height: Space.sm),
                         for (final a in _server!.artists) ...[
                           InkWell(
@@ -507,8 +530,8 @@ class _BrowseWhenEmpty extends StatelessWidget {
     if (artists.isEmpty && albums.isEmpty) {
       return const Center(
         child: Text(
-          'Search your library — results appear as you type.',
-          style: TypeScale.body,
+          'Search your library. Results appear as you type.',
+          style: TypeScale.note,
         ),
       );
     }
@@ -547,7 +570,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                         const SizedBox(height: Space.sm),
                         Text(
                           name,
-                          style: TypeScale.caption,
+                          style: TypeScale.caption.copyWith(color: Tones.text),
                           maxLines: 2,
                           textAlign: TextAlign.center,
                           overflow: TextOverflow.ellipsis,
@@ -610,6 +633,10 @@ class _BrowseWhenEmpty extends StatelessWidget {
   }
 }
 
+/// Result and browse section names in the serif, one size, so a screen of
+/// results reads as headings and rows rather than a column of equals.
+TextStyle _sectionStyle() => TypeScale.heading.copyWith(fontSize: 21);
+
 class _BrowseHeader extends StatelessWidget {
   const _BrowseHeader(this.label);
 
@@ -619,7 +646,7 @@ class _BrowseHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-      child: Text(label, style: TypeScale.title),
+      child: Text(label, style: _sectionStyle()),
     );
   }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The wall of the room. Matches Tones.base in the app, so the window
+         behind the first frame is the same colour as the first frame. -->
+    <color name="tunes_ink">#0E0E15</color>
+</resources>

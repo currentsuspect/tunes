@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 class Reachability extends ChangeNotifier {
   bool _offline = false;
@@ -12,6 +12,19 @@ class Reachability extends ChangeNotifier {
     _offline = value;
     notifyListeners();
   }
+}
+
+/// Makes [Reachability] readable from any screen, so the places that say where
+/// the sound is coming from follow the connection without being handed it.
+class ReachabilityScope extends InheritedNotifier<Reachability> {
+  const ReachabilityScope({
+    super.key,
+    required Reachability reachability,
+    required super.child,
+  }) : super(notifier: reachability);
+
+  static Reachability? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ReachabilityScope>()?.notifier;
 }
 
 class Heartbeat {

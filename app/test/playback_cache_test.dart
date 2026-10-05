@@ -92,6 +92,64 @@ void main() {
     });
   });
 
+  group('StreamFollower', () {
+    final q = [for (final c in 'abcd'.split('')) track(c * 64, c)];
+    late List<String> kept;
+    late List<String> warmed;
+    late StreamFollower f;
+
+    setUp(() {
+      kept = [];
+      warmed = [];
+      f = StreamFollower(
+        keep: (t) => kept.add(t.title),
+        warm: (t) => warmed.add(t.title),
+      );
+    });
+
+    void tick(int i, int secs, {bool playing = true}) => f.tick(
+      queue: q,
+      index: i,
+      position: Duration(seconds: secs),
+      playing: playing,
+    );
+
+    test('does nothing until the track has played a while', () {
+      tick(0, 0);
+      tick(0, 3);
+      expect(kept, isEmpty);
+      expect(warmed, isEmpty);
+    });
+
+    test('does nothing while paused', () {
+      tick(0, 20, playing: false);
+      expect(kept, isEmpty);
+    });
+
+    test('then keeps this track and warms the next two, once', () {
+      tick(0, 9);
+      tick(0, 12);
+      tick(0, 30);
+      expect(kept, ['a']);
+      expect(warmed, ['b', 'c']);
+    });
+
+    test('a new track starts the wait again and warms only what is new', () {
+      tick(0, 9);
+      tick(1, 2);
+      expect(kept, ['a']);
+      tick(1, 9);
+      expect(kept, ['a', 'b']);
+      expect(warmed, ['b', 'c', 'd']);
+    });
+
+    test('the end of the queue warms nothing past it', () {
+      tick(3, 9);
+      expect(kept, ['d']);
+      expect(warmed, isEmpty);
+    });
+  });
+
   group('TrackResolver', () {
     late _FakeClient client;
     late MediaGrants grants;
@@ -127,13 +185,24 @@ void main() {
       expect(caching.jobs, isEmpty);
     });
 
+    test('opening a whole queue starts no transfers', () {
+      client.baseUrl = 'http://box:4780';
+      for (final c in 'cdefg'.split('')) {
+        resolver.uriFor(track(c * 64, c));
+      }
+      expect(caching.jobs, isEmpty);
+    });
+
     test('a second play of a streamed track reads from disk', () async {
       client.baseUrl = 'http://box:4780';
       final t = track('b' * 64, 'B');
-      // First play: nothing local, so a signed-or-bare URL -- and a
-      // background cache starts behind it.
+      // First play: nothing local, so a signed-or-bare URL. Resolving starts
+      // no transfer of its own: it would race the stream for the same bytes.
       final first = resolver.uriFor(t);
-      expect(first, startsWith('http://box:4780/track/'));
+      expect(first, startsWith('http://box:4780/t/'));
+      expect(caching.jobFor('b' * 64), isNull);
+      // Once it is playing, the follower asks for a copy.
+      resolver.keep(t);
       expect(caching.jobFor('b' * 64), isNotNull);
       // Let the background transfer land.
       for (var i = 0; i < 50 && !cacheStore.contains('b' * 64); i++) {

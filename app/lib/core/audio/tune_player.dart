@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'queue_order.dart';
 import '../../domain/manifest.dart';
 import '../platform/diag_log.dart';
 import 'transport_rules.dart';
@@ -21,6 +22,19 @@ abstract class TunePlayer extends ChangeNotifier {
   bool get shuffle;
 
   void playQueue(List<ManifestTrack> tracks, int startIndex);
+
+  /// Plays [tracks] in a random order, starting from a random one, with shuffle
+  /// mode on so the player shows it and a later toggle behaves.
+  ///
+  /// What the Shuffle buttons call. They used to shuffle the list themselves
+  /// and play it from the top, which left the shuffle switch off and the first
+  /// song a coin flip nobody could repeat.
+  void shufflePlay(List<ManifestTrack> tracks) {
+    if (tracks.isEmpty) return;
+    setShuffle(true);
+    playQueue(tracks, Random().nextInt(tracks.length));
+  }
+
   void play();
   void pause();
   void toggle();
@@ -228,6 +242,12 @@ class MediaKitTunePlayer extends TunePlayer {
   PlaybackRepeat _repeat = PlaybackRepeat.off;
   bool _shuffle = false;
 
+  /// The queue in the order it was supplied: what "in order" means.
+  ///
+  /// Kept beside the order that is playing so shuffle can be turned off, or on,
+  /// at any moment and still know where the list was.
+  List<ManifestTrack> _canonical = const [];
+
   @override
   List<ManifestTrack> get queue => _queue;
 
@@ -275,6 +295,7 @@ class MediaKitTunePlayer extends TunePlayer {
     final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
     _queue = List<ManifestTrack>.of(tracks);
     _index = safeStart;
+    _canonical = List.of(_queue);
     _playing = false;
     // Reported straight away so the mini-player shows the right elapsed time
     // rather than 0:00 until the seek lands.
@@ -313,6 +334,7 @@ class MediaKitTunePlayer extends TunePlayer {
     // Fisher–Yates the remainder. Repeat: caller passes the canonical
     // order; we don't reorder for repeat.
     final safeStart = startIndex.clamp(0, tracks.length - 1).toInt();
+    _canonical = List.of(tracks);
     final shuffled = _shuffle && tracks.length > 1;
     final ordered = shuffled
         ? _shuffledWithStart(tracks, safeStart)
@@ -482,6 +504,7 @@ class MediaKitTunePlayer extends TunePlayer {
         return;
       }
       final grown = [..._queue, pick];
+      _canonical = [..._canonical, pick];
       _queue = grown;
       _index = grown.length - 1;
       _playing = true;
@@ -642,13 +665,62 @@ class MediaKitTunePlayer extends TunePlayer {
   void setShuffle(bool on) {
     if (_shuffle == on) return;
     _shuffle = on;
-    // If shuffle turned ON mid-queue, reorder remaining tracks from the
-    // current index (current stays pinned). If turned OFF, restore the
-    // canonical order — but we don't track the original input list, so
-    // the cleanest UX is "takes effect on next playQueue call". A
-    // dedicated queue model would solve this cleanly; for now we keep
-    // the visible ordering stable and document the limitation.
+    // Applied to the queue now, not at the next playQueue. Turning shuffle on
+    // puts what is still to come in a random order; turning it off continues
+    // from the song on in the order the list was given. What was played and
+    // what is playing never move. This used to wait for the next playQueue, so
+    // the switch changed nothing about what played next.
+    _reorderFuture(
+      on
+          ? shuffleAfter(_queue, _index, Random())
+          : inOrderAfter(_queue, _canonical, _index),
+    );
     notifyListeners();
+  }
+
+  /// Plays [tracks] shuffled without first reordering a queue that is about to
+  /// be replaced.
+  @override
+  void shufflePlay(List<ManifestTrack> tracks) {
+    if (tracks.isEmpty) return;
+    _shuffle = true;
+    playQueue(tracks, Random().nextInt(tracks.length));
+  }
+
+  /// Serialises reorders, so two quick toggles apply in the order they were
+  /// made and never interleave their edits to the decoder's playlist.
+  Future<void> _reorderFlight = Future<void>.value();
+
+  /// Makes the queue after the current song [next], in the decoder as well as
+  /// here. The song on is never touched, so there is no gap and no restart.
+  void _reorderFuture(List<ManifestTrack> next) {
+    if (_queue.isEmpty) return;
+    if (sameFuture(_queue, next, _index)) {
+      _queue = next;
+      return;
+    }
+    final keep = _index + 1;
+    final before = _queue.length;
+    _queue = next;
+    onQueuePlayed?.call(next);
+    final player = _player;
+    if (player == null) return;
+    _reorderFlight = _reorderFlight.then((_) async {
+      try {
+        final tail = next.sublist(keep);
+        await prepareQueue?.call(tail);
+        // From the back, so no removal shifts the index of one still to go.
+        for (var i = before - 1; i >= keep; i--) {
+          await player.remove(i);
+        }
+        for (final t in tail) {
+          await player.add(Media(trackUriFor(t)));
+        }
+      } catch (_) {
+        // The decoder refusing an edit is no reason to stop the music: the
+        // current song keeps playing and the next play rebuilds the queue.
+      }
+    });
   }
 
   /// Decides whether a position report predates a restore seek that is still
@@ -728,6 +800,10 @@ class MediaKitTunePlayer extends TunePlayer {
         }
       }),
     );
+    // A stream that fails to open is retried, twice and a little later each
+    // time, before the track is given up on and the next one played. A cold
+    // track can fail its first open while the server is still fetching it.
+    _peerSubs.add(player.stream.error.listen((_) => _retryOpen(player)));
     // The decoder finished the media by itself. With repeat off at the last
     // index the queue has run out; radio may continue it, otherwise it stops.
     _peerSubs.add(
@@ -738,6 +814,54 @@ class MediaKitTunePlayer extends TunePlayer {
   }
 
   bool _subscribed = false;
+
+  String? _retrySha;
+  int _retries = 0;
+  bool _retryWaiting = false;
+  Duration _retryFrom = Duration.zero;
+
+  void _retryOpen(Player player) {
+    if (_index < 0 || _index >= _queue.length) return;
+    // One failure can report several errors; only the first starts a retry.
+    if (_retryWaiting) return;
+    final sha = _queue[_index].sha;
+    if (sha != _retrySha) {
+      _retrySha = sha;
+      _retries = 0;
+    }
+    // A drop well after the last one is a new problem, not the same one again.
+    if (_retries > 0 && _position > _retryFrom + const Duration(seconds: 15)) {
+      _retries = 0;
+    }
+    final index = _index;
+    if (_retries >= 2) {
+      _retries = 0;
+      next();
+      return;
+    }
+    final wait = Duration(seconds: _retries == 0 ? 1 : 3);
+    _retries += 1;
+    _retryFrom = _position;
+    _retryWaiting = true;
+    Future<void>.delayed(wait, () {
+      _retryWaiting = false;
+      // Only if the listener has not moved on in the meantime.
+      if (_index != index || index >= _queue.length) return;
+      if (_queue[index].sha != sha) return;
+      // Pick up where it dropped: starting the song over, up to three times,
+      // read as the track repeating before it was skipped.
+      if (_retryFrom > const Duration(seconds: 2)) {
+        _pendingSeek = _retryFrom;
+        _pendingSeekSince = DateTime.now();
+        _lastSeekRetry = null;
+        _seekRetries = 0;
+      }
+      player.jump(index);
+      if (_retryFrom > const Duration(seconds: 2)) {
+        unawaited(player.seek(_retryFrom));
+      }
+    });
+  }
 
   @override
   void dispose() {

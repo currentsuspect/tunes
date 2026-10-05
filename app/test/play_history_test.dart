@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/audio/tune_player.dart';
 import 'package:tunes/core/data/database.dart';
@@ -199,6 +200,27 @@ void main() {
     }
   }
 
+  /// A completed play of [sha] that started [ago] ago, written straight to the
+  /// table so a test can put history in the past without waiting for it.
+  Future<void> playedAgo(String sha, Duration ago, {int times = 1}) async {
+    for (var i = 0; i < times; i++) {
+      await db
+          .into(db.playEvents)
+          .insert(
+            PlayEventsCompanion.insert(
+              sha: sha,
+              startedAt: DateTime.now()
+                  .subtract(ago)
+                  .subtract(Duration(minutes: i))
+                  .millisecondsSinceEpoch,
+              listenedMs: 40000,
+              durationMs: const Value(60000),
+              completed: const Value(true),
+            ),
+          );
+    }
+  }
+
   group('on repeat', () {
     test('ranks by how often, heaviest first', () async {
       await playThrough('a', 2);
@@ -226,33 +248,139 @@ void main() {
       // One real play out of two starts is not two plays.
       expect(await history.topShas(minPlays: 2), isEmpty);
     });
+
+    test('is what is on today, not what has been played all year', () async {
+      // Fifty plays last month, three this morning. The long history must not
+      // outrank, or even appear beside, what is actually looping now.
+      await playedAgo(
+        'last-months-favourite',
+        const Duration(days: 30),
+        times: 50,
+      );
+      await playedAgo('this-morning', const Duration(hours: 3), times: 3);
+      await playedAgo('yesterday-ish', const Duration(hours: 30), times: 9);
+
+      expect(await history.topShas(), ['this-morning']);
+    });
+
+    test('the window is a day by default and can be changed', () async {
+      await playedAgo('two-days-ago', const Duration(days: 2), times: 4);
+
+      expect(await history.topShas(), isEmpty);
+      expect(await history.topShas(window: const Duration(days: 3)), [
+        'two-days-ago',
+      ]);
+    });
+
+    test(
+      'plays just outside the window do not count towards the total',
+      () async {
+        await playedAgo('edge', const Duration(hours: 2), times: 1);
+        await playedAgo('edge', const Duration(hours: 40), times: 5);
+
+        // One play in the window is below the two it takes.
+        expect(await history.topShas(), isEmpty);
+      },
+    );
   });
 
   group('listen again', () {
-    test('offers what is not in the current rotation', () async {
-      await playThrough('old', 4);
-      await playThrough('older', 2);
-      await playThrough('now1', 1);
-      await playThrough('now2', 1);
+    test('is what you played a while back and have not played since', () async {
+      await playedAgo('last-month', const Duration(days: 30), times: 4);
+      await playedAgo('two-months', const Duration(days: 60), times: 2);
 
-      // The two most recently played are current rotation, not a suggestion.
-      expect(await history.listenAgainShas(skipRecent: 2), ['old', 'older']);
+      expect(await history.listenAgainShas(), ['last-month', 'two-months']);
     });
 
     test('ranks the rest by how much they were played', () async {
-      await playThrough('light', 1);
-      await playThrough('heavy', 6);
-      await playThrough('recent', 1);
+      await playedAgo('light', const Duration(days: 20), times: 1);
+      await playedAgo('heavy', const Duration(days: 40), times: 6);
 
-      expect(await history.listenAgainShas(skipRecent: 1), ['heavy', 'light']);
+      expect(await history.listenAgainShas(), ['heavy', 'light']);
     });
 
-    test('is empty when everything played is still in rotation', () async {
-      // A fresh install must not be offered its own last three tracks back.
+    test('leaves out anything played in the last couple of weeks', () async {
+      await playedAgo('lately', const Duration(days: 5), times: 8);
+      await playedAgo('this-morning', const Duration(hours: 2), times: 3);
+      await playedAgo('forgotten', const Duration(days: 25), times: 2);
+
+      expect(await history.listenAgainShas(), ['forgotten']);
+    });
+
+    test('leaves out what is so old it is another taste', () async {
+      await playedAgo('ancient', const Duration(days: 400), times: 9);
+
+      expect(await history.listenAgainShas(), isEmpty);
+    });
+
+    test('is empty on a fresh install rather than echoing it back', () async {
+      // Everything played in the last hour is current, not something to go back
+      // to: a new install must not be offered its own last tracks.
       await playThrough('a', 1);
       await playThrough('b', 1);
 
-      expect(await history.listenAgainShas(skipRecent: 10), isEmpty);
+      expect(await history.listenAgainShas(), isEmpty);
+    });
+
+    test('never repeats what is on repeat', () async {
+      // The exact complaint: the same favourites sitting in both rails.
+      await playedAgo('favourite', const Duration(hours: 2), times: 5);
+      await playedAgo('favourite', const Duration(days: 30), times: 20);
+      await playedAgo('old-one', const Duration(days: 30), times: 3);
+
+      final top = await history.topShas();
+      final again = await history.listenAgainShas(exclude: top.toSet());
+
+      expect(top, ['favourite']);
+      expect(again, ['old-one']);
+      expect(top.toSet().intersection(again.toSet()), isEmpty);
+    });
+
+    test('an excluded track stays out even when it is quiet', () async {
+      await playedAgo('skip-me', const Duration(days: 30), times: 3);
+      await playedAgo('keep-me', const Duration(days: 30), times: 2);
+
+      expect(await history.listenAgainShas(exclude: {'skip-me'}), ['keep-me']);
+    });
+  });
+
+  group('play stamps', () {
+    test(
+      'are finished plays with the time they started, newest first',
+      () async {
+        await playedAgo('old', const Duration(days: 20));
+        await playedAgo('new', const Duration(hours: 2));
+
+        final stamps = await history.playStamps();
+        expect(stamps.map((s) => s.sha), ['new', 'old']);
+        expect(
+          DateTime.now().difference(stamps.first.at).inMinutes,
+          inInclusiveRange(119, 121),
+        );
+      },
+    );
+
+    test('leave out skips', () async {
+      player.loadTrack(_track('skipped', durationMs: 120000));
+      player.listenFor(const Duration(seconds: 10));
+      history.flush();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await playedAgo('kept', const Duration(hours: 1));
+
+      expect((await history.playStamps()).map((s) => s.sha), ['kept']);
+    });
+
+    test('stop at the window and the cap', () async {
+      await playedAgo('recent', const Duration(days: 3));
+      await playedAgo('ancient', const Duration(days: 500));
+      expect((await history.playStamps()).map((s) => s.sha), ['recent']);
+      expect(
+        (await history.playStamps(within: const Duration(days: 900))).length,
+        2,
+      );
+
+      await playedAgo('many', const Duration(hours: 5), times: 5);
+      expect((await history.playStamps(limit: 3)).length, 3);
     });
   });
 

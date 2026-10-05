@@ -93,6 +93,60 @@ void main() {
     expect(nav.current, const TabDest(3));
   });
 
+  test('a tab tapped from inside a page leaves the page for good', () {
+    // The tabs are on screen under pages now, so this tap is reachable. Before,
+    // it stacked the tab on top of the page, and Back from the new tab walked
+    // into a page that had been left on purpose.
+    final nav = NavController();
+    nav.selectTab(3);
+    nav.openPanel('tunes/artist/a', () => const SizedBox());
+    nav.openPanel('tunes/album/b', () => const SizedBox());
+    expect(nav.history.length, 3);
+
+    nav.selectTab(1);
+
+    expect(nav.history, [const TabDest(1)]);
+    expect(nav.back(), isFalse);
+  });
+
+  test('a left page is still there to come back to later', () {
+    final nav = NavController();
+    nav.openPanel('tunes/artist/a', () => const Text('artist'));
+    final first = nav.instanceFor('tunes/artist/a');
+    nav.selectTab(2);
+
+    nav.openPanel('tunes/artist/a', () => const Text('artist'));
+    expect(identical(nav.instanceFor('tunes/artist/a'), first), isTrue);
+  });
+
+  test('forgetting unused panes keeps the ones on screen', () {
+    nav.openPanel('tunes/artist/a', () => const Text('a1'));
+    final onScreen = nav.instanceFor('tunes/artist/a');
+    nav.openPanel('tunes/album/b', () => const Text('b1'));
+    nav.instanceFor('tunes/album/b');
+    nav.back(); // album left, artist is on top again
+    expect(nav.registrySize, 2);
+
+    nav.forgetUnused();
+
+    expect(nav.registrySize, 1);
+    expect(identical(nav.instanceFor('tunes/artist/a'), onScreen), isTrue);
+  });
+
+  test(
+    'a forgotten pane is rebuilt from the builder it is opened with next',
+    () {
+      // Opened offline, built from a cut-down library; the connection returns.
+      nav.openPanel('tunes/album/b', () => const Text('built offline'));
+      expect((nav.instanceFor('tunes/album/b') as Text).data, 'built offline');
+      nav.selectTab(0);
+      nav.forgetUnused();
+
+      nav.openPanel('tunes/album/b', () => const Text('built online'));
+      expect((nav.instanceFor('tunes/album/b') as Text).data, 'built online');
+    },
+  );
+
   test('popped panes are retained, not destroyed', () {
     openArtist();
     nav.instanceFor(TunesPanels.artist('A'));

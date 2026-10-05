@@ -30,22 +30,32 @@ import 'core/auth/tunes_auth.dart';
 import 'core/data/settings_store.dart';
 import 'core/data/reachability.dart';
 import 'core/nav/nav_controller.dart';
+import 'core/nav/root_route_guard.dart';
 import 'core/radio/radio_engine.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/tokens.dart';
+import 'core/ui/offline_note.dart';
+import 'core/ui/downloads_bar.dart';
+import 'core/ui/greeting.dart';
+import 'core/ui/tunes_nav_bar.dart';
 import 'core/ui/profile_avatar.dart';
 import 'domain/collection_gaps.dart';
 import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
+import 'domain/mixes.dart';
+import 'domain/whats_new.dart';
 import 'features/album/album_page.dart';
 import 'features/artist/artist_page.dart';
 import 'features/discover/discover_view.dart';
+import 'features/downloads/downloads_sheet.dart';
 import 'features/home/home_skeleton.dart';
 import 'features/home/home_view.dart';
+import 'features/mixes/mix_page.dart';
+import 'features/whats_new/whats_new_page.dart';
 import 'features/library/library_view.dart';
 import 'features/now_playing/now_playing_page.dart';
 import 'features/player/mini_player_bar.dart';
@@ -163,7 +173,7 @@ Future<void> main() async {
     // network, so signing them would be pure latency.
     prepareQueue: (tracks) => grants.prime([
       for (final t in tracks)
-        if (store.pathFor(t.sha) == null) '/track/${t.sha}',
+        if (store.pathFor(t.sha) == null) '/t/${t.sha}',
     ]),
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
@@ -172,6 +182,17 @@ Future<void> main() async {
       // artist, search) route through this single hook.
       unawaited(queueStore.replace(tracks.map((t) => t.sha).toList()));
     },
+  );
+  // Keep what is playing and warm what is next, but only once playback has
+  // started, so nothing competes with the stream the listener is waiting on.
+  final follower = StreamFollower(keep: resolver.keep, warm: resolver.warm);
+  player.addListener(
+    () => follower.tick(
+      queue: player.queue,
+      index: player.index,
+      position: player.position,
+      playing: player.playing,
+    ),
   );
   TuneAudioHandler? boundHandler;
   Future<void>? audioInitFlight;
@@ -185,6 +206,12 @@ Future<void> main() async {
         // A closure, so notification artwork follows both the server and
         // the current set of grants rather than being pinned at startup.
         artUriFor: (sha) {
+          // The saved copy first: the notification and lock screen fetch this
+          // themselves, and a network address there is a blank cover offline.
+          final saved = artStore.pathFor(sha);
+          if (saved != null && File(saved).existsSync()) {
+            return Uri.file(saved).toString();
+          }
           final signed = grants.urlFor('/art/$sha');
           return '${client.baseUrl}${signed ?? '/art/$sha'}';
         },
@@ -279,20 +306,23 @@ Future<void> main() async {
   runApp(
     ArtScope(
       store: artStore,
-      child: TunesApp(
-        client: client,
-        grants: grants,
-        auth: auth,
-        player: player,
-        store: store,
-        artStore: artStore,
+      child: ReachabilityScope(
         reachability: reachability,
-        manifestStore: manifestStore,
-        queueStore: queueStore,
-        settings: settings,
-        history: history,
-        likes: likes,
-        playlists: playlists,
+        child: TunesApp(
+          client: client,
+          grants: grants,
+          auth: auth,
+          player: player,
+          store: store,
+          artStore: artStore,
+          reachability: reachability,
+          manifestStore: manifestStore,
+          queueStore: queueStore,
+          settings: settings,
+          history: history,
+          likes: likes,
+          playlists: playlists,
+        ),
       ),
     ),
   );
@@ -315,8 +345,8 @@ Set<String> grantPathsFor(
     if (art != null && art.isNotEmpty) paths.add('/art/$art');
     // Streaming grants for anything not already on disk. Downloaded tracks
     // resolve to a local path and never touch the network, so a grant for
-    // one would be waste.
-    if (pathFor(t.sha) == null) paths.add('/track/${t.sha}');
+    // one would be waste. Streams ride /t/, not /track/.
+    if (pathFor(t.sha) == null) paths.add('/t/${t.sha}');
   }
   for (final r in manifest.releases) {
     final art = r.artSha;
@@ -412,25 +442,36 @@ class _TunesAppState extends State<TunesApp> {
               title: 'tunes',
               debugShowCheckedModeBanner: false,
               theme: buildTunesTheme(mq),
-              home: AppShell(
-                client: widget.client,
-                grants: widget.grants,
-                auth: widget.auth,
-                player: widget.player,
-                store: widget.store,
-                reachability: widget.reachability,
-                manifestStore: widget.manifestStore,
-                queueStore: widget.queueStore,
-                settings: widget.settings,
-                history: widget.history,
-                downloads: _downloads,
-              ),
+              navigatorObservers: [_rootGuard],
+              home: _shell(),
             ),
           ),
         ),
       ),
     );
   }
+
+  /// The shell as the Navigator's one route. Also what the guard puts back if
+  /// that route is ever popped, which would otherwise leave a blank screen over
+  /// a playing app.
+  late final RootRouteGuard _rootGuard = RootRouteGuard(
+    restore: () => MaterialPageRoute<void>(builder: (_) => _shell()),
+  );
+
+  Widget _shell() => AppShell(
+    client: widget.client,
+    grants: widget.grants,
+    artStore: widget.artStore,
+    auth: widget.auth,
+    player: widget.player,
+    store: widget.store,
+    reachability: widget.reachability,
+    manifestStore: widget.manifestStore,
+    queueStore: widget.queueStore,
+    settings: widget.settings,
+    history: widget.history,
+    downloads: _downloads,
+  );
 }
 
 class AppShell extends StatefulWidget {
@@ -438,6 +479,7 @@ class AppShell extends StatefulWidget {
     super.key,
     required this.client,
     required this.grants,
+    required this.artStore,
     required this.auth,
     required this.player,
     required this.store,
@@ -453,6 +495,9 @@ class AppShell extends StatefulWidget {
 
   /// Signed media capabilities, consulted when building artwork URLs.
   final MediaGrants grants;
+
+  /// Covers saved on the phone; filled after each sync.
+  final ArtStore artStore;
 
   /// Device identity, so Settings can offer enrolment.
   final TunesAuth auth;
@@ -502,6 +547,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, int> _playsByArtist = const {};
   List<ManifestTrack> _onRepeat = const [];
   List<ManifestTrack> _listenAgain = const [];
+  List<Mix> _mixes = const [];
+  List<UnheardAlbum> _unheard = const [];
   bool _syncing = false;
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
@@ -558,6 +605,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Hydrate from the store before kicking off a sync, so the sync's
     // setState doesn't race against a stale in-memory snapshot.
     _bootstrap();
+    // After the first frame, so there is a screen under it to come back to.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowWhatsNew());
+  }
+
+  /// The first time a release opens, say what is new in it. Once per pack: it is
+  /// recorded as soon as it is shown, so being interrupted does not bring it
+  /// back, and Settings can open it again whenever.
+  void _maybeShowWhatsNew() {
+    if (!mounted) return;
+    if (widget.settings.whatsNewSeen == kWhatsNewId) return;
+    unawaited(widget.settings.setWhatsNewSeen(kWhatsNewId));
+    _openWhatsNew();
+  }
+
+  void _openWhatsNew() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (page) => WhatsNewPage(onDone: () => Navigator.of(page).pop()),
+      ),
+    );
   }
 
   @override
@@ -603,6 +671,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused) {
       unawaited(_persistResume());
     }
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadMixes());
+    }
   }
 
   /// Newest first, and only tracks still in the library -- history outlives
@@ -637,7 +708,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// the library, so a rail never offers something that cannot be played.
   Future<void> _loadDerivedRails() async {
     final top = await widget.history.topShas();
-    final again = await widget.history.listenAgainShas();
+    // Kept apart from what is on repeat: the two are about different stretches
+    // of time and must never offer the same song.
+    final again = await widget.history.listenAgainShas(exclude: top.toSet());
     if (!mounted) return;
     final manifest = _manifest;
     if (manifest == null) return;
@@ -650,6 +723,45 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _onRepeat = resolve(top);
       _listenAgain = resolve(again);
     });
+    await _loadMixes();
+  }
+
+  /// Playlists built from how you listen, and records you never opened.
+  ///
+  /// Rebuilt when a listen finishes, after a sync, and when the app comes back to
+  /// the front (an hour passing is what brings Late Night in, with no play to
+  /// signal it). Cheap: a thousand tracks and the history's finished plays.
+  Future<void> _loadMixes() async {
+    final manifest = _manifest;
+    if (manifest == null || !mounted) return;
+    final stamps = await widget.history.playStamps();
+    if (!mounted) return;
+    final liked = LikesScope.maybeOf(context)?.shas.toSet() ?? const <String>{};
+    final inputs = MixInputs(
+      tracks: manifest.tracks,
+      artists: manifest.artists,
+      releases: manifest.releases,
+      stamps: stamps,
+      liked: liked,
+      now: DateTime.now(),
+    );
+    setState(() {
+      _mixes = buildMixes(inputs);
+      _unheard = unheardAlbums(inputs);
+    });
+  }
+
+  void _openMix(Mix mix) {
+    final tag = mix.tracks.isEmpty ? '' : mix.tracks.first.sha.substring(0, 6);
+    _nav.openPanel(
+      TunesPanels.mix('${mix.id}-${mix.tracks.length}-$tag'),
+      () => MixPage(
+        mix: mix,
+        player: widget.player,
+        artUrlFor: _artUrlFor,
+        playlists: PlaylistScope.maybeOf(context),
+      ),
+    );
   }
 
   /// Folds the play counters into a per-act tally for the discover ranking.
@@ -677,6 +789,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_wasOffline && !offline) {
       _reload();
     }
+    // Pages already visited were built from the library as it was: offline that
+    // is only what is downloaded. Forget them, so the next visit is built fresh.
+    if (_wasOffline != offline) _nav.forgetUnused();
     _wasOffline = offline;
   }
 
@@ -748,6 +863,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               .toList()
         : manifest.tracks;
     if (library.isEmpty) return null;
+    _radioSession.reach = widget.settings.radioReach;
     return _radioEngine.next(
       library: library,
       session: _radioSession,
@@ -989,7 +1105,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // common case on a warm launch, and priming only on the rare path would
     // have left exactly the launches people notice paying the full cost.
     final current = _manifest;
-    if (mounted && synced && current != null) unawaited(_primeGrants(current));
+    if (mounted && synced && current != null) {
+      unawaited(_primeGrants(current));
+      unawaited(_saveCovers(current));
+    }
+  }
+
+  /// Keeps every cover on the phone, so the library looks the same on a train
+  /// as it does at home. Runs after a real sync, which is when the server is
+  /// known to be reachable, and goes through the authenticated client rather
+  /// than signed URLs, which expire during a long session.
+  Future<void> _saveCovers(TunesManifest manifest) async {
+    final shas = <String>{
+      for (final t in manifest.tracks)
+        if (t.artSha != null) t.artSha!,
+      for (final a in manifest.artists)
+        if (a.artSha != null) a.artSha!,
+    };
+    await widget.artStore.prefetch(shas);
   }
 
   /// Mints artwork grants for everything the library can show.
@@ -1017,6 +1150,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // library with fifty-four by six.
       final albums = await widget.client.missing(limit: 200);
       if (mounted) setState(() => _missingAlbums = albums);
+      unawaited(
+        widget.artStore.prefetch([
+          for (final a in albums)
+            if (a.artSha != null) a.artSha!,
+        ]),
+      );
     } catch (_) {
       // An older daemon answers 404 here, and offline answers nothing. Both
       // mean "cannot say", so leave whatever we last knew on screen rather
@@ -1106,6 +1245,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       () => SettingsPage(
         settings: widget.settings,
         auth: widget.auth,
+        onWhatsNew: _openWhatsNew,
         player: widget.player,
         endpoint: widget.client.baseUrl,
         offline: widget.reachability.offline,
@@ -1305,9 +1445,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // separation is a hairline and a surface change, not a shadow -- this
         // interface has no other shadows and one would read as a mistake.
         //
-        // Tab roots only: a panel paints its own chrome full-screen, exactly
-        // as pushed routes used to cover it.
-        bottomNavigationBar: _nav.current is PanelDest
+        // On every page but the player. The mini bar and the tabs are one dock,
+        // so the way out of an artist, an album or a playlist is always the
+        // same: the tab you want, one tap. Pages used to cover it and each
+        // supplied a mini bar of its own, some forgetting to, which is why it
+        // was there on some screens and not on others. Now Playing is the one
+        // exception: it is the layer over the app, lit by the record, and
+        // carries its own controls.
+        bottomNavigationBar:
+            _nav.current == const PanelDest(TunesPanels.nowPlaying)
             ? null
             : _buildBottomNav(),
       ),
@@ -1390,7 +1536,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('tunes', style: TypeScale.wordmark),
+                          // Home greets you; the other tabs keep the name over the
+                          // door, so each still says where you are.
+                          if (_tab == 0)
+                            ListenableBuilder(
+                              listenable: widget.settings,
+                              builder: (context, _) => Text(
+                                greetingFor(
+                                  DateTime.now(),
+                                  widget.settings.displayName,
+                                ),
+                                style: TypeScale.wordmark.copyWith(
+                                  fontSize: 28,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            )
+                          else
+                            const Text('tunes', style: TypeScale.wordmark),
                           // The library's size belongs to the wordmark, not
                           // to the feed. It used to scroll away with the
                           // first rail, which made it read as a caption on
@@ -1413,41 +1577,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ],
                 ),
               ),
-              if (offline) ...[
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    Space.md,
-                    Space.lg,
-                    0,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: Space.md,
-                    vertical: Space.sm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Tones.surfaceRaised,
-                    borderRadius: BorderRadius.circular(RadiusTokens.control),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.cloud_off_rounded,
-                        size: 16,
-                        color: Tones.textMuted,
-                      ),
-                      SizedBox(width: Space.sm),
-                      Expanded(
-                        child: Text(
-                          'Offline — playing downloads only',
-                          style: TypeScale.body,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              if (offline) const OfflineNote(),
               Expanded(child: _buildContent(offline)),
             ],
           );
@@ -1461,7 +1591,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _buildBottomNav() {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: Tones.surface,
+        color: Tones.base,
         border: Border(top: BorderSide(color: Tones.hairline)),
       ),
       // Bottom only: the top edge of this bar is the app's own, and the
@@ -1471,69 +1601,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            DownloadsBar(
+              manager: _downloads,
+              onTap: () {
+                final bySha = {
+                  for (final t in _manifest?.tracks ?? const <ManifestTrack>[])
+                    t.sha: t,
+                };
+                DownloadsSheet.show(
+                  context,
+                  manager: _downloads,
+                  trackFor: (sha) => bySha[sha],
+                );
+              },
+            ),
             MiniPlayerBar(
               player: widget.player,
               onTap: _openNowPlaying,
               artUrlFor: _artUrlFor,
             ),
-            NavigationBarTheme(
-              data: NavigationBarThemeData(
-                // Grows with the system font scale, capped: at the largest
-                // settings a fixed 64 clips the labels, and an uncapped bar
-                // eats the screen those labels are there to navigate.
-                height:
-                    64 *
-                    MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.4),
-                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                indicatorColor: Colors.transparent,
-                backgroundColor: Tones.surface,
-                surfaceTintColor: Colors.transparent,
-                labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return TypeScale.caption.copyWith(
-                    color: selected ? Tones.text : Tones.textMuted,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  );
-                }),
-              ),
-              child: NavigationBar(
-                selectedIndex: _tab,
-                onDestinationSelected: _onTabSelected,
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.home_outlined, color: Tones.textMuted),
-                    selectedIcon: Icon(Icons.home_rounded, color: Tones.text),
-                    label: 'Home',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(
-                      Icons.travel_explore_outlined,
-                      color: Tones.textMuted,
-                    ),
-                    selectedIcon: Icon(
-                      Icons.travel_explore_rounded,
-                      color: Tones.text,
-                    ),
-                    label: 'Discover',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.search_rounded, color: Tones.textMuted),
-                    selectedIcon: Icon(Icons.search_rounded, color: Tones.text),
-                    label: 'Search',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(
-                      Icons.library_music_outlined,
-                      color: Tones.textMuted,
-                    ),
-                    selectedIcon: Icon(
-                      Icons.library_music_rounded,
-                      color: Tones.text,
-                    ),
-                    label: 'Library',
-                  ),
-                ],
-              ),
+            TunesNavBar(
+              selectedIndex: _tab,
+              onSelected: _onTabSelected,
+              items: const [
+                TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
+                TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
+                TunesNavItem(glyph: NavGlyph.search, label: 'Search'),
+                TunesNavItem(glyph: NavGlyph.library, label: 'Library'),
+              ],
             ),
           ],
         ),
@@ -1553,12 +1648,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_manifest!.tracks.isEmpty && _lastSyncError != null) {
       return _buildUnreachableState();
     }
-    final manifest = _manifest!;
+    // Without a connection the library is what is on this phone. Everything
+    // below, the lists and search and the pages opened from them, is built from
+    // this, so nothing is offered that cannot be played and a search cannot come
+    // back empty because the match was a song that was never downloaded.
+    bool held(String sha) => widget.store.pathFor(sha) != null;
+    final manifest = offline ? _manifest!.onlyHeld(held) : _manifest!;
     final tracks = manifest.tracks;
+    List<ManifestTrack> playable(List<ManifestTrack> l) => offline
+        ? [
+            for (final t in l)
+              if (held(t.sha)) t,
+          ]
+        : l;
     final content = switch (_tab) {
       1 => DiscoverView(
-        gaps: collectionGaps(missing: _missingAlbums, plays: _playsByArtist),
-        threads: _threads,
+        gaps: offline
+            ? const []
+            : collectionGaps(missing: _missingAlbums, plays: _playsByArtist),
+        threads: offline
+            ? [
+                for (final r in _threads)
+                  if (playable(r.tracks).length >= 3)
+                    ThreadRail(
+                      act: r.act,
+                      title: r.title,
+                      subtitle: r.subtitle,
+                      tracks: playable(r.tracks),
+                    ),
+              ]
+            : _threads,
         offline: offline,
         artUrlFor: _artUrlFor,
         onArtistTap: (artist) => _openArtist(artist, manifest),
@@ -1593,14 +1712,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onAlbumTap: (release) => _openAlbum(release, manifest),
         queueStore: widget.queueStore,
         manifestStore: widget.manifestStore,
+        recents: playable(_recents),
       ),
       _ => HomeView(
         manifest: manifest,
-        recents: _recents,
-        missingAlbums: _missingAlbums,
+        missingAlbums: offline ? const [] : _missingAlbums,
         onRefresh: _refresh,
-        onRepeat: _onRepeat,
-        listenAgain: _listenAgain,
+        onRepeat: playable(_onRepeat),
+        listenAgain: playable(_listenAgain),
+        mixes: [
+          for (final m in _mixes)
+            if (playable(m.tracks).length >= 8)
+              Mix(
+                id: m.id,
+                title: m.title,
+                note: m.note,
+                kind: m.kind,
+                tracks: playable(m.tracks),
+              ),
+        ],
+        unheard: offline
+            ? [
+                for (final u in _unheard)
+                  if (u.release.trackShas.any(held)) u,
+              ]
+            : _unheard,
+        onMixTap: _openMix,
         onArtistTap: (artist) => _openArtist(artist, manifest),
         onAlbumTap: (release) => _openAlbum(release, manifest),
         onPlay: (list, index) {

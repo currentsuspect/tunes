@@ -198,6 +198,11 @@ class Artists extends Table {
   TextColumn get artSha => text().nullable()();
   TextColumn get searchText => text().withDefault(const Constant(''))();
 
+  /// The artist's crowd tags from the box (genres: "trap", "cloud rap"), as a
+  /// JSON array. Kept so mixes can tell what a library is made of; an artist the
+  /// providers had nothing on has an empty list, which is the truth.
+  TextColumn get tagsJson => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column> get primaryKey => {name};
 }
@@ -234,7 +239,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -302,6 +307,11 @@ class TunesDatabase extends _$TunesDatabase {
         // playing fine for months.
         await m.createTable(playlists);
         await m.createTable(playlistItems);
+      }
+      if (from < 10) {
+        // v9 -> v10: artist tags. One new column with a default, so existing
+        // rows read as "no tags" until the next sync fills them in.
+        await m.addColumn(artists, artists.tagsJson);
       }
     },
   );

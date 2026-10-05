@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/missing_cover.dart';
+import '../../core/ui/initials.dart';
 import '../../core/ui/pressable.dart';
+import '../../core/ui/shelf_widgets.dart';
 import '../../domain/collection_gaps.dart';
 import '../../domain/manifest.dart';
 import '../../domain/threads.dart';
@@ -65,49 +68,30 @@ class DiscoverView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: Space.xl),
       children: [
+        _Hero(threads: threads.length, records: releases),
+        const _ReachDial(),
         if (threads.isNotEmpty) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Follow the thread', style: TypeScale.heading),
-                SizedBox(height: Space.xs),
-                Text(
-                  'Guest spots and deep cuts around the acts you actually '
-                  'play. Built from your library and your listening, nothing '
-                  'else.',
-                  style: TypeScale.caption,
-                ),
-              ],
-            ),
+          const SectionHeader(
+            'Follow the thread',
+            padding: Space.lg,
+            note:
+                'Guest spots and deep cuts around the acts you play. Built '
+                'from your library and your listening, nothing else.',
           ),
           for (final rail in threads)
             _ThreadRail(rail: rail, artUrlFor: artUrlFor, onPlay: onPlay),
           const SizedBox(height: Space.md),
         ],
         if (gaps.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Complete your collection',
-                  style: TypeScale.heading,
-                ),
-                const SizedBox(height: Space.xs),
-                Text(
-                  '$releases ${releases == 1 ? 'release' : 'releases'} by '
-                  '${gaps.length} ${gaps.length == 1 ? 'artist' : 'artists'} '
-                  'already in your library. '
-                  '${hasHistory ? 'Ordered by what you actually play.' : 'Ordered by what you own most of, until there is listening to go on.'}',
-                  style: TypeScale.caption.copyWith(height: 1.5),
-                ),
-              ],
-            ),
+          SectionHeader(
+            'Complete your collection',
+            padding: Space.lg,
+            note:
+                '$releases ${releases == 1 ? 'release' : 'releases'} by '
+                '${gaps.length} ${gaps.length == 1 ? 'artist' : 'artists'} you '
+                'already have. '
+                '${hasHistory ? 'Ordered by what you actually play.' : 'Ordered by what you own most of, until there is listening to go on.'}',
           ),
-          const SizedBox(height: Space.md),
         ],
         for (final gap in gaps)
           _ArtistSection(
@@ -116,14 +100,17 @@ class DiscoverView extends StatelessWidget {
             onArtistTap: onArtistTap,
           ),
         if (gaps.isNotEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
             child: Text(
               'Only artists whose catalogue could be confirmed against something '
               'you already own appear here. Asking for a common name returns the '
               'wrong act often enough that guessing would be worse than a short '
               'list.',
-              style: TypeScale.caption,
+              style: TypeScale.note.copyWith(
+                fontSize: 13,
+                color: Tones.textMuted,
+              ),
             ),
           ),
       ],
@@ -135,6 +122,88 @@ class DiscoverView extends StatelessWidget {
 /// covers. Tapping a track plays the rail from there, so the rest of the
 /// suggestion follows on -- a rail that ends after one song is a list, not
 /// a discovery.
+/// What this page is for, and how much there is, before any of it.
+class _Hero extends StatelessWidget {
+  const _Hero({required this.threads, required this.records});
+
+  final int threads;
+  final int records;
+
+  @override
+  Widget build(BuildContext context) {
+    final facts = [
+      if (threads > 0) '$threads ${threads == 1 ? 'thread' : 'threads'}',
+      if (records > 0)
+        '$records ${records == 1 ? 'record' : 'records'} to find',
+    ].join('  ·  ');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.lg, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Discover', style: TypeScale.display.copyWith(fontSize: 34)),
+          const SizedBox(height: Space.xs),
+          Text(
+            'What is already yours that you have not found yet, and what is '
+            'missing from the artists you love.',
+            style: TypeScale.note.copyWith(
+              fontSize: 15,
+              color: Tones.textMuted,
+            ),
+          ),
+          if (facts.isNotEmpty) ...[
+            const SizedBox(height: Space.sm),
+            Text(facts, style: TypeScale.mono),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A dashed rounded outline around [child], for something that is not here yet.
+class _Ghost extends StatelessWidget {
+  const _Ghost({required this.size, required this.child});
+
+  final double size;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      foregroundPainter: const _DashedBorder(),
+      child: SizedBox(width: size, height: size, child: child),
+    );
+  }
+}
+
+class _DashedBorder extends CustomPainter {
+  const _DashedBorder();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(RadiusTokens.card),
+    );
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = Tones.textMuted.withValues(alpha: 0.55);
+    final path = Path()..addRRect(rrect);
+    for (final metric in path.computeMetrics()) {
+      var d = 0.0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, d + 5), paint);
+        d += 9;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedBorder old) => false;
+}
+
 class _ThreadRail extends StatelessWidget {
   const _ThreadRail({
     required this.rail,
@@ -151,31 +220,11 @@ class _ThreadRail extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            Space.lg,
-            Space.lg,
-            Space.sm,
-            Space.sm,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(rail.title, style: TypeScale.heading),
-                    Text(rail.subtitle, style: TypeScale.caption),
-                  ],
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () => onPlay(rail.tracks, 0),
-                icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                label: const Text('Play'),
-              ),
-            ],
-          ),
+        SectionHeader(
+          rail.title,
+          padding: Space.lg,
+          note: rail.subtitle,
+          trailing: PlayPill(onTap: () => onPlay(rail.tracks, 0)),
         ),
         SizedBox(
           height: 176,
@@ -209,7 +258,7 @@ class _ThreadRail extends StatelessWidget {
                       const SizedBox(height: Space.xs),
                       Text(
                         t.title,
-                        style: TypeScale.body,
+                        style: cardTitleStyle(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -262,7 +311,6 @@ class _ArtistSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final completion = gap.completion;
     return Padding(
       padding: const EdgeInsets.only(bottom: Space.lg),
       child: Column(
@@ -279,23 +327,34 @@ class _ArtistSection extends StatelessWidget {
               ),
               child: Row(
                 children: [
+                  InitialsAvatar(name: gap.artist, size: 44),
+                  const SizedBox(width: Space.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           gap.artist,
-                          style: TypeScale.body.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: TypeScale.display.copyWith(fontSize: 20),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
-                        Text(_subtitle(), style: TypeScale.caption),
+                        Text(_subtitle(), style: TypeScale.mono),
                       ],
                     ),
                   ),
+                  // Absent rather than empty when the catalogue is unknown: a
+                  // ring at zero would claim the library holds none of this act.
+                  if (gap.ownedReleases != null &&
+                      gap.totalReleases != null) ...[
+                    const SizedBox(width: Space.sm),
+                    ProgressRing(
+                      have: gap.ownedReleases!,
+                      total: gap.totalReleases!,
+                    ),
+                  ],
+                  const SizedBox(width: Space.xs),
                   const Icon(
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
@@ -305,26 +364,6 @@ class _ArtistSection extends StatelessWidget {
               ),
             ),
           ),
-          // Absent rather than empty when completion is unknown: a bar at zero
-          // would claim the library holds none of this act.
-          if (completion != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.lg,
-                0,
-                Space.lg,
-                Space.sm,
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: completion,
-                  minHeight: 4,
-                  backgroundColor: Tones.surfaceRaised,
-                  valueColor: const AlwaysStoppedAnimation(Tones.primary),
-                ),
-              ),
-            ),
           SizedBox(
             height: 190,
             child: ListView.separated(
@@ -341,20 +380,23 @@ class _ArtistSection extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Opacity(
-                          // Reads as "not here yet" beside the fully opaque
-                          // covers of everything the library does hold.
-                          opacity: 0.72,
-                          child: MissingCover(
-                            album: album,
-                            artUrlFor: artUrlFor,
-                            size: 140,
+                        // A dashed outline and a dimmer sleeve: a place on the shelf
+                        // that is empty, not a picture that failed to load.
+                        _Ghost(
+                          size: 140,
+                          child: Opacity(
+                            opacity: 0.7,
+                            child: MissingCover(
+                              album: album,
+                              artUrlFor: artUrlFor,
+                              size: 140,
+                            ),
                           ),
                         ),
                         const SizedBox(height: Space.xs),
                         Text(
                           album.title,
-                          style: TypeScale.body,
+                          style: cardTitleStyle(),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -362,8 +404,8 @@ class _ArtistSection extends StatelessWidget {
                           [
                             if (album.type != null) album.type!,
                             if (album.year != null) album.year!,
-                          ].join(' · '),
-                          style: TypeScale.caption,
+                          ].join('  ·  '),
+                          style: TypeScale.mono,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -375,6 +417,86 @@ class _ArtistSection extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// How far out the radio goes, as one dial: familiar at one end, further out at
+/// the other. It is the same setting the radio reads when the queue runs out,
+/// so moving it here changes what plays next, not just what this page says.
+class _ReachDial extends StatelessWidget {
+  const _ReachDial();
+
+  static String _line(double v) {
+    if (v < 0.25) return 'Staying close to what you play';
+    if (v < 0.6) return 'A little off the path';
+    if (v < 0.85) return 'Drifting further out';
+    return 'Surprise me';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = SettingsScope.maybeOf(context);
+    if (settings == null) return const SizedBox.shrink();
+    final v = settings.radioReach;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        Space.lg,
+        Space.sm,
+        Space.lg,
+        Space.md,
+      ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          Space.md,
+          Space.md,
+          Space.md,
+          Space.sm,
+        ),
+        decoration: BoxDecoration(
+          color: Tones.surface,
+          borderRadius: BorderRadius.circular(RadiusTokens.card),
+          border: Border.all(color: Tones.hairline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Radio', style: TypeScale.mono),
+            const SizedBox(height: Space.xs),
+            AnimatedSwitcher(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              child: Text(
+                _line(v),
+                key: ValueKey(_line(v)),
+                style: TypeScale.note.copyWith(fontSize: 17, color: Tones.text),
+              ),
+            ),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                activeTrackColor: Tones.primary,
+                inactiveTrackColor: Tones.hairline,
+                thumbColor: Tones.text,
+                overlayColor: Tones.primary.withValues(alpha: 0.15),
+              ),
+              child: Slider(
+                value: v,
+                onChanged: (x) => settings.setRadioReach(x),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('familiar', style: TypeScale.caption),
+                Text('further out', style: TypeScale.caption),
+              ],
+            ),
+            const SizedBox(height: Space.xs),
+          ],
+        ),
       ),
     );
   }
