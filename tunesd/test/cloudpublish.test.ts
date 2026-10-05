@@ -200,3 +200,19 @@ describe("publishAudioFile", () => {
     ).toBe(false);
   });
 });
+
+describe("publishAudioFile URL", () => {
+  it("PUTs to <base>/audio/<sha>, so the base is the /internal prefix", async () => {
+    const urls: string[] = [];
+    const ok = await publishAudioFile({
+      baseUrl: "https://t.example/internal",
+      key: "k",
+      sha: "a".repeat(64),
+      bytes: new Uint8Array([1]),
+      log,
+      fetchFn: (async (u: unknown) => (urls.push(String(u)), new Response("{}"))) as any,
+    });
+    expect(ok).toBe(true);
+    expect(urls).toEqual([`https://t.example/internal/audio/${"a".repeat(64)}`]);
+  });
+});

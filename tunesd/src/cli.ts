@@ -1249,9 +1249,11 @@ async function main(): Promise<void> {
     } catch {
       void undefined; // first run
     }
-    const audioBase = env.publishUrl?.replace(/\/publish\/?$/, "/audio") ?? "";
+    // publishAudioFile appends /audio/<sha> itself, so the base is the
+    // /internal prefix (…/internal/publish -> …/internal), not …/internal/audio.
+    const audioBase = env.publishUrl?.replace(/\/publish\/?$/, "") ?? "";
     const audioPusher =
-      env.publishUrl && env.publishKey && /\/audio$/.test(audioBase)
+      env.publishUrl && env.publishKey && audioBase !== env.publishUrl && audioBase !== ""
         ? new AudioPusher(audioLedger, {
             log,
             read: async (sha) => {
