@@ -1,5 +1,9 @@
 name = "tunes-fetch"
 main = "src/index.ts"
+
+# Reached only through the tunes-auth service binding. The public workers.dev
+# address answered /ping and /sweep for anyone, so it is off.
+workers_dev = false
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]
 

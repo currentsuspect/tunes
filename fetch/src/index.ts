@@ -5,6 +5,7 @@ import { Logger } from "teleproto/extensions/Logger.js";
 import { verifyMediaUrl } from "./grant.js";
 import { pickVictims, sniffMime } from "./policy.js";
 import { Flight, Gate, runDownload } from "./flight.js";
+import { serveHit, type R2Like } from "./hit.js";
 
 interface Env {
   TG_API_ID: string;
@@ -19,8 +20,11 @@ interface Env {
   FETCH_DAILY_CAP?: string;
 }
 
-/** 3 GB: ORIGIN §4. R2 free tier is 10 GB; the cache stays well inside it. */
-const CACHE_BUDGET = 3 * 1024 * 1024 * 1024;
+/** 8 GB. ORIGIN §4 sized this at 3 GB for two listeners; with four people on
+ * different music a 12 GB library misses far more often, and every miss is a
+ * slow Telegram fetch. R2 egress is free and the free tier is 10 GB, so 8 GB
+ * (evicting down to 7.2 GB) keeps the bill at zero. */
+const CACHE_BUDGET = 8 * 1024 * 1024 * 1024;
 
 const CONNECT_MS = 15_000;
 const LOCATE_MS = 10_000;
@@ -343,6 +347,13 @@ export class Fetcher {
       prefix: "a:",
     });
     for (const [k, v] of per) times.set(k.slice(2), v.at);
+    // Hits are served off the DO and record recency in D1.
+    const { results } = await this.env.DB.prepare(
+      "SELECT sha, at FROM fetch_access"
+    ).all<{ sha: string; at: number }>();
+    for (const r of results ?? []) {
+      times.set(r.sha, Math.max(times.get(r.sha) ?? 0, r.at));
+    }
 
     const entries: { sha: string; size: number; accessed?: number }[] = [];
     let cursor: string | undefined;
@@ -361,6 +372,14 @@ export class Fetcher {
     );
     await Promise.all(victims.map((sha) => this.env.CACHE.delete(sha)));
     await this.state.storage.delete(victims.map((sha) => `a:${sha}`));
+    for (let i = 0; i < victims.length; i += 50) {
+      const batch = victims.slice(i, i + 50);
+      await this.env.DB.prepare(
+        `DELETE FROM fetch_access WHERE sha IN (${batch.map(() => "?").join(",")})`
+      )
+        .bind(...batch)
+        .run();
+    }
     if (legacy) {
       for (const sha of victims) delete legacy[sha];
       await this.state.storage.put("access", legacy);
@@ -492,8 +511,74 @@ export class Fetcher {
   }
 }
 
+/** When each track's last-served time was last written, per isolate. Recency
+ * only has to be right to within minutes, so most hits write nothing. */
+const touched = new Map<string, number>();
+const TOUCH_EVERY_MS = 10 * 60 * 1000;
+
+async function touch(env: Env, sha: string, size: number): Promise<void> {
+  const now = Date.now();
+  const last = touched.get(sha);
+  if (last !== undefined && now - last < TOUCH_EVERY_MS) return;
+  touched.set(sha, now);
+  if (touched.size > 5000) touched.clear();
+  try {
+    await env.DB.prepare(
+      "INSERT INTO fetch_access (sha, at, size) VALUES (?, ?, ?) ON CONFLICT(sha) DO UPDATE SET at = excluded.at, size = excluded.size"
+    )
+      .bind(sha, now, size)
+      .run();
+  } catch {
+    // Recency is an optimisation for eviction, never a reason to fail a play.
+  }
+}
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(req.url);
+    // Only the track path is public. /ping (opens a Telegram connection and
+    // names the account) and /sweep (evicts the cache) used to be reachable
+    // by anyone who found the workers.dev address; they are the DO's own.
+    const m = /^\/t\/([0-9a-f]{64})$/.exec(url.pathname);
+    if (!m || (req.method !== "GET" && req.method !== "HEAD")) {
+      return new Response("not found", { status: 404 });
+    }
+    const sha = m[1]!;
+
+    const secret = env.MEDIA_SECRET ?? "";
+    const verdict =
+      secret === ""
+        ? { ok: false as const, reason: "missing" as const }
+        : await verifyMediaUrl(
+            `/t/${sha}`,
+            url.searchParams,
+            secret,
+            Math.floor(Date.now() / 1000)
+          );
+    if (!verdict.ok) {
+      return Response.json(
+        { ok: false, err: verdict.reason },
+        { status: verdict.reason === "expired" ? 403 : 401 }
+      );
+    }
+
+    // Cached tracks are served here, off the Durable Object.
+    if (url.searchParams.get("warm") === "1") {
+      if (await env.CACHE.head(sha)) return new Response(null, { status: 204 });
+    } else {
+      const hit = await serveHit(
+        env.CACHE as unknown as R2Like,
+        sha,
+        req.headers.get("range"),
+        req.method === "HEAD"
+      );
+      if (hit) {
+        ctx.waitUntil(touch(env, sha, hit.size));
+        return hit.response;
+      }
+    }
+
+    // Miss: the DO owns the Telegram connection.
     const stub = env.FETCHER.getByName("live");
     return stub.fetch(req);
   },
