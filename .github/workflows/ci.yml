@@ -85,6 +85,11 @@ jobs:
       # than its own, so without the offset those phones would never be offered
       # one. Releases are tagged with the same number, so tunesd's integer
       # comparison still holds.
+      # --build-number is the Android versionCode. Every build used to carry
+      # versionCode 1 (pubspec 0.1.0+1), so an update installed from inside the
+      # app was the same version as the one it replaced, and on a test phone the
+      # system installer said "App installed" while the package stayed put. It
+      # now rises with the build number, so every update is a real upgrade.
       - name: Release APK builds
         working-directory: app
         run: |
@@ -93,6 +98,7 @@ jobs:
             --dart-define=TUNESD_URL=https://tunes.aestra.studio \
             --dart-define=GIT_COMMIT=${{ github.sha }} \
             --dart-define=BUILD_NUMBER=$((${{ github.run_number }} + 1000)) \
+            --build-number=$((${{ github.run_number }} + 1000)) \
             --dart-define=CHANNEL=dev
 
       - name: Upload release APK
