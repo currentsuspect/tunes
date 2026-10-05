@@ -19,6 +19,8 @@ import { buildManifest, isCategoryRelease, releaseArtKey } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
+import { LyricStore, runLyricPass, type LyricTarget } from "./lyricstore.js";
+import { LrclibClient } from "./lyrics.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -321,6 +323,11 @@ async function main(): Promise<void> {
 
     // name -> crowd tags + popularity, kept out of enrich.json because it is
     // about the artist, not the file.
+    // Lyrics: found by the daemon, or typed by a listener, and served to every
+    // phone through the manifest (see lyricstore.ts).
+    const lyricStore = await new LyricStore(join(env.dataDir, "lyrics.json")).load();
+    const lrclib = new LrclibClient();
+
     const artistMetaFile = join(env.dataDir, "artist-meta.json");
     const artistMeta = new Map<string, { tags: string[]; listeners: number | null; fetchedAt: string }>();
     try {
@@ -1206,7 +1213,8 @@ async function main(): Promise<void> {
         linkMeta,
         state.allAddedAt(),
         embeddedArt,
-        releaseArt
+        releaseArt,
+        lyricStore.forManifest()
       );
     };
 
@@ -1303,6 +1311,37 @@ async function main(): Promise<void> {
     // Telegram tells us about new posts; the poll below is only the safety net.
     const wake = new Wake({ settleMs: 5_000, minGapMs: 20_000 });
 
+    // Fetch lyrics for tracks that have none, a few at a time. Not awaited by
+    // the cycle: a slow or absent LRCLIB must never delay the scan schedule.
+    let lyricPassRunning = false;
+    const fetchLyrics = async (): Promise<void> => {
+      if (lyricPassRunning) return;
+      lyricPassRunning = true;
+      try {
+        const m = await manifestBuilder();
+        const targets: LyricTarget[] = m.tracks.map((t) => ({
+          sha: t.sha,
+          title: t.title,
+          artist: t.primaryArtist ?? t.artist,
+          album: t.album,
+          durationMs: t.durationMs,
+        }));
+        const r = await runLyricPass({
+          tracks: targets,
+          store: lyricStore,
+          client: lrclib,
+          limit: 40,
+        });
+        if (r.found > 0 || r.none > 0 || r.stoppedEarly) {
+          log.info({ event: "LYRICS_PASS", ...r });
+        }
+      } catch (e) {
+        log.warn({ event: "LYRICS_PASS_FAILED", err: String(e).slice(0, 200) });
+      } finally {
+        lyricPassRunning = false;
+      }
+    };
+
     const run = async (): Promise<void> => {
       wake.started();
       const result = await engine.runCycle(channels);
@@ -1314,6 +1353,7 @@ async function main(): Promise<void> {
       });
       // Best effort and not awaited: the scan schedule is ban-safety, publishing
       // must not shift it, and a failure only logs.
+      void fetchLyrics();
       publishSoon.request();
       void queueAudioBacklog().catch((e) =>
         log.warn({ event: "AUDIO_BACKLOG_FAILED", err: String(e).slice(0, 160) })
@@ -1377,7 +1417,10 @@ async function main(): Promise<void> {
         () => releaseArt,
         env.host,
         updates,
-        onDemand
+        onDemand,
+        lyricStore,
+        // A listener's lyrics go to the edge soon, not at the next scan.
+        () => publishSoon.request()
       );
       await server.start();
       void runEnrichPass()

@@ -8,6 +8,7 @@ import type { OnDemandFetcher } from "./ondemand.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
+import { kMaxLyricChars, type LyricStore } from "./lyricstore.js";
 import type {
   ArtistDiscography,
   DiscographyGroup,
@@ -74,7 +75,13 @@ export class ManifestServer {
     /// On-demand fetch for store misses (ORIGIN step 1). Null serves the old
     /// way: a miss is a 404. Optional so existing callers and tests that only
     /// serve music are unchanged.
-    private readonly onDemand: OnDemandFetcher | null = null
+    private readonly onDemand: OnDemandFetcher | null = null,
+    /// Where listeners' lyrics live, so one person adding them adds them for
+    /// everyone. Null leaves PUT /lyrics unavailable and /changes unchanged.
+    private readonly lyrics: LyricStore | null = null,
+    /// Told after a listener's lyrics are stored, so the daemon can put the new
+    /// manifest on the edge now instead of at the next cycle.
+    private readonly onLyricsChanged: (() => void) | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -152,14 +159,69 @@ export class ManifestServer {
               return Number.isFinite(ts) && ts > cutoffMs;
             })
             .map((t) => t.sha);
+          // Tracks whose lyrics were added or changed since the phone last
+          // looked. A new lyric adds no track, so addedShas alone would tell a
+          // phone nothing had happened.
+          const lyricsChanged = this.lyrics
+            ? this.lyrics.changedSince(cutoffMs)
+            : [];
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(
             JSON.stringify({
               generatedAt: manifest.generatedAt,
               integrity: manifest.integrity,
               addedShas: added,
+              lyricsChanged,
             }),
           );
+          return;
+        }
+
+        // A listener's lyrics for a track, shared with everyone through the
+        // manifest. PUT { "lyrics": "<text>" }; empty text takes the
+        // listener's version away.
+        const lyricMatch = /^\/lyrics\/([0-9a-f]{64})$/.exec(url.pathname);
+        if (lyricMatch) {
+          if (req.method !== "PUT") {
+            res.writeHead(405, { allow: "PUT", "content-type": "text/plain" });
+            res.end("PUT only");
+            return;
+          }
+          if (!this.lyrics) {
+            res.writeHead(503, { "content-type": "text/plain" });
+            res.end("lyrics are not available");
+            return;
+          }
+          const sha = lyricMatch[1]!;
+          const manifest = await this.getManifest();
+          if (!manifest.tracks.some((t) => t.sha === sha)) {
+            res.writeHead(404, { "content-type": "text/plain" });
+            res.end("no such track");
+            return;
+          }
+          const body = await readBody(req, kMaxLyricChars * 4 + 1024);
+          let text: unknown;
+          try {
+            text = (JSON.parse(body ?? "") as { lyrics?: unknown }).lyrics;
+          } catch {
+            text = undefined;
+          }
+          if (
+            body === null ||
+            typeof text !== "string" ||
+            text.length > kMaxLyricChars
+          ) {
+            res.writeHead(400, { "content-type": "text/plain" });
+            res.end("expected { lyrics: string } of reasonable length");
+            return;
+          }
+          await this.lyrics.setUser(sha, text);
+          // The 30-second manifest cache would otherwise hide it from the next
+          // phone to ask.
+          this.lastManifest = null;
+          this.onLyricsChanged?.();
+          res.writeHead(204);
+          res.end();
           return;
         }
 
@@ -416,4 +478,20 @@ export class ManifestServer {
     createReadStream(path).pipe(res);
     return;
   }
+}
+
+/** The body of a request as text, or null when it is larger than [limit]. */
+async function readBody(
+  req: import("node:http").IncomingMessage,
+  limit: number,
+): Promise<string | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    size += buf.length;
+    if (size > limit) return null;
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }

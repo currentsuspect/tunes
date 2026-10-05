@@ -241,7 +241,8 @@ export function buildManifest(
   linkMeta: Map<string, ReleaseLinkMeta> = new Map(),
   addedAtBySha: Map<string, string> = new Map(),
   embeddedArtBySha: Map<string, string> = new Map(),
-  releaseArtByKey: Map<string, string> = new Map()
+  releaseArtByKey: Map<string, string> = new Map(),
+  lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map()
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -368,8 +369,8 @@ export function buildManifest(
         embeddedArtist: p.tags.artist?.trim() || null,
         embeddedAlbum: p.tags.album?.trim() || null,
         embeddedYear: p.tags.year ?? null,
-        lyrics: null,
-        lyricsSource: null,
+        lyrics: lyricsBySha.get(p.sha)?.lyrics ?? null,
+        lyricsSource: lyricsBySha.get(p.sha)?.source ?? null,
       };
     })
     .sort((a: ManifestTrack, b: ManifestTrack) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0));
