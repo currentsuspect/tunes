@@ -108,3 +108,20 @@ describe("State", () => {
     expect(all.has("sha-b")).toBe(true);
   });
 });
+describe("State.channelIdsSeen / sightingsFor across retired channels", () => {
+  it("includes a channel that is no longer configured", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "state-"));
+    try {
+      const s = await new State(join(dir, "state.json")).load();
+      s.markSeen("-100", 1, "a".repeat(64), "c", "f");
+      s.markSeen("-200", 2, "b".repeat(64), "c", "f");
+      expect(s.channelIdsSeen().sort()).toEqual(["-100", "-200"]);
+      // The old rule: only the configured channel.
+      expect(s.sightingsFor(["-200"]).map((r) => r.sha)).toEqual(["b".repeat(64)]);
+      // The new rule: everything ever seen.
+      expect(s.sightingsFor(s.channelIdsSeen()).map((r) => r.sha).sort()).toEqual(["a".repeat(64), "b".repeat(64)]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

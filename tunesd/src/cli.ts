@@ -1210,7 +1210,13 @@ async function main(): Promise<void> {
       try {
         const manifest = await manifestBuilder();
         const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
-        const { rows, watermark } = selectNewRows(state.sightingsFor(channelIds), rowsSince);
+        // Every channel ever seen, not just the configured ones: tracks ingested
+        // from a retired channel were never given a Telegram source in the
+        // cloud, so they 404ed there ("skips until one lands").
+        const { rows, watermark } = selectNewRows(
+          state.sightingsFor([...new Set([...channelIds, ...state.channelIdsSeen()])]),
+          rowsSince
+        );
         const manifestChanged = typeof integrity === "string" && integrity !== lastIntegrity;
         if (rows.length === 0 && !manifestChanged) return;
         const done = await publishCloud({
