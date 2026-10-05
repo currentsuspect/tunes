@@ -1423,6 +1423,11 @@ async function main(): Promise<void> {
         () => publishSoon.request()
       );
       await server.start();
+      // Lyrics are asked for on their own beat as well as after each scan: a
+      // pass is forty tracks, and a library of a thousand should not wait
+      // forty scans for them. The first one starts soon after launch.
+      setTimeout(() => void fetchLyrics(), 15_000).unref();
+      setInterval(() => void fetchLyrics(), 120_000).unref();
       void runEnrichPass()
         .then(() => publishSoon.request())
         .catch((e) => log.error({ event: "ENRICH_PASS_ERROR", err: String(e) }));

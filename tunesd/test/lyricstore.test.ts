@@ -114,19 +114,65 @@ describe("the fetch pass", () => {
     expect(asked).toBe(2);
   });
 
-  it("stops at the first outage and records nothing for it", async () => {
+  it("tries a busy service again, and records what it then finds", async () => {
+    // "503, the server is busy, retry in a moment" -- and the next try is fine.
+    const s = await new LyricStore(file).load();
+    let calls = 0;
+    const r = await runLyricPass({
+      tracks: [T(1)],
+      store: s,
+      client: {
+        find: async () => {
+          if (++calls < 3) throw new LyricsUnavailable("lrclib 503");
+          return { synced: "[00:01.00] la", plain: null, id: 4 };
+        },
+      },
+      gapMs: 0,
+      retryGapMs: 0,
+    });
+    expect(calls).toBe(3);
+    expect(r).toEqual({ found: 1, none: 0, stoppedEarly: false });
+    expect(s.get(T(1).sha)?.source).toBe("lrclib");
+  });
+
+  it("carries on to the next track when one will not answer", async () => {
     const s = await new LyricStore(file).load();
     const r = await runLyricPass({
       tracks: [T(1), T(2)],
       store: s,
       client: {
+        find: async (q) => {
+          if (q.title === "Song 1") throw new LyricsUnavailable("lrclib 503");
+          return { synced: "[00:01.00] la", plain: null, id: 4 };
+        },
+      },
+      gapMs: 0,
+      retryGapMs: 0,
+    });
+    expect(r.found).toBe(1);
+    // The one that failed is not recorded as having no lyrics.
+    expect(s.get(T(1).sha)).toBeNull();
+    expect(s.needsLookup(T(1).sha)).toBe(true);
+  });
+
+  it("stops when the service keeps failing, and records nothing", async () => {
+    const s = await new LyricStore(file).load();
+    let calls = 0;
+    const r = await runLyricPass({
+      tracks: [T(1), T(2), T(3), T(4)],
+      store: s,
+      client: {
         find: async () => {
+          calls++;
           throw new LyricsUnavailable("down");
         },
       },
       gapMs: 0,
+      retryGapMs: 0,
     });
     expect(r.stoppedEarly).toBe(true);
+    // Two tracks, three tries each, then it stops asking.
+    expect(calls).toBe(6);
     expect(s.get(T(1).sha)).toBeNull();
     expect(s.needsLookup(T(1).sha)).toBe(true);
   });

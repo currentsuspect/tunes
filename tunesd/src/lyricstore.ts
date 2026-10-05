@@ -184,42 +184,65 @@ export async function runLyricPass(opts: {
   client: Pick<LrclibClient, "find">;
   limit?: number;
   gapMs?: number;
+  /** Tries per track before it counts as a failure. */
+  attempts?: number;
+  /** Wait before the second try; grows with each one. */
+  retryGapMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }): Promise<{ found: number; none: number; stoppedEarly: boolean }> {
   const limit = opts.limit ?? 25;
   const gap = opts.gapMs ?? 1000;
+  const attempts = opts.attempts ?? 3;
+  const retryGap = opts.retryGapMs ?? 3000;
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const now = opts.now ?? Date.now;
   let found = 0;
   let none = 0;
   let asked = 0;
+  let failedInARow = 0;
   for (const t of opts.tracks) {
     if (asked >= limit) break;
     if (!opts.store.needsLookup(t.sha, now())) continue;
     if (asked > 0) await sleep(gap);
     asked += 1;
-    try {
-      const r = await opts.client.find({
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        durationMs: t.durationMs,
-      });
-      const text = r?.synced ?? r?.plain ?? null;
-      await opts.store.setFetched(
-        t.sha,
-        text ? { text, id: r?.id ?? null } : null,
-        new Date(now()),
-      );
-      if (text) found += 1;
-      else none += 1;
-    } catch (e) {
-      if (e instanceof LyricsUnavailable) {
-        return { found, none, stoppedEarly: true };
+
+    // LRCLIB answers "503 the server is busy, retry in a moment" to ordinary
+    // requests now and then, and the next one is fine. Giving up on the first
+    // would have left most of a library unasked; a few patient tries each get
+    // through, and only a service that keeps failing stops the pass.
+    let result: Awaited<ReturnType<LrclibClient["find"]>> = null;
+    let answered = false;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        result = await opts.client.find({
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          durationMs: t.durationMs,
+        });
+        answered = true;
+        break;
+      } catch (e) {
+        if (!(e instanceof LyricsUnavailable)) throw e;
+        if (attempt < attempts - 1) await sleep(retryGap * (attempt + 1));
       }
-      throw e;
     }
+    if (!answered) {
+      // Not recorded: an outage must not mark a track as lyric-less.
+      failedInARow += 1;
+      if (failedInARow >= 2) return { found, none, stoppedEarly: true };
+      continue;
+    }
+    failedInARow = 0;
+    const text = result?.synced ?? result?.plain ?? null;
+    await opts.store.setFetched(
+      t.sha,
+      text ? { text, id: result?.id ?? null } : null,
+      new Date(now()),
+    );
+    if (text) found += 1;
+    else none += 1;
   }
   return { found, none, stoppedEarly: false };
 }
