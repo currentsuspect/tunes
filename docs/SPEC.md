@@ -171,6 +171,7 @@ GET    /art/*           cover bytes
 GET    /track/*         track bytes — downloads, original bytes only
 GET    /t/*             track bytes — streams (DO + R2 + Telegram), same grant
 POST   /download        mark a track for device download
+PUT    /lyrics/*         a listener's lyrics for a track, shared with everyone (bearer token; added 2026-10-05)
 
 POST   /auth/redeem     invite code → device enrolment + refresh token
 POST   /auth/token      refresh token → short-lived access token
@@ -178,6 +179,8 @@ DELETE /auth/device/*   revoke one device
 ```
 
 Any new capability requires a new endpoint, which requires a spec change. The app must never grow into another backend: no crawling, no tagging, no Telegram knowledge inside the app process. This boundary is what keeps the phone fast, thin, and ban-safe.
+
+**Lyrics are shared, and `PUT /lyrics/<sha>` is the one write a phone makes to the library** (added 2026-10-05). Before it, a lyric typed on a phone stayed on that phone: two people with the same library saw different lyrics and a reinstall lost them. The body is `{ "lyrics": "<text, LRC or plain>" }`; empty text takes the listener's version away. A listener's lyrics win over anything the daemon fetched, are stored by the daemon, and reach every phone through the manifest (`lyrics`, `lyricsSource`). `/changes` also reports `lyricsChanged`, because a new lyric adds no track. Unlike every other route it changes what other people see, so the edge requires a bearer token for it and nothing else. The daemon fetches lyrics from LRCLIB for tracks that have none (matched on duration, never over a listener's).
 
 **Authentication is layered on top of this contract, not woven into it** (added 2026-09-08). The API routes carry a bearer access token. Media and artwork are fetched with a signed URL instead, because those bytes are fetched by mpv and by Android's notification loader — neither of which is the app's own HTTP client, and the notification loader cannot set headers at all.
 

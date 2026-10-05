@@ -38,7 +38,13 @@ class NowPlayingPage extends StatefulWidget {
     required this.manifestStore,
     this.queueStore,
     this.reachability,
+    this.shareLyrics,
   });
+
+  /// Saves a listener's lyrics and shares them with everyone. Without it they
+  /// are kept on this phone only, which is all a screen outside the app shell
+  /// (a test) can do.
+  final Future<void> Function(String sha, String text)? shareLyrics;
 
   /// Live, so the source tag follows the connection rather than what it was
   /// when the page opened. Falls back to [offline] when absent.
@@ -115,7 +121,12 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       track: track,
       player: widget.player,
       onSave: (text) async {
-        await widget.manifestStore.setEdit(track.sha, 'lyrics', text);
+        final share = widget.shareLyrics;
+        if (share != null) {
+          await share(track.sha, text);
+        } else {
+          await widget.manifestStore.setEdit(track.sha, 'lyrics', text);
+        }
       },
     );
   }

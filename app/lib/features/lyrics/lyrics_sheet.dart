@@ -744,8 +744,8 @@ class _Empty extends StatelessWidget {
             const SizedBox(height: Space.md),
             Text(
               'Paste an LRC file to follow along with the track, or paste '
-              'plain text to just read it. Lyrics live on this phone and '
-              'survive syncs.',
+              'plain text to just read it. Whatever you add is shared with '
+              'everyone who listens.',
               textAlign: TextAlign.center,
               style: TypeScale.note.copyWith(
                 fontSize: 15,

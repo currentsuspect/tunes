@@ -19,6 +19,8 @@ import { buildManifest, isCategoryRelease, releaseArtKey } from "./manifest.js";
 import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
+import { LyricStore, runLyricPass, type LyricTarget } from "./lyricstore.js";
+import { LrclibClient } from "./lyrics.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -316,6 +318,11 @@ async function main(): Promise<void> {
 
     // name -> crowd tags + popularity, kept out of enrich.json because it is
     // about the artist, not the file.
+    // Lyrics: found by the daemon, or typed by a listener, and served to every
+    // phone through the manifest (see lyricstore.ts).
+    const lyricStore = await new LyricStore(join(env.dataDir, "lyrics.json")).load();
+    const lrclib = new LrclibClient();
+
     const artistMetaFile = join(env.dataDir, "artist-meta.json");
     const artistMeta = new Map<string, { tags: string[]; listeners: number | null; fetchedAt: string }>();
     try {
@@ -1188,7 +1195,8 @@ async function main(): Promise<void> {
         linkMeta,
         state.allAddedAt(),
         embeddedArt,
-        releaseArt
+        releaseArt,
+        lyricStore.forManifest()
       );
     };
 
@@ -1199,6 +1207,59 @@ async function main(): Promise<void> {
     let rowsSince: string | null = null;
     let lastIntegrity: string | null = null;
 
+    // Fetch lyrics for tracks that have none, a few at a time. Not awaited by
+    // the cycle: a slow or absent LRCLIB must never delay the scan schedule.
+    let lyricPassRunning = false;
+    const fetchLyrics = async (): Promise<void> => {
+      if (lyricPassRunning) return;
+      lyricPassRunning = true;
+      try {
+        const m = await manifestBuilder();
+        const targets: LyricTarget[] = m.tracks.map((t) => ({
+          sha: t.sha,
+          title: t.title,
+          artist: t.primaryArtist ?? t.artist,
+          album: t.album,
+          durationMs: t.durationMs,
+        }));
+        const r = await runLyricPass({
+          tracks: targets,
+          store: lyricStore,
+          client: lrclib,
+          limit: 40,
+        });
+        if (r.found > 0 || r.none > 0 || r.stoppedEarly) {
+          log.info({ event: "LYRICS_PASS", ...r });
+        }
+      } catch (e) {
+        log.warn({ event: "LYRICS_PASS_FAILED", err: String(e).slice(0, 200) });
+      } finally {
+        lyricPassRunning = false;
+      }
+    };
+
+    // A listener's lyrics put on the edge straight away, so other phones get
+    // them on their next look and not at the next scan.
+    const publishManifestNow = (): void => {
+      if (!env.publishUrl || !env.publishKey) return;
+      void (async () => {
+        try {
+          const manifest = await manifestBuilder();
+          const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
+          const done = await publishCloud({
+            url: env.publishUrl as string,
+            key: env.publishKey as string,
+            manifest,
+            rows: [],
+            log,
+          });
+          if (done !== null && typeof integrity === "string") lastIntegrity = integrity;
+        } catch (e) {
+          log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
+        }
+      })();
+    };
+
     const run = async (): Promise<void> => {
       const result = await engine.runCycle(channels);
       log.info({
@@ -1207,6 +1268,7 @@ async function main(): Promise<void> {
         aborted: result.aborted,
         reason: result.reason,
       });
+      void fetchLyrics();
       // Cloud publish, best effort: the manifest and new sightings go to the
       // edge once per cycle. A failure only logs -- serving never waits on it
       // and the next cycle retries. Not awaited into the cadence: the scan
@@ -1302,9 +1364,16 @@ async function main(): Promise<void> {
         () => releaseArt,
         env.host,
         updates,
-        onDemand
+        onDemand,
+        lyricStore,
+        publishManifestNow
       );
       await server.start();
+      // Lyrics are asked for on their own beat as well as after each scan: a
+      // pass is forty tracks, and a library of a thousand should not wait
+      // forty scans for them. The first one starts soon after launch.
+      setTimeout(() => void fetchLyrics(), 15_000).unref();
+      setInterval(() => void fetchLyrics(), 120_000).unref();
       void runEnrichPass().catch((e) =>
         log.error({ event: "ENRICH_PASS_ERROR", err: String(e) })
       );

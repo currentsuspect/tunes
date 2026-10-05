@@ -155,4 +155,50 @@ describe("media edge", () => {
     const out = stripSignature(get(signed, { headers: { Range: "bytes=100-200" } }));
     expect(out.headers.get("Range")).toBe("bytes=100-200");
   });
+
+  describe("lyrics, the one write a phone makes", () => {
+    const token = (secret = ENV.ACCESS_SECRET) =>
+      signAccessToken(
+        { sub: "acct-1", did: "dev-1", iat: NOW, exp: NOW + 600 },
+        secret,
+      );
+
+    it("passes a PUT with a good bearer token through to origin", async () => {
+      expect(
+        await verdict(`/lyrics/${SHA}`, {
+          method: "PUT",
+          headers: { authorization: `Bearer ${await token()}` },
+        }),
+      ).toBeNull();
+    });
+
+    it("refuses a PUT with no token", async () => {
+      const res = await verdict(`/lyrics/${SHA}`, { method: "PUT" });
+      expect(res?.status).toBe(401);
+    });
+
+    it("refuses a PUT with a forged token", async () => {
+      const res = await verdict(`/lyrics/${SHA}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${await token("wrong-secret")}` },
+      });
+      expect(res?.status).toBe(401);
+    });
+
+    it("is PUT only, even with a good token", async () => {
+      const auth = { authorization: `Bearer ${await token()}` };
+      for (const method of ["GET", "POST", "DELETE"]) {
+        const res = await verdict(`/lyrics/${SHA}`, { method, headers: auth });
+        expect(res?.status).toBe(405);
+      }
+    });
+
+    it("does not open a path for anything else under /lyrics", async () => {
+      const res = await verdict(`/lyrics/not-a-sha`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${await token()}` },
+      });
+      expect(res?.status).toBe(404);
+    });
+  });
 });

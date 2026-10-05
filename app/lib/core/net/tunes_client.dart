@@ -10,10 +10,15 @@ class ChangesResponse {
     required this.generatedAt,
     required this.integrity,
     required this.addedShas,
+    this.lyricsChanged = const [],
   });
   final DateTime? generatedAt;
   final String integrity;
   final List<String> addedShas;
+
+  /// Tracks whose lyrics were added or changed since the last look. A new lyric
+  /// adds no track, so [addedShas] alone would say nothing had happened.
+  final List<String> lyricsChanged;
 }
 
 /// Raised when a download is cancelled by the user. Distinct from a failure:
@@ -127,6 +132,9 @@ class TunesClient {
         generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
         integrity: json['integrity'] as String,
         addedShas: ((json['addedShas'] as List?) ?? const [])
+            .cast<String>()
+            .toList(),
+        lyricsChanged: ((json['lyricsChanged'] as List?) ?? const [])
             .cast<String>()
             .toList(),
       );
@@ -376,6 +384,28 @@ class TunesClient {
       await res.drain<void>();
     } catch (_) {
       // A hint, never a reason to bother the listener.
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Shares a listener's lyrics for a track with everyone. True when the
+  /// daemon took them. Empty [text] takes the listener's version away.
+  ///
+  /// Never throws: a failure here must not lose what was typed, which is kept
+  /// on this phone and offered again after the next successful sync.
+  Future<bool> putLyrics(String sha, String text) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.putUrl(Uri.parse('$baseUrl/lyrics/$sha'));
+      await _authorize(req);
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode({'lyrics': text})));
+      final res = await req.close().timeout(_timeout);
+      await res.drain<void>();
+      return res.statusCode == 204;
+    } catch (_) {
+      return false;
     } finally {
       client.close(force: true);
     }

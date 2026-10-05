@@ -30,6 +30,13 @@ const PUBLIC_PATHS = new Set(["/update", "/health"]);
  */
 const MEDIA_PATH = /^\/(track|art|t)\/[0-9a-f]{64}$/;
 
+/**
+ * A listener adding lyrics for a track, for everyone. The one write a phone
+ * makes to the library: PUT only, and only with a bearer token, because unlike
+ * everything else here it changes what other people see.
+ */
+const LYRICS_PATH = /^\/lyrics\/[0-9a-f]{64}$/;
+
 function deny(reason: string, status = 403): Response {
   // The reason is for our own logs and the app's error surface; it names the
   // check that failed, never whether the object exists. A 403 for a bad
@@ -82,6 +89,19 @@ export async function handleMedia(
   if (url.pathname.startsWith("/update/")) return null;
 
   if (API_PATHS.has(url.pathname)) {
+    const header = req.headers.get("authorization");
+    if (!header?.startsWith("Bearer ")) return deny("no-token", 401);
+    const claims = await verifyAccessToken(
+      header.slice(7),
+      env.ACCESS_SECRET,
+      nowSec,
+    );
+    if (!claims) return deny("bad-token", 401);
+    return null;
+  }
+
+  if (LYRICS_PATH.test(url.pathname)) {
+    if (req.method !== "PUT") return deny("method", 405);
     const header = req.headers.get("authorization");
     if (!header?.startsWith("Bearer ")) return deny("no-token", 401);
     const claims = await verifyAccessToken(

@@ -197,6 +197,9 @@ class _FakeClient implements TunesClient {
   Future<bool> ping() async => true;
 
   @override
+  Future<bool> putLyrics(String sha, String text) async => true;
+
+  @override
   Future<void> warm(String sha) async {}
 
   @override

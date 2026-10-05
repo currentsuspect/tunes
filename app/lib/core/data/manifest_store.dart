@@ -60,6 +60,11 @@ class ManifestStore {
                 // group by it instead of the raw credit string.
                 primaryArtist: Value(t.primaryArtist),
                 featuredJson: Value(jsonEncode(t.featured)),
+                // The words, shared by everyone through the daemon. They were
+                // read off the wire and then dropped here, so even a daemon
+                // that sent lyrics left every phone without them.
+                lyrics: Value(t.lyrics),
+                lyricsSource: Value(t.lyricsSource),
               ),
             );
         if (priorAdded == null && effectiveAddedAt != null) {
@@ -375,6 +380,22 @@ class ManifestStore {
             ),
           );
     }
+  }
+
+  /// Every lyric a listener has typed on this phone, by track.
+  Future<Map<String, String>> lyricEdits() async {
+    final rows = await (_db.select(
+      _db.trackEdits,
+    )..where((t) => t.field.equals('lyrics'))).get();
+    return {for (final r in rows) r.sha: r.value};
+  }
+
+  /// What the daemon says the lyrics are, ignoring this phone's own edit.
+  Future<({String? text, String? source})> serverLyrics(String sha) async {
+    final row = await (_db.select(
+      _db.tracks,
+    )..where((t) => t.sha.equals(sha))).getSingleOrNull();
+    return (text: row?.lyrics, source: row?.lyricsSource);
   }
 
   /// Reads all edits for a track in one round trip; cheap because the

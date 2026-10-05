@@ -18,6 +18,7 @@ import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
 import 'core/data/art_store.dart';
 import 'core/data/download_manager.dart';
+import 'core/data/lyric_sharing.dart';
 import 'core/data/download_store.dart';
 import 'core/data/playback_cache.dart';
 import 'core/data/likes_store.dart';
@@ -591,6 +592,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Timer? _refreshTimer;
   bool _foreground = true;
 
+  /// Lyrics a listener adds go to the daemon and from there to everyone.
+  late final LyricSharing _lyricSharing = LyricSharing(
+    store: widget.manifestStore,
+    put: widget.client.putLyrics,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -1080,7 +1087,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (lastSync != null) {
       try {
         final changes = await widget.client.fetchChanges(lastSync);
-        if (changes.addedShas.isEmpty) {
+        // New lyrics add no track, so they are asked about separately: a
+        // phone that only checked for added tracks would never see them.
+        if (changes.addedShas.isEmpty && changes.lyricsChanged.isEmpty) {
           needFull = false;
           widget.reachability.setOffline(false);
           synced = true;
@@ -1129,6 +1138,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // on it. Only refreshed after a real sync, since the answer changes only
     // when what we hold changes.
     if (mounted && synced) unawaited(_loadMissing());
+    // The daemon's lyrics are fresh now: drop what it has caught up with and
+    // send what it has not seen.
+    if (mounted && synced) unawaited(_lyricSharing.reconcile());
 
     // Grants are minted here, off the critical path, rather than when the play
     // button is pressed.
@@ -1361,6 +1373,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         artUrlFor: _artUrlFor,
         manifestStore: widget.manifestStore,
         queueStore: widget.queueStore,
+        shareLyrics: _lyricSharing.save,
       ),
     );
   }

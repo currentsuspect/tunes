@@ -1063,3 +1063,41 @@ describe("release running order", () => {
     expect(m.releases[0]?.trackShas).toEqual([sha("a"), sha("b")]);
   });
 });
+
+describe("lyrics in the manifest", () => {
+  const args = (lyrics: Map<string, { lyrics: string; source: string }>) =>
+    buildManifest(
+      [probe()],
+      new Map(),
+      new Map(),
+      [],
+      [],
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      lyrics,
+    );
+
+  it("carries a track's lyrics and where they came from", () => {
+    const m = args(
+      new Map([["a".repeat(64), { lyrics: "[00:01.00] hi", source: "user" }]]),
+    );
+    expect(m.tracks[0]!.lyrics).toBe("[00:01.00] hi");
+    expect(m.tracks[0]!.lyricsSource).toBe("user");
+  });
+
+  it("is null, as before, for a track nobody has lyrics for", () => {
+    const m = args(new Map());
+    expect(m.tracks[0]!.lyrics).toBeNull();
+    expect(m.tracks[0]!.lyricsSource).toBeNull();
+  });
+
+  it("changes the integrity, so the edge copy is refreshed", () => {
+    const without = args(new Map()).integrity;
+    const withLyrics = args(
+      new Map([["a".repeat(64), { lyrics: "hi", source: "lrclib" }]]),
+    ).integrity;
+    expect(withLyrics).not.toBe(without);
+  });
+});
