@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
@@ -23,7 +23,9 @@ import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
 import { publishCloud } from "./cloudpublish.js";
-import { selectNewRows } from "./cloudpublish.js";
+import { publishAudioFile, selectAudioToBackfill, selectNewRows } from "./cloudpublish.js";
+import { AudioPusher } from "./audiopush.js";
+import { coalesce, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
@@ -87,7 +89,10 @@ async function main(): Promise<void> {
       { apiId: env.apiId, apiHash: env.apiHash, session: readSession(env.sessionFile) },
       log
     );
-    const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log);
+    // Filled in once publishing and the audio pusher exist (below); the engine
+    // reads it at call time.
+    const ingestHooks: { onDownloaded?: (d: { sha: string; size: number }) => void } = {};
+    const engine = new FetchEngine(client, store, state, { dataDir: env.dataDir, fetch: env.fetch }, log, ingestHooks);
     // ORIGIN step 1: serve misses from Telegram through the fetcher instead
     // of 404. Same session the daemon already serves from -- a tap is
     // human-low-frequency and counts against the same daily cap.
@@ -1199,7 +1204,92 @@ async function main(): Promise<void> {
     let rowsSince: string | null = null;
     let lastIntegrity: string | null = null;
 
+    const channelIds = channels.map((c) => String(c.id));
+    const publishNow = async (): Promise<void> => {
+      if (!env.publishUrl || !env.publishKey) return;
+      try {
+        const manifest = await manifestBuilder();
+        const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
+        const { rows, watermark } = selectNewRows(state.sightingsFor(channelIds), rowsSince);
+        const manifestChanged = typeof integrity === "string" && integrity !== lastIntegrity;
+        if (rows.length === 0 && !manifestChanged) return;
+        const done = await publishCloud({
+          url: env.publishUrl,
+          key: env.publishKey,
+          manifest,
+          rows,
+          log,
+        });
+        if (done !== null) {
+          rowsSince = watermark;
+          if (manifestChanged && typeof integrity === "string") lastIntegrity = integrity;
+        }
+      } catch (e) {
+        log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
+      }
+    };
+    // As each file lands, show it: at most one publish per 30 s, never two at
+    // once, and one trailing publish so the last file is never left unshown.
+    // The download pacing is untouched; this only changes when results appear.
+    const publishSoon = coalesce(publishNow, 30_000);
+
+    // New audio goes up to R2 from the local copy straight away, so a friend's
+    // first play of it is a cache hit rather than a cold Telegram fetch.
+    const audioLedgerFile = join(env.dataDir, "audio-published.json");
+    const audioLedger: Record<string, string> = {};
+    try {
+      const raw = JSON.parse(await readFile(audioLedgerFile, "utf8")) as { audio?: Record<string, string> };
+      Object.assign(audioLedger, raw.audio ?? {});
+    } catch {
+      void undefined; // first run
+    }
+    const audioBase = env.publishUrl?.replace(/\/publish\/?$/, "/audio") ?? "";
+    const audioPusher =
+      env.publishUrl && env.publishKey && /\/audio$/.test(audioBase)
+        ? new AudioPusher(audioLedger, {
+            log,
+            read: async (sha) => {
+              if (!store.has(sha)) return null;
+              return new Uint8Array(await readFile(store.pathOf(sha)));
+            },
+            put: (sha, bytes) =>
+              publishAudioFile({
+                baseUrl: audioBase,
+                key: env.publishKey as string,
+                sha,
+                bytes,
+                log,
+              }),
+            save: async (ledger) => {
+              await writeFile(audioLedgerFile, JSON.stringify({ audio: ledger }, null, 1));
+            },
+          })
+        : null;
+    // Whatever the box holds that R2 has not been sent, newest first.
+    const queueAudioBacklog = async (): Promise<void> => {
+      if (!audioPusher) return;
+      const held = await store.listObjects();
+      const dated = await Promise.all(
+        held.map(async (o) => {
+          try {
+            return { sha: o.sha, at: (await stat(store.pathOf(o.sha))).mtimeMs };
+          } catch {
+            return { sha: o.sha, at: 0 };
+          }
+        })
+      );
+      audioPusher.enqueue(selectAudioToBackfill(dated.sort((a, b) => b.at - a.at).map((d) => d.sha), audioLedger, () => true));
+    };
+    ingestHooks.onDownloaded = ({ sha }) => {
+      audioPusher?.enqueue([sha]);
+      publishSoon.request();
+    };
+
+    // Telegram tells us about new posts; the poll below is only the safety net.
+    const wake = new Wake({ settleMs: 5_000, minGapMs: 20_000 });
+
     const run = async (): Promise<void> => {
+      wake.started();
       const result = await engine.runCycle(channels);
       log.info({
         event: "CYCLE_DONE",
@@ -1207,42 +1297,12 @@ async function main(): Promise<void> {
         aborted: result.aborted,
         reason: result.reason,
       });
-      // Cloud publish, best effort: the manifest and new sightings go to the
-      // edge once per cycle. A failure only logs -- serving never waits on it
-      // and the next cycle retries. Not awaited into the cadence: the scan
-      // schedule is ban-safety, publishing must not shift it.
-      if (env.publishUrl && env.publishKey) {
-        const ids = channels.map((c) => String(c.id));
-        void (async () => {
-          try {
-            const manifest = await manifestBuilder();
-            const integrity =
-              (manifest as { integrity?: unknown }).integrity ?? null;
-            const { rows, watermark } = selectNewRows(
-              state.sightingsFor(ids),
-              rowsSince
-            );
-            const manifestChanged =
-              typeof integrity === "string" && integrity !== lastIntegrity;
-            if (rows.length === 0 && !manifestChanged) return;
-            const done = await publishCloud({
-              url: env.publishUrl as string,
-              key: env.publishKey as string,
-              manifest,
-              rows,
-              log,
-            });
-            if (done !== null) {
-              rowsSince = watermark;
-              if (manifestChanged && typeof integrity === "string") {
-                lastIntegrity = integrity;
-              }
-            }
-          } catch (e) {
-            log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
-          }
-        })();
-      }
+      // Best effort and not awaited: the scan schedule is ban-safety, publishing
+      // must not shift it, and a failure only logs.
+      publishSoon.request();
+      void queueAudioBacklog().catch((e) =>
+        log.warn({ event: "AUDIO_BACKLOG_FAILED", err: String(e).slice(0, 160) })
+      );
       return;
     };
 
@@ -1305,13 +1365,13 @@ async function main(): Promise<void> {
         onDemand
       );
       await server.start();
-      void runEnrichPass().catch((e) =>
-        log.error({ event: "ENRICH_PASS_ERROR", err: String(e) })
-      );
+      void runEnrichPass()
+        .then(() => publishSoon.request())
+        .catch((e) => log.error({ event: "ENRICH_PASS_ERROR", err: String(e) }));
       const enrichTimer = setInterval(() => {
-        void runEnrichPass().catch((e) =>
-          log.error({ event: "ENRICH_PASS_ERROR", err: String(e) })
-        );
+        void runEnrichPass()
+          .then(() => publishSoon.request())
+          .catch((e) => log.error({ event: "ENRICH_PASS_ERROR", err: String(e) }));
       }, 90_000);
       process.on("exit", () => clearInterval(enrichTimer));
 
@@ -1322,8 +1382,14 @@ async function main(): Promise<void> {
           log.error({ event: "CYCLE_FAILED", err: String(e) });
         }
       }
+      for (const ch of channels) {
+        void client
+          .watchChannel(ch.id, () => wake.poke())
+          .catch((e) => log.warn({ event: "WATCH_FAILED", channel: ch.id, err: String(e).slice(0, 160) }));
+      }
       while (!shuttingDown) {
-        await sleep(scanCadenceMs);
+        const why = await wake.wait(scanCadenceMs);
+        if (why === "push") log.info({ event: "SCAN_WAKE", reason: "telegram-push" });
         if (shuttingDown) break;
         try {
           await run();

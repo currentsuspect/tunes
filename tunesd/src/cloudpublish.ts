@@ -84,6 +84,8 @@ export async function publishCloud(opts: {
   }
 }
 
+const SHA_RE = /^[0-9a-f]{64}$/;
+
 /** Which audio files still need backfilling to R2, in reference order.
  *
  * Same shape as the art selector, minus the cap: a backfill is a bounded
@@ -95,7 +97,17 @@ export function selectAudioToBackfill(
   published: Record<string, string>,
   present: (sha: string) => boolean,
 ): string[] {
-  return selectArtToPublish(referenced, published, present, Number.MAX_SAFE_INTEGER);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const sha of referenced) {
+    if (typeof sha !== "string" || !SHA_RE.test(sha)) continue;
+    if (seen.has(sha)) continue;
+    seen.add(sha);
+    if (published[sha] !== undefined) continue;
+    if (!present(sha)) continue;
+    out.push(sha);
+  }
+  return out;
 }
 
 /** PUTs one audio file to the edge audio route. True on acceptance.

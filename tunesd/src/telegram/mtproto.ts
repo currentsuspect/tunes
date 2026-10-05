@@ -3,6 +3,7 @@ import type { Log } from "../logger.js";
 import { PermanentError, RetryableError } from "./ports.js";
 import { TelegramClient, Api } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
+import { NewMessage } from "teleproto/events/index.js";
 import { FloodWaitError, SlowModeWaitError } from "teleproto/errors/index.js";
 
 export interface AudioRef {
@@ -60,6 +61,9 @@ export class MtprotoClient {
   private client: TelegramClient | null = null;
   private connectPromise: Promise<TelegramClient> | null = null;
   private poisoned = false;
+  /** Channels whose new posts should wake the scanner. Re-attached whenever
+   * the client is rebuilt, since handlers live on the client object. */
+  private readonly watchers: Array<{ chatId: number; onPost: () => void }> = [];
 
   constructor(
     private readonly cfg: MtprotoCfg,
@@ -84,6 +88,7 @@ export class MtprotoClient {
         });
         await client.connect();
         this.client = client;
+        this.attachWatchers(client);
         this.log.info({ event: "MTPROTO_CONNECTED" });
         return client;
       })().catch((err) => {
@@ -92,6 +97,30 @@ export class MtprotoClient {
       });
     }
     return this.connectPromise;
+  }
+
+  /** Asks Telegram to tell us when [chatId] gets a new post, so a scan can
+   * start at once instead of at the next poll. The poll stays as the safety
+   * net: a missed update only costs the old delay. */
+  async watchChannel(chatId: number, onPost: () => void): Promise<void> {
+    this.watchers.push({ chatId, onPost });
+    const client = await this.connect();
+    this.attachWatchers(client, [{ chatId, onPost }]);
+  }
+
+  private attachWatchers(
+    client: TelegramClient,
+    only: Array<{ chatId: number; onPost: () => void }> = this.watchers
+  ): void {
+    for (const { chatId, onPost } of only) {
+      client.addEventHandler(() => {
+        try {
+          onPost();
+        } catch {
+          void undefined;
+        }
+      }, new NewMessage({ chats: [chatId] }));
+    }
   }
 
   private invalidateClient(reason: string): void {

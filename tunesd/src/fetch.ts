@@ -39,7 +39,11 @@ export class FetchEngine {
       dataDir: string;
       fetch: { perChannelDelayMs: number; jitterMs: number; dailyCapFiles: number };
     },
-    private readonly log: Log
+    private readonly log: Log,
+    private readonly hooks: {
+      /** After a file is stored and recorded. Must not throw or block. */
+      onDownloaded?: (d: { sha: string; size: number }) => void;
+    } = {}
   ) {}
 
   async runCycle(channels: ChannelConfig[]): Promise<CycleResult> {
@@ -142,6 +146,11 @@ export class FetchEngine {
               size,
             });
             await this.state.save();
+            try {
+              this.hooks.onDownloaded?.({ sha, size });
+            } catch {
+              void undefined;
+            }
           } catch (e) {
             await this.store.discardStaging(staging.path).catch(() => undefined);
             throw e;
