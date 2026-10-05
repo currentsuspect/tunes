@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'queue_order.dart';
+import 'restore_seek.dart';
 import '../../domain/manifest.dart';
 import '../platform/diag_log.dart';
 import 'transport_rules.dart';
@@ -37,6 +38,11 @@ abstract class TunePlayer extends ChangeNotifier {
 
   void play();
   void pause();
+
+  /// The player's own level, 0 to 1, apart from the phone's volume. Used to
+  /// ease music back in after another app has had the output. A no-op where a
+  /// player has no such control.
+  void setVolume(double level) {}
   void toggle();
   void next();
   void previous();
@@ -221,11 +227,26 @@ class MediaKitTunePlayer extends TunePlayer {
   DateTime? _lastSeekRetry;
   int _seekRetries = 0;
 
-  void _clearPendingSeek() {
+  /// Where the song was when the app last closed, until it has been put back.
+  /// Outlives the on-screen guard above (which gives up after ten seconds):
+  /// play is what finally makes the engine able to seek, and it can be pressed
+  /// long after the restore.
+  Duration? _restoreAt;
+  RestoreSeek? _restoreSeek;
+
+  /// [keepRestore] is for the guard expiring on its own. Anything the listener
+  /// does (a new queue, a seek, next) is a decision about where to be, so the
+  /// remembered spot is dropped with it.
+  void _clearPendingSeek({bool keepRestore = false}) {
     _pendingSeek = null;
     _pendingSeekSince = null;
     _lastSeekRetry = null;
     _seekRetries = 0;
+    if (!keepRestore) {
+      _restoreAt = null;
+      _restoreSeek?.cancel();
+      _restoreSeek = null;
+    }
   }
 
   List<ManifestTrack> _queue = const [];
@@ -315,6 +336,7 @@ class MediaKitTunePlayer extends TunePlayer {
     if (at > Duration.zero) {
       _pendingSeek = at;
       _pendingSeekSince = DateTime.now();
+      _restoreAt = at;
       unawaited(player.seek(at));
     }
     _applyPlaylistMode(player);
@@ -425,6 +447,17 @@ class MediaKitTunePlayer extends TunePlayer {
     if (_queue.isEmpty) return;
     _claimLive();
     player.play();
+    final target = _restoreAt;
+    if (target != null) {
+      _restoreSeek?.cancel();
+      _restoreSeek = RestoreSeek(
+        target: target,
+        enginePosition: () => player.state.position,
+        engineDuration: () => player.state.duration,
+        seek: (to) => unawaited(player.seek(to)),
+        onDone: () => _restoreAt = null,
+      )..start();
+    }
   }
 
   @override
@@ -432,6 +465,14 @@ class MediaKitTunePlayer extends TunePlayer {
     if (_queue.isEmpty) return;
     _claimLive();
     _player?.pause();
+  }
+
+  @override
+  void setVolume(double level) {
+    // mpv takes 0 to 100.
+    unawaited(
+      _player?.setVolume(level.clamp(0.0, 1.0) * 100) ?? Future.value(),
+    );
   }
 
   @override
@@ -731,13 +772,25 @@ class MediaKitTunePlayer extends TunePlayer {
   /// the live reports win no matter what -- a guard that never clears would
   /// freeze the playhead worse than the reset it prevents.
   bool _swallowStaleRestoreReport(Player player, Duration p) {
+    // Play has been pressed and the restore seek is still being applied: the
+    // engine is reporting the start of the song, which is not where the
+    // listener is. Hold the screen on the spot until the seek lands.
+    final saved = _restoreAt;
+    if (saved != null &&
+        (_restoreSeek?.active ?? false) &&
+        p < saved - const Duration(seconds: 2)) {
+      return true;
+    }
     final target = _pendingSeek;
     if (target == null) return false;
     final since = _pendingSeekSince ?? DateTime.now();
-    if (p >= target - const Duration(seconds: 2) ||
+    final landed = p >= target - const Duration(seconds: 2);
+    if (landed ||
         DateTime.now().difference(since) > const Duration(seconds: 10) ||
         _seekRetries >= 5) {
-      _clearPendingSeek();
+      // Giving up on the guard is not giving up on the spot: play still
+      // applies it (see [_restoreAt]).
+      _clearPendingSeek(keepRestore: !landed);
       return false;
     }
     // Still waiting: hold the restored spot on screen and nudge the decoder

@@ -386,7 +386,7 @@ Mix? _deepCuts(_Context c, int minTracks, int size) {
 }
 
 /// Tags too general to say what a record sounds like.
-const _vagueTags = {
+const vagueTags = {
   'seen live',
   'favorites',
   'favourite',
@@ -427,7 +427,7 @@ List<Mix> _genreLanes(_Context c, int minTracks, int size) {
     final seen = <String>{};
     for (final raw in tags.take(5)) {
       final key = _tagKey(raw);
-      if (key.isEmpty || _vagueTags.contains(raw.toLowerCase())) continue;
+      if (key.isEmpty || vagueTags.contains(raw.toLowerCase())) continue;
       if (!seen.add(key)) continue;
       tracksFor.putIfAbsent(key, () => []).add(t);
       final sp = spellings.putIfAbsent(key, () => {});

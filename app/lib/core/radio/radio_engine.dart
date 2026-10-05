@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import '../../domain/manifest.dart';
+import '../../domain/mixes.dart' show vagueTags;
 import 'session.dart';
 
 /// What the listener has done over time, independent of this session.
@@ -8,7 +9,41 @@ import 'session.dart';
 /// Passed in rather than read here so the engine stays a pure function of its
 /// inputs and can be tested without a database (AGENTS.md §1, §6).
 class TasteSnapshot {
-  const TasteSnapshot({this.playCounts = const {}, this.skipCounts = const {}});
+  const TasteSnapshot({
+    this.playCounts = const {},
+    this.skipCounts = const {},
+    this.artistTags = const {},
+    this.recentPlays = const {},
+    this.tagWeights = const {},
+  });
+
+  /// How much each tag says, 0..1: a tag on a third of the library ("rap")
+  /// tells you little about which song to play next, one on a handful
+  /// ("plugg", "afroswing") tells you a lot. Built by [weighTags]; a tag with
+  /// no entry counts in full.
+  final Map<String, double> tagWeights;
+
+  /// Weights for [artistTags]: the rarer the tag, the more it counts.
+  static Map<String, double> weighTags(Map<String, List<String>> artistTags) {
+    final seen = <String, int>{};
+    for (final raw in artistTags.values) {
+      final keys = <String>{
+        for (final t in raw.take(5))
+          if (!vagueTags.contains(t.toLowerCase())) _key(t),
+      }..remove('');
+      for (final k in keys) {
+        seen[k] = (seen[k] ?? 0) + 1;
+      }
+    }
+    return {
+      for (final e in seen.entries) e.key: 1 / (1 + log(1 + e.value / 5)),
+    };
+  }
+
+  static String _key(String t) =>
+      t.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+  double weightOf(String tag) => tagWeights[tag] ?? 1.0;
 
   /// sha -> times played to completion.
   final Map<String, int> playCounts;
@@ -16,8 +51,30 @@ class TasteSnapshot {
   /// sha -> times abandoned.
   final Map<String, int> skipCounts;
 
+  /// Lower-cased act name -> what kind of music it is called ("trap",
+  /// "afrobeats"). The only idea of genre the radio has, and what lets it stay
+  /// in the kind of music the listener is in the middle of.
+  final Map<String, List<String>> artistTags;
+
+  /// sha -> times played in the last week. What keeps the same favourites from
+  /// coming round every time, however well they fit.
+  final Map<String, int> recentPlays;
+
   int playsOf(String sha) => playCounts[sha] ?? 0;
   int skipsOf(String sha) => skipCounts[sha] ?? 0;
+  int recentPlaysOf(String sha) => recentPlays[sha] ?? 0;
+
+  /// The tags for an act, normalised and without the ones too general to say
+  /// anything ("seen live", "american").
+  Set<String> tagsOf(String act) {
+    final raw = artistTags[act.toLowerCase()];
+    if (raw == null) return const {};
+    return {
+      for (final t in raw.take(5))
+        if (!vagueTags.contains(t.toLowerCase()))
+          t.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
+    }..remove('');
+  }
 }
 
 /// One scored candidate. Kept visible so the mix can be inspected rather than
@@ -48,10 +105,19 @@ class RadioEngine {
 
   final Random _random;
 
-  /// How many top candidates to sample from rather than always taking the
-  /// best. docs/RADIO.md §4: always taking the maximum converges on one loop
-  /// and starts to feel algorithmic.
-  static const _sampleWindow = 4;
+  /// The least and most top candidates to sample from. docs/RADIO.md §4:
+  /// always taking the maximum converges on one loop and starts to feel
+  /// algorithmic. The width grows with how adventurous the session is; it used
+  /// to be 1 to 4, which at the usual 0.2 meant choosing between the top two
+  /// of a thousand tracks, and the next song could be guessed.
+  static const _minWindow = 6;
+  static const _extraWindow = 54;
+
+  /// How sharply the pick favours the best of the window. Smaller is closer to
+  /// always the best; larger is closer to a coin toss across the window. It
+  /// loosens as the listener asks for further out.
+  static const _baseTemperature = 0.08;
+  static const _extraTemperature = 0.25;
 
   /// Picks the next track, or null when the library has nothing eligible.
   ManifestTrack? next({
@@ -71,9 +137,20 @@ class RadioEngine {
     // Sample from the top few, weighted by rank. The width grows with the
     // exploration level, so a listener who keeps skipping gets tighter, more
     // predictable choices and one who lets things play gets more variety.
-    final width = 1 + (session.exploration * (_sampleWindow - 1)).round();
+    final width = _minWindow + (session.exploration * _extraWindow).round();
     final pool = ranked.take(min(width, ranked.length)).toList();
-    return pool[_random.nextInt(pool.length)].track;
+    // Weighted by score, not uniform: better fits come up more often, but the
+    // ones just behind them still do.
+    final best = pool.first.score;
+    final temperature =
+        _baseTemperature + _extraTemperature * session.exploration;
+    final weights = [for (final c in pool) exp((c.score - best) / temperature)];
+    var roll = _random.nextDouble() * weights.fold(0.0, (a, b) => a + b);
+    for (var i = 0; i < pool.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return pool[i].track;
+    }
+    return pool.last.track;
   }
 
   /// Every eligible candidate, best first.
@@ -83,6 +160,7 @@ class RadioEngine {
     required TasteSnapshot taste,
     ManifestTrack? current,
   }) {
+    final vibe = _vibe(session, taste, current);
     final out = <ScoredTrack>[];
     for (final t in library) {
       // Never suggest what is playing, and never re-suggest something already
@@ -90,7 +168,7 @@ class RadioEngine {
       if (current != null && t.sha == current.sha) continue;
       if (session.wasSkipped(t.sha)) continue;
 
-      final reasons = _score(t, session, taste, current);
+      final reasons = _score(t, session, taste, current, vibe);
       final total = reasons.values.fold(0.0, (a, b) => a + b);
       out.add(ScoredTrack(t, total, reasons));
     }
@@ -98,18 +176,75 @@ class RadioEngine {
     return out;
   }
 
+  /// The kind of music the listener is in right now: the tags of what is
+  /// playing, and, fading with each step back, of the acts before it. A weight
+  /// per tag, so one track of something new does not erase an hour of
+  /// something else, and an hour of something new is not undone by one old
+  /// favourite.
+  Map<String, double> _vibe(
+    RadioSession session,
+    TasteSnapshot taste,
+    ManifestTrack? current,
+  ) {
+    final vibe = <String, double>{};
+    void add(Set<String> tags, double weight) {
+      for (final t in tags) {
+        vibe[t] = (vibe[t] ?? 0) + weight * taste.weightOf(t);
+      }
+    }
+
+    if (current != null) {
+      add(taste.tagsOf(current.artistKey), 1.0);
+    }
+    var weight = 0.9;
+    for (final act in session.recentArtists.take(8)) {
+      add(taste.tagsOf(act), weight);
+      weight *= 0.8;
+    }
+    return vibe;
+  }
+
   Map<String, double> _score(
     ManifestTrack candidate,
     RadioSession session,
     TasteSnapshot taste,
     ManifestTrack? current,
+    Map<String, double> vibe,
   ) {
     final reasons = <String, double>{};
 
+    // Fit with the kind of music playing now. Only when both sides have tags:
+    // an act nobody has tagged is neither rewarded nor punished, so a young
+    // library still works.
+    final tags = taste.tagsOf(candidate.artistKey);
+    double? lane;
+    if (vibe.isNotEmpty && tags.isNotEmpty) {
+      final top = vibe.values.toList()..sort((a, b) => b.compareTo(a));
+      final norm = top.take(3).fold(0.0, (a, b) => a + b);
+      final shared = tags.fold(0.0, (a, t) => a + (vibe[t] ?? 0));
+      lane = norm == 0 ? 0.0 : (shared / norm).clamp(0.0, 1.0);
+      // The pull of the lane eases as the listener asks to go further out.
+      reasons['lane'] = 0.45 * (1 - 0.5 * session.exploration) * lane;
+      // Nothing in common with what is playing. Softer the more adventurous
+      // the listener has said they are, so the dial still lets it wander.
+      if (shared == 0) reasons['off-lane'] = -0.25 * (1 - session.exploration);
+    }
+
     // Taste: how much this track has earned, damped so a single favourite
-    // cannot dominate a 600-track library forever.
+    // cannot dominate a 600-track library forever. Scaled by the fit: a
+    // favourite from some other kind of music used to win anyway, which is why
+    // the radio kept snapping back to the same songs.
     final plays = taste.playsOf(candidate.sha);
-    if (plays > 0) reasons['taste'] = 0.30 * (1 - 1 / (1 + plays));
+    if (plays > 0) {
+      reasons['taste'] =
+          0.30 *
+          (1 - 1 / (1 + plays)) *
+          (lane == null ? 1.0 : 0.35 + 0.65 * lane);
+    }
+
+    // Worn out: played already this week, however well it fits.
+    final worn = taste.recentPlaysOf(candidate.sha);
+    if (worn > 0) reasons['fatigue'] = -0.10 * min(worn, 4);
 
     // Long-run dislike. Distinct from a session skip: that one is absolute,
     // this one is a lasting lean away.

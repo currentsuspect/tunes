@@ -31,6 +31,20 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // Whether any app is playing audio right now. Asked while this app is
+        // paused because another one took the output for good, so it can wait
+        // for that app to finish and carry on, instead of staying silent.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/audio")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "otherAudioActive" -> {
+                        val audio = getSystemService(android.content.Context.AUDIO_SERVICE)
+                            as android.media.AudioManager
+                        result.success(audio.isMusicActive)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/notifications")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

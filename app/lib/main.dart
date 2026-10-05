@@ -13,6 +13,7 @@ import 'core/net/update_check.dart';
 import 'core/net/update_installer.dart';
 import 'features/updates/update_banner.dart';
 import 'core/audio/tune_audio_handler.dart';
+import 'core/audio/position_saver.dart';
 import 'core/audio/tune_player.dart';
 import 'core/data/database.dart';
 import 'core/data/art_store.dart';
@@ -274,26 +275,23 @@ Future<void> main() async {
   // back on it rather than at the top of the queue. Written on change only:
   // the player notifies four times a second, and this is a disk write.
   String? lastSeenSha;
-  var lastSavedPosition = Duration.zero;
+  final positionSaver = PositionSaver();
   player.addListener(() {
     final sha = player.current?.sha;
     if (sha != lastSeenSha) {
       lastSeenSha = sha;
-      lastSavedPosition = Duration.zero;
       unawaited(settings.setLastPlayedSha(sha));
     }
-    // Where in the track, so a relaunch resumes rather than restarting.
-    //
-    // Every five seconds of movement, not every notification: the player
-    // reports four times a second and this is a disk write. Five seconds is
-    // the most listening a crash can cost, which is less than the time it
-    // takes to notice.
-    final pos = player.position;
-    final moved = (pos - lastSavedPosition).abs();
-    if (moved >= const Duration(seconds: 5)) {
-      lastSavedPosition = pos;
-      unawaited(settings.setLastPosition(pos));
-    }
+    // Where in the track, so a relaunch resumes rather than restarting. The
+    // saver decides when it is worth a disk write (see PositionSaver): every
+    // five seconds of movement, on a new song, and never for the engine being
+    // reset to zero by a stop.
+    final write = positionSaver.tick(
+      sha: sha,
+      position: player.position,
+      playing: player.playing,
+    );
+    if (write != null) unawaited(settings.setLastPosition(write));
   });
 
   player.onFirstPlay = ensureAudioService;
@@ -585,6 +583,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   bool _wasOffline = false;
 
+  /// The library is asked about again on this beat while the app is on screen.
+  /// The edge keeps the manifest for only a minute, so a few minutes is
+  /// cheap, and new music turns up without anyone having to pull to refresh.
+  /// /changes answers first, so most beats are one small request.
+  static const _refreshEvery = Duration(minutes: 3);
+  Timer? _refreshTimer;
+  bool _foreground = true;
+
   @override
   void initState() {
     super.initState();
@@ -595,6 +601,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _downloads.addListener(_onDownloadsChanged);
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
+    _refreshTimer = Timer.periodic(_refreshEvery, (_) {
+      if (_foreground && mounted) _reload();
+    });
     widget.player.addListener(_trackRecents);
     widget.player.addListener(_feedRadio);
     widget.player.onQueueEnded = _pickRadio;
@@ -633,6 +642,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.reachability.removeListener(_onReachability);
     widget.player.removeListener(_trackRecents);
+    _refreshTimer?.cancel();
     widget.player.removeListener(_feedRadio);
     widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
@@ -660,12 +670,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // track's progress -- and the sha, if the track changed within the gap.
     final current = widget.player.current;
     await widget.settings.setLastPlayedSha(current?.sha);
-    await widget.settings.setLastPosition(widget.player.position);
+    // Not a zero from a stopped player: backing out halts the player, the
+    // engine then reports 0:00, and the lifecycle change that follows used to
+    // write that over the place just saved (see PositionSaver).
+    final position = widget.player.position;
+    if (widget.player.playing || position > Duration.zero) {
+      await widget.settings.setLastPosition(position);
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !widget.reachability.offline) {
+    _foreground = state == AppLifecycleState.resumed;
+    // Always on coming back, offline or not: a sync that succeeds is also how
+    // an app that thinks it is offline finds out it is not.
+    if (state == AppLifecycleState.resumed) {
       _reload();
     }
     if (state == AppLifecycleState.paused) {
@@ -774,12 +793,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted) return;
     final skips = await widget.history.skipCounts();
     if (!mounted) return;
+    final week = await widget.history.playStamps(
+      within: const Duration(days: 7),
+    );
+    if (!mounted) return;
     final manifest = _manifest;
     if (manifest == null) return;
     final plays = playsByArtist(counts, manifest.tracks);
+    final tags = {
+      for (final a in manifest.artists)
+        if (a.tags.isNotEmpty) a.name.toLowerCase(): a.tags,
+    };
+    final recentPlays = <String, int>{};
+    for (final p in week) {
+      recentPlays[p.sha] = (recentPlays[p.sha] ?? 0) + 1;
+    }
     setState(() {
       _playsByArtist = plays;
-      _taste = TasteSnapshot(playCounts: counts, skipCounts: skips);
+      _taste = TasteSnapshot(
+        playCounts: counts,
+        skipCounts: skips,
+        // What the radio knows of genre: the crowd tags the daemon holds for
+        // each act, so it can stay in the kind of music being played.
+        artistTags: tags,
+        tagWeights: TasteSnapshot.weighTags(tags),
+        recentPlays: recentPlays,
+      );
       _threads = followThreads(library: manifest.tracks, plays: counts);
     });
   }

@@ -571,6 +571,37 @@ void main() {
     expect(now.difference(since).inMinutes < 5, isTrue);
   });
 
+  testWidgets('the library is asked about again every few minutes, and on '
+      'coming back to the app', (tester) async {
+    final client = _FakeClient(
+      () async => _manifestOf(_library()),
+      onChanges: (_) async => ChangesResponse(
+        generatedAt: null,
+        integrity: '',
+        addedShas: const [],
+      ),
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+    expect(client.changesCalls, isEmpty);
+
+    // Not before the beat.
+    await tester.pump(const Duration(minutes: 2));
+    expect(client.changesCalls, isEmpty);
+
+    await tester.pump(const Duration(minutes: 1, seconds: 1));
+    expect(client.changesCalls, hasLength(1));
+
+    // Out of sight it holds still: no beat while the app is in the background.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(minutes: 10));
+    expect(client.changesCalls, hasLength(1));
+
+    // Back on screen it asks straight away.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(client.changesCalls, hasLength(2));
+  });
+
   testWidgets('shows the honest error state when the daemon is unreachable', (
     tester,
   ) async {

@@ -363,4 +363,141 @@ void main() {
       }
     });
   });
+
+  group('staying in the kind of music', () {
+    // Thirty acts of one kind of music and thirty of another, the second kind
+    // being what the listener has always played most.
+    final trap = [for (var i = 0; i < 30; i++) t('trap$i', artist: 'Trap $i')];
+    final rnb = [for (var i = 0; i < 30; i++) t('rnb$i', artist: 'Rnb $i')];
+    final library = [...trap, ...rnb];
+    final tags = {
+      for (final x in trap) x.artist.toLowerCase(): ['trap', 'hip hop'],
+      for (final x in rnb) x.artist.toLowerCase(): ['rnb', 'soul'],
+      'seen live': ['trap'],
+    };
+    final taste = TasteSnapshot(
+      // The old favourites: heavily played, all of the other kind.
+      playCounts: {for (final x in rnb) x.sha: 40},
+      artistTags: tags,
+    );
+
+    List<String> picks(RadioSession session, ManifestTrack current, int n) {
+      return [
+        for (var seed = 0; seed < n; seed++)
+          RadioEngine(random: Random(seed))
+              .next(
+                library: library,
+                session: session,
+                taste: taste,
+                current: current,
+              )!
+              .sha,
+      ];
+    }
+
+    RadioSession listening(List<ManifestTrack> heard) {
+      final s = RadioSession();
+      for (final h in heard.reversed) {
+        s.completed(h);
+      }
+      return s;
+    }
+
+    test('does not snap back to old favourites of another kind', () {
+      final session = listening(trap.take(4).toList());
+      final got = picks(session, trap[3], 200);
+      final stayed = got.where((s) => s.startsWith('trap')).length;
+      expect(stayed, greaterThan(180));
+    });
+
+    test('one track of something else does not undo the run before it', () {
+      // Three trap tracks, then one R&B: the next is still mostly trap.
+      final session = listening([trap[0], trap[1], trap[2]]);
+      final got = picks(session, rnb[0], 200);
+      final trapShare = got.where((s) => s.startsWith('trap')).length;
+      expect(trapShare, greaterThan(100));
+    });
+
+    test('moves with the listener when they really change', () {
+      final session = listening(rnb.take(5).toList());
+      final got = picks(session, rnb[4], 200);
+      expect(got.where((s) => s.startsWith('rnb')).length, greaterThan(180));
+    });
+
+    test('the further out dial lets it leave the lane', () {
+      final session = listening(trap.take(4).toList())..reach = 1.0;
+      final got = picks(session, trap[3], 300);
+      final left = got.where((s) => s.startsWith('rnb')).length;
+      expect(left, greaterThan(15));
+    });
+
+    test('untagged acts are neither rewarded nor punished', () {
+      final bare = TasteSnapshot(playCounts: {'x': 1});
+      final r = engine.rank(
+        library: [
+          t('x', artist: 'Nobody'),
+          t('y', artist: 'Else'),
+        ],
+        session: RadioSession(),
+        taste: bare,
+        current: t('cur', artist: 'Third'),
+      );
+      expect(r.first.reasons.keys, isNot(contains('lane')));
+      expect(r.first.reasons.keys, isNot(contains('off-lane')));
+    });
+
+    test('a track played this week sits lower than one that was not', () {
+      final fresh = t('fresh', artist: 'F');
+      final stale = t('stale', artist: 'S');
+      final r = engine.rank(
+        library: [fresh, stale],
+        session: RadioSession(),
+        taste: const TasteSnapshot(recentPlays: {'stale': 3}),
+        current: t('cur', artist: 'C'),
+      );
+      expect(order(r).first, 'fresh');
+      expect(
+        r.firstWhere((x) => x.track.sha == 'stale').reasons,
+        contains('fatigue'),
+      );
+    });
+
+    test('the next track is not the same few every time', () {
+      final session = listening(trap.take(4).toList());
+      final distinct = picks(session, trap[3], 200).toSet();
+      expect(distinct.length, greaterThan(8));
+    });
+
+    test('within one wide genre, the narrow tag decides', () {
+      // Everything is "rap"; two small scenes are told apart by their own tags.
+      final plugg = [for (var i = 0; i < 12; i++) t('pl$i', artist: 'Pl $i')];
+      final boom = [for (var i = 0; i < 12; i++) t('bb$i', artist: 'Bb $i')];
+      final crowd = [for (var i = 0; i < 60; i++) t('rp$i', artist: 'Rp $i')];
+      final tg = {
+        for (final x in plugg) x.artist.toLowerCase(): ['rap', 'plugg'],
+        for (final x in boom) x.artist.toLowerCase(): ['rap', 'boom bap'],
+        for (final x in crowd) x.artist.toLowerCase(): ['rap'],
+      };
+      final tas = TasteSnapshot(
+        artistTags: tg,
+        tagWeights: TasteSnapshot.weighTags(tg),
+      );
+      final session = RadioSession();
+      for (final h in plugg.take(3).toList().reversed) {
+        session.completed(h);
+      }
+      var inScene = 0;
+      for (var seed = 0; seed < 100; seed++) {
+        final pick = RadioEngine(random: Random(seed)).next(
+          library: [...plugg, ...boom, ...crowd],
+          session: session,
+          taste: tas,
+          current: plugg[3],
+        )!;
+        if (pick.sha.startsWith('pl')) inScene++;
+      }
+      // Eight of eighty-four candidates are in the scene: chance is about ten.
+      expect(inScene, greaterThan(40));
+    });
+  });
 }
