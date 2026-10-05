@@ -4,6 +4,7 @@ import { PromisedWebSockets } from "teleproto/extensions/PromisedWebSockets.js";
 import { Logger } from "teleproto/extensions/Logger.js";
 import { verifyMediaUrl } from "./grant.js";
 import { pickVictims, sniffMime } from "./policy.js";
+import { Flight, Gate, runDownload } from "./flight.js";
 
 interface Env {
   TG_API_ID: string;
@@ -20,6 +21,24 @@ interface Env {
 
 /** 3 GB: ORIGIN §4. R2 free tier is 10 GB; the cache stays well inside it. */
 const CACHE_BUDGET = 3 * 1024 * 1024 * 1024;
+
+const CONNECT_MS = 15_000;
+const LOCATE_MS = 10_000;
+/** No data for this long means the connection is dead, not slow. */
+const STALL_MS = 15_000;
+/** 1 MB, Telegram's ceiling per request. The default is far smaller, which
+ * is a round trip per few hundred KB. */
+const CHUNK = 1024 * 1024;
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const t = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error(`${what} timed out`)), ms);
+  });
+  return Promise.race([p, t]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
 
 // Every production DC fronted through a web host that answers /apiws.
 // Measured 2026-09-08: venus 404s, pluto + flora upgrade clean. Bare DC IPs
@@ -108,6 +127,11 @@ function rangeEmpty(total: number): Response {
 export class Fetcher {
   private client: TelegramClient | null = null;
   private connecting: Promise<TelegramClient> | null = null;
+  /** Downloads in progress, by sha. A second request joins the first. */
+  private readonly flights = new Map<string, Promise<Flight | { err: string }>>();
+  /** Telegram multiplexes requests on one connection; more than a few at once
+   * just makes each of them slower. Extra cold tracks wait their turn. */
+  private readonly gate = new Gate(3);
 
   constructor(
     private readonly state: DurableObjectState,
@@ -117,7 +141,7 @@ export class Fetcher {
   private async connected(): Promise<TelegramClient> {
     if (this.client) return this.client;
     if (!this.connecting) {
-      this.connecting = (async () => {
+      const attempt = (async () => {
         const fresh = new TelegramClient(
           new StringSession(this.env.TG_SESSION),
           Number(this.env.TG_API_ID),
@@ -130,13 +154,33 @@ export class Fetcher {
             baseLogger: new Logger("warn" as any),
           } as any
         );
-        await fresh.connect();
+        await withTimeout(fresh.connect(), CONNECT_MS, "connect");
         this.client = fresh;
-        this.connecting = null;
         return fresh;
       })();
+      // A failed connect must not stay cached, or every later request awaits
+      // the same rejected promise.
+      this.connecting = attempt.finally(() => {
+        this.connecting = null;
+      });
     }
     return this.connecting;
+  }
+
+  /** Throws the client away. A connection that dropped mid-download ("Network
+   * connection lost") used to stay cached for good, and the next request
+   * waited on it for two minutes. */
+  private async resetClient(): Promise<void> {
+    const old = this.client;
+    this.client = null;
+    this.connecting = null;
+    if (old) {
+      try {
+        await withTimeout(old.disconnect(), 3000, "disconnect");
+      } catch {
+        /* already dead */
+      }
+    }
   }
 
   private async sources(
@@ -150,52 +194,124 @@ export class Fetcher {
     return results ?? [];
   }
 
-  private async fromTelegram(
+  /** Finds the Telegram message for [sha] and its size, resetting the
+   * connection once if it turns out to be dead. */
+  private async locate(
     sha: string
-  ): Promise<{ bytes: Uint8Array; src: "telegram" } | { err: string }> {
+  ): Promise<{ msg: any; size: number } | { err: string }> {
     const rows = await this.sources(sha);
     if (rows.length === 0) return { err: "unknown" };
-    const c = await this.connected();
-    for (const { chat, msg } of rows) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const peer = await c.getInputEntity(chat);
-        const found = await c.getMessages(peer, { ids: [msg] });
-        const m = (found as any[]).find((x) => x && x.id === msg);
-        if (!m) continue;
-        const buf = (await (c as any).downloadMedia(m, {})) as unknown;
-        if (!buf) continue;
-        const bytes =
-          buf instanceof Uint8Array ? buf : new Uint8Array(buf as ArrayBuffer);
-        const digest = await crypto.subtle.digest("SHA-256", bytes as any);
-        const got = [...new Uint8Array(digest)]
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-        if (got !== sha) continue;
-        return { bytes, src: "telegram" };
+        const c = await this.connected();
+        for (const { chat, msg } of rows) {
+          const peer = await withTimeout(c.getInputEntity(chat), LOCATE_MS, "entity");
+          const found = await withTimeout(
+            c.getMessages(peer, { ids: [msg] }),
+            LOCATE_MS,
+            "message"
+          );
+          const m = (found as any[]).find((x) => x && x.id === msg);
+          const size = Number(m?.media?.document?.size ?? 0);
+          if (m && size > 0) return { msg: m, size };
+        }
+        return { err: "unreachable" };
       } catch {
-        continue;
+        await this.resetClient();
       }
     }
     return { err: "unreachable" };
   }
 
-  private async noteAccess(sha: string, size: number): Promise<void> {
-    const map =
-      (await this.state.storage.get<Record<string, { size: number; at: number }>>(
-        "access"
-      )) ?? {};
-    map[sha] = { size, at: Date.now() };
-    await this.state.storage.put("access", map);
+  /** The shared download for [sha]: started once, joined by everyone else. */
+  private flightFor(
+    sha: string,
+    opts: { warm: boolean }
+  ): Promise<Flight | { err: string }> | null {
+    const existing = this.flights.get(sha);
+    if (existing) return existing;
+    // A warm-up is a hint, never a reason to queue behind real playback.
+    if (opts.warm && this.gate.busy) return null;
+    const p = this.startFlight(sha);
+    this.flights.set(sha, p);
+    void p.then(
+      (f) => {
+        if ("err" in f) this.flights.delete(sha);
+      },
+      () => this.flights.delete(sha)
+    );
+    return p;
   }
 
-  /** Full size from the access map, recorded at put time. Null means unseen:
-   * serve whole and learn it, rather than guessing from a ranged read. */
+  private async startFlight(sha: string): Promise<Flight | { err: string }> {
+    if (!(await this.takeCap())) return { err: "cap" };
+    const found = await this.gate.run(() => this.locate(sha));
+    if ("err" in found) return found;
+    const flight = new Flight(found.size);
+    // The download outlives the request that started it, so the cache fills
+    // even when the listener skips ahead.
+    const job = this.gate
+      .run(() =>
+        runDownload(
+          flight,
+          async (offset) => {
+            const c = await this.connected();
+            return c.iterDownload(found.msg, {
+              offset,
+              requestSize: CHUNK,
+            }) as AsyncIterable<Uint8Array>;
+          },
+          {
+            stallMs: STALL_MS,
+            attempts: 3,
+            onRetry: () => this.resetClient(),
+          }
+        )
+      )
+      .then(() => this.finishFlight(sha, flight))
+      .finally(() => this.flights.delete(sha));
+    this.state.waitUntil(job);
+    return flight;
+  }
+
+  /** Verifies and caches a finished download. The listener already has the
+   * bytes; a bad hash only means this copy is not kept. */
+  private async finishFlight(sha: string, flight: Flight): Promise<void> {
+    if (flight.error) return;
+    const bytes = flight.bytes();
+    const digest = await crypto.subtle.digest("SHA-256", bytes as any);
+    const got = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    if (got !== sha) {
+      console.warn(`tunes-fetch: hash mismatch for ${sha}, not cached`);
+      return;
+    }
+    await this.env.CACHE.put(sha, bytes as any, {
+      httpMetadata: { contentType: sniffMime(bytes) },
+    });
+    await this.noteAccess(sha, bytes.byteLength);
+  }
+
+  /** One storage key per track. The old single map was read and rewritten
+   * whole on every request, which gets slower with every track and serialises
+   * every listener behind it. */
+  private async noteAccess(sha: string, size: number): Promise<void> {
+    await this.state.storage.put(`a:${sha}`, { size, at: Date.now() });
+  }
+
+  /** Full size recorded at put time. Null means unseen: serve whole and learn
+   * it, rather than guessing from a ranged read. Falls back to the legacy map
+   * so tracks cached before this change keep their sizes. */
   private async knownSize(sha: string): Promise<number | null> {
-    const map =
-      (await this.state.storage.get<Record<string, { size: number; at: number }>>(
-        "access"
-      )) ?? {};
-    return map[sha]?.size ?? null;
+    const one = await this.state.storage.get<{ size: number; at: number }>(
+      `a:${sha}`
+    );
+    if (one) return one.size;
+    const legacy = await this.state.storage.get<
+      Record<string, { size: number; at: number }>
+    >("access");
+    return legacy?.[sha]?.size ?? null;
   }
 
   private async takeCap(): Promise<boolean> {
@@ -218,20 +334,37 @@ export class Fetcher {
   /** Nightly sweep: LRU past budget with hysteresis. Reached by cron, never
    * by listeners. */
   async sweep(): Promise<{ evicted: number; remaining: number }> {
-    const map =
-      (await this.state.storage.get<Record<string, { size: number; at: number }>>(
-        "access"
-      )) ?? {};
-    const listed = await this.env.CACHE.list({ limit: 1000 });
-    const entries = listed.objects.map((o) => ({
-      sha: o.key,
-      size: o.size,
-      accessed: map[o.key]?.at,
-    }));
-    const { victims, remaining } = pickVictims(entries, CACHE_BUDGET);
+    const times = new Map<string, number>();
+    const legacy = await this.state.storage.get<
+      Record<string, { size: number; at: number }>
+    >("access");
+    for (const [sha, v] of Object.entries(legacy ?? {})) times.set(sha, v.at);
+    const per = await this.state.storage.list<{ size: number; at: number }>({
+      prefix: "a:",
+    });
+    for (const [k, v] of per) times.set(k.slice(2), v.at);
+
+    const entries: { sha: string; size: number; accessed?: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.CACHE.list({ limit: 1000, cursor });
+      for (const o of page.objects) {
+        entries.push({ sha: o.key, size: o.size, accessed: times.get(o.key) });
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+
+    const { victims, remaining } = pickVictims(
+      entries,
+      CACHE_BUDGET,
+      new Set(this.flights.keys())
+    );
     await Promise.all(victims.map((sha) => this.env.CACHE.delete(sha)));
-    for (const sha of victims) delete map[sha];
-    await this.state.storage.put("access", map);
+    await this.state.storage.delete(victims.map((sha) => `a:${sha}`));
+    if (legacy) {
+      for (const sha of victims) delete legacy[sha];
+      await this.state.storage.put("access", legacy);
+    }
     return { evicted: victims.length, remaining };
   }
 
@@ -273,6 +406,10 @@ export class Fetcher {
         // Totals come from the access map (full sizes recorded at put), never
         // from a ranged read, whose size is the range, not the object. Types
         // come from R2 metadata, sniffed once at put time.
+        const warm = url.searchParams.get("warm") === "1";
+        if (warm && (await this.env.CACHE.head(sha))) {
+          return new Response(null, { status: 204 });
+        }
         const range = parseRange(req.headers.get("range"));
         const known = await this.knownSize(sha);
         if (range && known !== null) {
@@ -309,31 +446,42 @@ export class Fetcher {
             });
           }
         }
-        if (!(await this.takeCap())) {
-          return Response.json({ ok: false, err: "cap" }, { status: 429 });
+        // Miss. `?warm=1` means "have this ready", not "play this": it joins
+        // or starts the download, waits for it, and sends no audio.
+        const pending = this.flightFor(sha, { warm });
+        if (!pending) {
+          return Response.json({ ok: true, skipped: "busy" }, { status: 202 });
         }
-        const res = await this.fromTelegram(sha);
-        if ("err" in res) {
-          return Response.json(
-            { ok: false, err: res.err },
-            { status: res.err === "unknown" ? 404 : 502 }
-          );
+        const flight = await pending;
+        if ("err" in flight) {
+          const status =
+            flight.err === "unknown" ? 404 : flight.err === "cap" ? 429 : 502;
+          return Response.json({ ok: false, err: flight.err }, { status });
         }
-        const total = res.bytes.byteLength;
-        const type = sniffMime(res.bytes);
-        await this.env.CACHE.put(sha, res.bytes as any, {
-          httpMetadata: { contentType: type },
-        });
-        await this.noteAccess(sha, total);
+        if (warm) {
+          try {
+            await flight.complete();
+          } catch (e) {
+            return Response.json(
+              { ok: false, err: String(e).slice(0, 200) },
+              { status: 502 }
+            );
+          }
+          return new Response(null, { status: 204 });
+        }
+        // Sniff needs the first bytes; everything after streams as it lands.
+        await flight.ready(Math.min(16, flight.total));
+        const total = flight.total;
+        const type = sniffMime(flight.head(16));
         if (range) {
           if (range.start >= total) return rangeEmpty(total);
           const end = Math.min(range.end, total - 1);
-          return new Response(res.bytes.slice(range.start, end + 1) as any, {
+          return new Response(flight.stream(range.start, end), {
             status: 206,
             headers: rangeHeaders(range.start, end, total, "telegram", type),
           });
         }
-        return new Response(res.bytes as any, {
+        return new Response(flight.stream(0, total - 1), {
           headers: fullHeaders(total, "telegram", type),
         });
       }
