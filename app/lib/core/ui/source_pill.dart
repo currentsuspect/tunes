@@ -1,3 +1,5 @@
+import '../platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
@@ -19,7 +21,7 @@ extension TrackSourceText on TrackSource {
   String get label => switch (this) {
     TrackSource.saved => 'held offline',
     TrackSource.streaming => 'streaming',
-    TrackSource.unavailable => 'not on this phone yet',
+    TrackSource.unavailable => 'not on ${Device.thisOne} yet',
   };
 
   Color get color => switch (this) {

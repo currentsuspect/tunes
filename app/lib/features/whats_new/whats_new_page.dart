@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
@@ -108,7 +110,8 @@ class _Entry extends StatelessWidget {
           Text(entry.title, style: TypeScale.heading.copyWith(fontSize: 21)),
           const SizedBox(height: Space.xs),
           Text(
-            entry.body,
+            // Written for a phone; on a computer it says computer.
+            entry.body.replaceAll('phone', Device.noun),
             style: TypeScale.body.copyWith(height: 1.5, fontSize: 14.5),
           ),
         ],

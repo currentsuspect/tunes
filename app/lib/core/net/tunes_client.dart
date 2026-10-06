@@ -495,23 +495,22 @@ class TunesClient {
 
   /// Whether the service answers, asked the cheapest way there is.
   ///
-  /// This used to fetch /manifest, the whole library (about 3 MB), every ten
-  /// seconds, which is a lot to spend on mobile data to learn one bit.
-  /// /changes with "since now" is authenticated like the manifest and answers
-  /// in a few bytes, from the daemon and the edge alike.
+  /// `/update` is public and a few bytes, answered in milliseconds. The two
+  /// things this used to ask were wrong for opposite reasons: /manifest is the
+  /// whole library (about 3 MB every ten seconds), and /changes makes the box
+  /// rebuild that manifest from scratch on every call, which on a busy box takes
+  /// seconds -- longer than the check would wait, so a perfectly good
+  /// connection was reported as lost, over and over.
+  ///
+  /// Any answer short of a server error counts: this asks "is it there", and a
+  /// 401 from a token that needs refreshing is the server very much being there.
   Future<bool> ping() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
     try {
-      final since = Uri.encodeComponent(
-        DateTime.now().toUtc().toIso8601String(),
-      );
-      final req = await client.getUrl(
-        Uri.parse('$baseUrl/changes?since=$since'),
-      );
-      await _authorize(req);
-      final res = await req.close().timeout(const Duration(seconds: 4));
-      await res.drain<void>().timeout(const Duration(seconds: 4));
-      return res.statusCode == 200;
+      final req = await client.getUrl(Uri.parse('$baseUrl/update'));
+      final res = await req.close().timeout(const Duration(seconds: 6));
+      await res.drain<void>().timeout(const Duration(seconds: 6));
+      return res.statusCode < 500;
     } catch (_) {
       return false;
     } finally {

@@ -3,11 +3,19 @@ import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/ui/playing_bars.dart';
 import 'package:tunes/core/ui/tunes_refresh.dart';
 import 'package:tunes/features/now_playing/now_playing_page.dart';
 import 'package:tunes/core/audio/tune_player.dart';
+import 'package:tunes/core/platform/device.dart';
+import 'package:tunes/core/ui/tunes_nav_bar.dart';
+import 'package:tunes/features/desktop/desktop_play_bar.dart';
+import 'package:tunes/features/lyrics/lyrics_sheet.dart';
+import 'package:tunes/features/player/scrubber.dart';
+import 'package:tunes/features/now_playing/lyric_preview.dart';
+import 'package:tunes/features/desktop/desktop_sidebar.dart';
 import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/art_store.dart';
 import 'package:tunes/core/data/download_manager.dart';
@@ -423,6 +431,7 @@ ManifestTrack _track(
   String? sha,
   String? releaseId,
   DateTime? addedAt,
+  String? lyrics,
 }) => ManifestTrack(
   sha: sha ?? (title == 'Bassline' ? 'a' * 64 : 'b' * 64),
   size: 1000,
@@ -440,6 +449,7 @@ ManifestTrack _track(
   trackNumber: null,
   discNumber: null,
   addedAt: addedAt,
+  lyrics: lyrics,
 );
 
 List<ManifestTrack> _library() => [
@@ -1506,16 +1516,265 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
 
+    // A phone on its side: 800 x 360 logical. (At a computer's size the app
+    // switches to its desktop layout, which has its own tests.)
     tester.view.physicalSize = const Size(2400, 1080);
-    tester.view.devicePixelRatio = 1.0;
+    tester.view.devicePixelRatio = 3.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpAndSettle();
 
-    // The row, the mini bar, and the recently played rail above the list.
-    expect(find.text('Bassline'), findsNWidgets(3));
+    // The row and the mini bar (the recently played rail above the list is
+    // out of a short window's view).
+    expect(find.text('Bassline'), findsAtLeastNWidgets(2));
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
     expect(player.playQueueCalls, 1);
+  });
+
+  testWidgets(
+    'a computer-sized window gets the sidebar and the bottom player',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final player = FakeTunePlayer();
+      await pumpApp(
+        tester,
+        _FakeClient(() async => _manifestOf(_library())),
+        player,
+      );
+      expect(find.byType(DesktopSidebar), findsOneWidget);
+      expect(find.byType(DesktopPlayBar), findsOneWidget);
+      expect(find.byType(TunesNavBar), findsNothing);
+
+      // The sidebar is the navigation.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DesktopSidebar),
+          matching: find.text('Library'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Bassline'), findsWidgets);
+
+      // Playing something fills the bottom player, and nothing overflows.
+      await tester.tap(find.text('Bassline').first);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(DesktopPlayBar),
+          matching: find.text('Bassline'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.pause_rounded), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  group('Now Playing on a computer', () {
+    Future<void> open(WidgetTester tester, List<ManifestTrack> lib) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pumpApp(
+        tester,
+        _FakeClient(() async => _manifestOf(lib)),
+        FakeTunePlayer(),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DesktopSidebar),
+          matching: find.text('Library'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bassline').first);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DesktopPlayBar),
+          matching: find.text('Bassline'),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    List<ManifestTrack> withLyrics() => [
+      _track('Bassline', 'flac', 950000, lyrics: '[00:01.00]first line'),
+      _track('Nightdrive', 'mp3', 320000),
+    ];
+
+    testWidgets('has the lyrics beside it, once, when the song has them', (
+      tester,
+    ) async {
+      await open(tester, withLyrics());
+      expect(find.byType(LyricsSheet), findsOneWidget);
+      // not also as a strip under the controls
+      expect(find.byType(LyricPreview), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('does not repeat the transport the bottom player already has', (
+      tester,
+    ) async {
+      await open(tester, withLyrics());
+      // one seek bar and one set of skip buttons: the bottom player's
+      expect(find.byType(Scrubber), findsOneWidget);
+      expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+    });
+
+    testWidgets('does not offer Lyrics in the menu when they are beside it', (
+      tester,
+    ) async {
+      await open(tester, withLyrics());
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NowPlayingPage),
+          matching: find.byType(PopupMenuButton<String>),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Track information'), findsOneWidget);
+      expect(find.text('Lyrics'), findsNothing);
+    });
+
+    testWidgets('offers it when the song has none, as the way to add some', (
+      tester,
+    ) async {
+      await open(tester, _library());
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NowPlayingPage),
+          matching: find.byType(PopupMenuButton<String>),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Lyrics'), findsOneWidget);
+    });
+
+    testWidgets('has no empty lyrics pane when the song has none', (
+      tester,
+    ) async {
+      await open(tester, _library());
+      expect(find.byType(LyricsSheet), findsNothing);
+      expect(find.byType(LyricPreview), findsNothing);
+      expect(find.byType(DesktopPlayBar), findsOneWidget);
+    });
+
+    testWidgets('hides the lyrics when the listener has turned them off', (
+      tester,
+    ) async {
+      await settings.setShowLyrics(false);
+      await open(tester, withLyrics());
+      expect(find.byType(LyricsSheet), findsNothing);
+    });
+  });
+
+  group('keyboard on a computer', () {
+    Future<FakeTunePlayer> desktop(WidgetTester tester) async {
+      Device.debugDesktop = true;
+      addTearDown(() => Device.debugDesktop = false);
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final player = FakeTunePlayer();
+      await pumpApp(
+        tester,
+        _FakeClient(() async => _manifestOf(_library())),
+        player,
+      );
+      return player;
+    }
+
+    Future<void> tab(WidgetTester tester, String name) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DesktopSidebar),
+          matching: find.text(name),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('space pauses from a fresh start', (tester) async {
+      final player = await desktop(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.toggleCalls, 1);
+    });
+
+    testWidgets('and after moving around the sidebar', (tester) async {
+      final player = await desktop(tester);
+      await tab(tester, 'Library');
+      await tab(tester, 'Discover');
+      await tab(tester, 'Home');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.toggleCalls, 1);
+    });
+
+    testWidgets('and after using the search box and leaving it', (
+      tester,
+    ) async {
+      final player = await desktop(tester);
+      await tab(tester, 'Search');
+      await tester.tap(find.byType(TextField).first);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'bass');
+      await tester.pumpAndSettle();
+      await tab(tester, 'Home');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.toggleCalls, 1, reason: 'after leaving Search');
+    });
+
+    testWidgets('and after clicking empty space while a box has focus', (
+      tester,
+    ) async {
+      final player = await desktop(tester);
+      await tab(tester, 'Search');
+      await tester.tap(find.byType(TextField).first);
+      await tester.pumpAndSettle();
+      // click somewhere that is not a control
+      await tester.tapAt(const Offset(900, 400));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.toggleCalls, 1, reason: 'after clicking away');
+    });
+
+    testWidgets('but typing in the search box is still typing', (tester) async {
+      final player = await desktop(tester);
+      await tab(tester, 'Search');
+      await tester.tap(find.byType(TextField).first);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+      expect(player.toggleCalls, 0);
+    });
+
+    testWidgets('and after a track is played from the list', (tester) async {
+      final player = await desktop(tester);
+      await tab(tester, 'Library');
+      await tester.tap(find.text('Bassline').first);
+      await tester.pumpAndSettle();
+      final before = player.toggleCalls;
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.toggleCalls, before + 1);
+    });
+  });
+
+  testWidgets('a phone-sized window keeps the tab bar and no sidebar', (
+    tester,
+  ) async {
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    expect(find.byType(DesktopSidebar), findsNothing);
+    expect(find.byType(TunesNavBar), findsOneWidget);
   });
 
   testWidgets('stop lives in the Now Playing menu', (tester) async {
@@ -1560,6 +1819,63 @@ void main() {
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(find.text('Up next'), findsNothing); // queue is a secondary surface
     expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+  });
+
+  group('Now Playing on a phone', () {
+    Future<void> open(WidgetTester tester, List<ManifestTrack> lib) async {
+      await pumpApp(
+        tester,
+        _FakeClient(() async => _manifestOf(lib)),
+        FakeTunePlayer(),
+      );
+      await goToLibrary(tester);
+      await tester.tap(find.text('Bassline'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bassline').last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('shows the lyric strip only when there are lyrics', (
+      tester,
+    ) async {
+      await open(tester, _library());
+      expect(find.byType(LyricPreview), findsNothing);
+    });
+
+    testWidgets('shows it for a song that has them', (tester) async {
+      await open(tester, [
+        _track('Bassline', 'flac', 950000, lyrics: '[00:01.00]first line'),
+        _track('Nightdrive', 'mp3', 320000),
+      ]);
+      expect(find.byType(LyricPreview), findsOneWidget);
+    });
+
+    testWidgets('and not when the listener has turned lyrics off', (
+      tester,
+    ) async {
+      await settings.setShowLyrics(false);
+      await open(tester, [
+        _track('Bassline', 'flac', 950000, lyrics: '[00:01.00]first line'),
+        _track('Nightdrive', 'mp3', 320000),
+      ]);
+      expect(find.byType(LyricPreview), findsNothing);
+    });
+
+    testWidgets(
+      'the page below has no lyrics section, and The file says how good it is',
+      (tester) async {
+        await open(tester, [
+          _track('Bassline', 'flac', 950000, lyrics: '[00:01.00]first line'),
+          _track('Nightdrive', 'mp3', 320000),
+        ]);
+        await tester.drag(find.byType(NowPlayingPage), const Offset(0, -2000));
+        await tester.pumpAndSettle();
+        expect(find.text('Lyrics'), findsNothing);
+        expect(find.text('The file'), findsOneWidget);
+        expect(find.text('Lossless'), findsOneWidget);
+        expect(find.text('FLAC'), findsOneWidget);
+      },
+    );
   });
 
   testWidgets('full page controls reach the player', (tester) async {
@@ -1825,6 +2141,11 @@ void main() {
     var ok = false;
     final reach = Reachability();
     final hb = Heartbeat(ping: () async => ok, reachability: reach);
+    // Three missed answers in a row, not one: a single slow reply is not an
+    // outage.
+    await hb.probe();
+    await hb.probe();
+    expect(reach.offline, isFalse);
     await hb.probe();
     expect(reach.offline, isTrue);
     ok = true;

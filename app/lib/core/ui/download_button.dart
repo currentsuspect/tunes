@@ -1,3 +1,5 @@
+import '../platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../data/download_manager.dart';
@@ -47,7 +49,7 @@ class DownloadButton extends StatelessWidget {
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
-        content: Text('Removed "$title" from this phone'),
+        content: Text('Removed "$title" from ${Device.thisOne}'),
         duration: const Duration(seconds: 5),
         // An action keeps a snackbar up until dismissed unless told otherwise.
         persist: false,
@@ -77,7 +79,7 @@ class DownloadButton extends StatelessWidget {
         final VoidCallback? onTap;
         if (held) {
           face = const _Held(key: ValueKey('held'));
-          label = 'On this phone. Tap to remove.';
+          label = 'On ${Device.thisOne}. Tap to remove.';
           onTap = () => _remove(context, manager);
         } else if (job != null && job.phase == DownloadPhase.failed) {
           face = const _Failed(key: ValueKey('failed'));
@@ -109,7 +111,7 @@ class DownloadButton extends StatelessWidget {
           );
           label = offline
               ? 'Offline. Download unavailable.'
-              : 'Download to this phone.';
+              : 'Download to ${Device.thisOne}.';
           onTap = offline ? null : onDownload;
         }
 

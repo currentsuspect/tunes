@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -351,7 +353,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           title: 'Keep playing with radio',
                           detail:
                               'When the queue ends, pick what follows from your '
-                              'own listening, on this phone. Added after the '
+                              'own listening, on ${Device.thisOne}. Added after the '
                               'queue, never mixed into it.',
                           value: s.radioAutoplay,
                           onChanged: s.setRadioAutoplay,
@@ -378,6 +380,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     _Group(
                       title: 'Lyrics',
                       children: [
+                        _SwitchTile(
+                          title: 'Show lyrics on Now Playing',
+                          detail:
+                              'Off, Now Playing is only the player. Songs '
+                              'with no lyrics never show a gap either way. '
+                              'Lyrics stay one tap away in the menu.',
+                          value: s.showLyrics,
+                          onChanged: s.setShowLyrics,
+                        ),
                         _ChoiceTile(
                           title: 'Text size',
                           choices: const ['Small', 'Medium', 'Large'],
@@ -407,7 +418,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         _ValueTile(
                           dot: Tones.held,
-                          label: 'Songs on this phone',
+                          label: 'Songs on ${Device.thisOne}',
                           value: _usage == null
                               ? '—'
                               : '${_usage!.downloadCount} · '
@@ -451,7 +462,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         _LinkTile(
                           title: 'Remove all downloads',
                           detail:
-                              'Takes every song off this phone. Your library and '
+                              'Takes every song off ${Device.thisOne}. Your library and '
                               'everything on the box is untouched.',
                           destructive: true,
                           onTap: _usage == null || _usage!.downloadCount == 0
@@ -460,7 +471,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   title: 'Remove all downloads?',
                                   body:
                                       'Every downloaded song is removed from this '
-                                      'phone. You can download them again.',
+                                      '${Device.noun}. You can download them again.',
                                   action: 'Remove',
                                   run: () async {
                                     for (final sha in widget.store.shas) {
@@ -492,7 +503,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           title: 'Sync the whole library',
                           detail:
                               'Ask the box for everything again, not just what '
-                              'changed. Nothing on this phone is lost.',
+                              'changed. Nothing on ${Device.thisOne} is lost.',
                           onTap: () async {
                             widget.onResync();
                             NavScope.of(context).back();
@@ -545,7 +556,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
 
                     _Group(
-                      title: 'This phone',
+                      title: Device.titleThis,
                       children: [
                         _ValueTile(
                           dot: _deviceId == null ? Tones.warn : Tones.held,
@@ -562,9 +573,9 @@ class _SettingsPageState extends State<SettingsPage> {
                               : 'Sign in again with a new code',
                           detail: _deviceId == null
                               ? 'Without this, the box will not send music to '
-                                    'this phone. Songs already downloaded keep '
+                                    '${Device.thisOne}. Songs already downloaded keep '
                                     'playing.'
-                              : 'Replaces the key on this phone. The old one '
+                              : 'Replaces the key on ${Device.thisOne}. The old one '
                                     'stops working.',
                           onTap: _enrolling ? null : _enrolDevice,
                         ),
@@ -1262,7 +1273,7 @@ class _StorageBar extends StatelessWidget {
             loaded ? formatBytes(total) : '—',
             style: TypeScale.display.copyWith(fontSize: 26),
           ),
-          Text('used on this phone', style: TypeScale.caption),
+          Text('used on ${Device.thisOne}', style: TypeScale.caption),
           const SizedBox(height: Space.md),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),

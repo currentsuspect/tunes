@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/rendering.dart' show HitTestResult, RenderEditable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -11,6 +12,13 @@ import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
 import 'core/net/update_check.dart';
 import 'core/net/update_installer.dart';
+import 'core/platform/device.dart';
+import 'features/desktop/desktop_keys.dart';
+import 'features/lyrics/lyrics_sheet.dart';
+import 'features/desktop/desktop_play_bar.dart';
+import 'features/desktop/desktop_sidebar.dart';
+import 'features/playlists/playlist_page.dart';
+import 'features/queue/queue_sheet.dart';
 import 'features/updates/update_banner.dart';
 import 'core/audio/tune_audio_handler.dart';
 import 'core/audio/position_saver.dart';
@@ -761,6 +769,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
     widget.accountSync?.onChanged = _onAccountSynced;
+    FocusManager.instance.addListener(_regainFocus);
     _refreshTimer = Timer.periodic(_refreshEvery, (_) {
       if (_foreground && mounted) _reload();
     });
@@ -800,6 +809,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    FocusManager.instance.removeListener(_regainFocus);
+    _keys.dispose();
     if (widget.accountSync?.onChanged == _onAccountSynced) {
       widget.accountSync?.onChanged = null;
     }
@@ -1309,7 +1320,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // phone that only checked for added tracks would never see them.
         if (changes.addedShas.isEmpty && changes.lyricsChanged.isEmpty) {
           needFull = false;
-          widget.reachability.setOffline(false);
+          widget.reachability.ok();
           synced = true;
         }
       } catch (_) {
@@ -1321,10 +1332,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       Object? fetchError;
       try {
         raw = await widget.client.fetchManifest(fromCacheOnFailure: false);
-        widget.reachability.setOffline(false);
+        widget.reachability.ok();
       } catch (e) {
         fetchError = e;
-        widget.reachability.setOffline(true);
+        widget.reachability.failed();
       }
       if (raw != null && mounted) {
         var applyOk = false;
@@ -1710,24 +1721,243 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               }),
         );
       },
-      child: Scaffold(
-        body: NavScope(controller: _nav, child: _buildBody()),
-        // The player sits above the navigation rather than beside it: it is a
-        // layer over the app, and the nav is the app's own furniture. The
-        // separation is a hairline and a surface change, not a shadow -- this
-        // interface has no other shadows and one would read as a mistake.
-        //
-        // On every page but the player. The mini bar and the tabs are one dock,
-        // so the way out of an artist, an album or a playlist is always the
-        // same: the tab you want, one tap. Pages used to cover it and each
-        // supplied a mini bar of its own, some forgetting to, which is why it
-        // was there on some screens and not on others. Now Playing is the one
-        // exception: it is the layer over the app, lit by the record, and
-        // carries its own controls.
-        bottomNavigationBar:
-            _nav.current == const PanelDest(TunesPanels.nowPlaying)
-            ? null
-            : _buildBottomNav(),
+      child: Listener(
+        // A click outside a text box lets go of it. On a computer a box keeps
+        // focus until something else asks for it, and while it has focus every
+        // key is read as typing, so after one search the shortcuts were dead.
+        onPointerDown: _releaseTextFocus,
+        child: Focus(
+          focusNode: _keys,
+          autofocus: true,
+          onKeyEvent: _onKey,
+          child: LayoutBuilder(
+            builder: (context, box) => isWideWindow(box.biggest)
+                ? _buildWide(context)
+                : _buildNarrow(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  final FocusNode _keys = FocusNode(debugLabel: 'tunes-keys');
+
+  /// Whether the focused thing is a text box.
+  static bool _inTextBox(FocusNode? f) =>
+      f?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
+
+  void _releaseTextFocus(PointerDownEvent event) {
+    if (!_inTextBox(FocusManager.instance.primaryFocus)) return;
+    final hit = HitTestResult();
+    WidgetsBinding.instance.hitTestInView(hit, event.position, event.viewId);
+    final onBox = hit.path.any((e) => e.target is RenderEditable);
+    if (!onBox) _keys.requestFocus();
+  }
+
+  /// Focus can be lost altogether (the box that had it was removed), after
+  /// which no key reaches the shortcuts. Take it back.
+  void _regainFocus() {
+    if (!mounted) return;
+    final f = FocusManager.instance.primaryFocus;
+    if (f == null || f is FocusScopeNode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_keys.hasFocus) _keys.requestFocus();
+      });
+    }
+  }
+
+  /// Keyboard control, on a computer: space plays and pauses, the arrows seek,
+  /// ctrl+arrows skip, L likes, / searches, Esc goes back, and the media keys
+  /// do what they say.
+  ///
+  /// Only for keys nothing else wanted: a focused button or text field sees
+  /// them first, and while a text field has focus none of this runs, so typing
+  /// a space into a search or a playlist name is never taken for "pause".
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (!Device.isDesktop) return KeyEventResult.ignored;
+    final focus = FocusManager.instance.primaryFocus;
+    final keys = HardwareKeyboard.instance;
+    return handleDesktopKey(
+      event: event,
+      player: widget.player,
+      typing:
+          focus?.context?.findAncestorWidgetOfExactType<EditableText>() != null,
+      ctrl: keys.isControlPressed || keys.isMetaPressed,
+      alt: keys.isAltPressed,
+      onLike: () {
+        final sha = widget.player.current?.sha;
+        if (sha != null) unawaited(LikesScope.maybeOf(context)?.toggle(sha));
+      },
+      onSearch: () => _onTabSelected(2),
+      onBack: _nav.back,
+    );
+  }
+
+  bool _wideNow(BuildContext context) =>
+      isWideWindow(MediaQuery.sizeOf(context));
+
+  Widget _buildNarrow() {
+    return Scaffold(
+      body: NavScope(controller: _nav, child: _buildBody()),
+      // The player sits above the navigation rather than beside it: it is a
+      // layer over the app, and the nav is the app's own furniture. The
+      // separation is a hairline and a surface change, not a shadow -- this
+      // interface has no other shadows and one would read as a mistake.
+      //
+      // On every page but the player. The mini bar and the tabs are one dock,
+      // so the way out of an artist, an album or a playlist is always the
+      // same: the tab you want, one tap. Pages used to cover it and each
+      // supplied a mini bar of its own, some forgetting to, which is why it
+      // was there on some screens and not on others. Now Playing is the one
+      // exception: it is the layer over the app, lit by the record, and
+      // carries its own controls.
+      bottomNavigationBar:
+          _nav.current == const PanelDest(TunesPanels.nowPlaying)
+          ? null
+          : _buildBottomNav(),
+    );
+  }
+
+  /// Now Playing on a wide window: the player as on a phone on the left, and
+  /// the lyrics open beside it on the right, where a phone would need a sheet.
+  Widget _buildWideNowPlaying() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.player, widget.settings]),
+      builder: (context, _) {
+        final track = widget.player.current;
+        final showPane =
+            track != null &&
+            widget.settings.showLyrics &&
+            (track.lyrics ?? '').trim().isNotEmpty;
+        return _wideNowPlayingRow(track, showPane);
+      },
+    );
+  }
+
+  Widget _wideNowPlayingRow(ManifestTrack? track, bool showPane) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 5,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: _buildBody(),
+            ),
+          ),
+        ),
+        // Lyrics beside the player only when there are lyrics to show and the
+        // listener wants them; otherwise the player has the room to itself.
+        if (showPane) ...[
+          const VerticalDivider(width: 1, color: Tones.hairline),
+          Expanded(
+            flex: 6,
+            child: LyricsSheet(
+              embedded: true,
+              track: track!,
+              player: widget.player,
+              onSave: (saved, text) => _lyricSharing.save(saved.sha, text),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The desktop layout: sidebar left, the page in the middle, the player
+  /// across the bottom. The same pages as the phone, in a frame that suits a
+  /// window; Now Playing sits in the middle column rather than covering all.
+  Widget _buildWide(BuildContext context) {
+    final onTab = _nav.current is! PanelDest;
+    final count = _manifest?.tracks.length ?? 0;
+    final tracks = [
+      for (final t in _manifest?.tracks ?? const <ManifestTrack>[])
+        if (!widget.reachability.offline || widget.store.pathFor(t.sha) != null)
+          t,
+    ];
+    final current = _nav.current;
+    final playingPage =
+        current is PanelDest && current.id == TunesPanels.nowPlaying;
+    final store = PlaylistScope.maybeOf(context);
+    return Scaffold(
+      body: Column(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                ListenableBuilder(
+                  listenable: widget.settings,
+                  builder: (context, _) => DesktopSidebar(
+                    selectedTab: onTab ? _tab : null,
+                    onTab: _onTabSelected,
+                    playlists: store,
+                    onPlaylist: (p) => _nav.openPanel(
+                      TunesPanels.playlist(p.id),
+                      () => PlaylistPage(
+                        summary: p,
+                        store: store!,
+                        player: widget.player,
+                        tracks: tracks,
+                        artUrlFor: _artUrlFor,
+                      ),
+                    ),
+                    onSettings: () => _openProfile(count),
+                    name: widget.settings.displayName,
+                    avatarPath: widget.settings.avatarPath,
+                    activePlaylistId:
+                        current is PanelDest &&
+                            current.id.startsWith('tunes/playlist/')
+                        ? int.tryParse(current.id.split('/').last)
+                        : null,
+                  ),
+                ),
+                Expanded(
+                  child: NavScope(
+                    controller: _nav,
+                    // Now Playing is a phone-shaped page; centred and held to a
+                    // comfortable width it reads as a panel rather than a
+                    // stretched poster.
+                    child: playingPage ? _buildWideNowPlaying() : _buildBody(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          DownloadsBar(
+            manager: _downloads,
+            onTap: () {
+              final bySha = {
+                for (final t in _manifest?.tracks ?? const <ManifestTrack>[])
+                  t.sha: t,
+              };
+              DownloadsSheet.show(
+                context,
+                manager: _downloads,
+                trackFor: (sha) => bySha[sha],
+              );
+            },
+          ),
+          DesktopPlayBar(
+            player: widget.player,
+            artUrlFor: _artUrlFor,
+            volume: widget.settings.volume,
+            onVolume: (v) => unawaited(widget.settings.setVolume(v)),
+            onOpenNowPlaying: _openNowPlaying,
+            onQueue: () => QueueSheet.show(
+              context,
+              queueStore: widget.queueStore,
+              player: widget.player,
+            ),
+            statusBuilder: (context) => SourceTag(
+              player: widget.player,
+              held:
+                  widget.player.current != null &&
+                  widget.store.pathFor(widget.player.current!.sha) != null,
+              offline: widget.reachability.offline,
+              reachability: widget.reachability,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1785,24 +2015,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ),
                 child: Row(
                   children: [
-                    GestureDetector(
-                      onTap: () {
-                        final count = _manifest?.tracks.length ?? 0;
-                        _openProfile(count);
-                      },
-                      // Listens to settings directly: choosing a picture in
-                      // the screen this opens should change the thing you
-                      // came back to, without a restart.
-                      child: ListenableBuilder(
-                        listenable: widget.settings,
-                        builder: (context, _) => ProfileAvatar(
-                          name: widget.settings.displayName,
-                          path: widget.settings.avatarPath,
-                          size: 38,
+                    // The sidebar has the profile on a wide window.
+                    if (!_wideNow(context)) ...[
+                      GestureDetector(
+                        onTap: () {
+                          final count = _manifest?.tracks.length ?? 0;
+                          _openProfile(count);
+                        },
+                        // Listens to settings directly: choosing a picture in
+                        // the screen this opens should change the thing you
+                        // came back to, without a restart.
+                        child: ListenableBuilder(
+                          listenable: widget.settings,
+                          builder: (context, _) => ProfileAvatar(
+                            name: widget.settings.displayName,
+                            path: widget.settings.avatarPath,
+                            size: 38,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: Space.md),
+                      const SizedBox(width: Space.md),
+                    ],
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

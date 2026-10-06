@@ -30,7 +30,13 @@ class LyricsSheet extends StatefulWidget {
     required this.track,
     required this.player,
     required this.onSave,
+    this.embedded = false,
   });
+
+  /// Set when the lyrics sit in a pane of a wide window instead of a sheet: no
+  /// drag handle, no sheet, and a header that is only the menu (the player
+  /// beside it already says which song this is).
+  final bool embedded;
 
   /// What was playing when the sheet opened, used only until the player says
   /// otherwise.
@@ -85,6 +91,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
 
   @override
   void dispose() {
+    _embeddedScroll.dispose();
     widget.player.removeListener(_onPlayer);
     _controller.dispose();
     super.dispose();
@@ -198,82 +205,89 @@ class _LyricsSheetState extends State<LyricsSheet> {
     ...t.featured,
   ].whereType<String>().where((a) => a.trim().isNotEmpty).toList();
 
+  final ScrollController _embeddedScroll = ScrollController();
+
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) return _content(context, _embeddedScroll);
     return DraggableScrollableSheet(
       initialChildSize: 0.93,
       minChildSize: 0.4,
       maxChildSize: 0.97,
       expand: false,
-      builder: (context, scrollController) {
-        // The sheet is a route of its own, outside the player's tint, so it
-        // lights itself: the record's colour pouring in from the top, as on
-        // Now Playing.
-        return TintBuilder(
-          artSha: _track.artSha,
-          builder: (context, tint) => Stack(
-            fit: StackFit.expand,
-            children: [
-              AmbientGlow(tint: tint, strength: 0.32),
-              SafeArea(
-                // The sheet sits below the status bar already.
-                top: false,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).viewInsets.bottom,
-                  ),
-                  child: Column(
-                    children: [
-                      // A handle drawn on the glow, rather than the sheet's own
-                      // on a solid band that cut the colour off at the top.
-                      Container(
-                        width: 36,
-                        height: 4,
-                        margin: const EdgeInsets.symmetric(
-                          vertical: Space.sm + 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Tones.textMuted.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      _Header(
-                        track: _track,
-                        editing: _editing,
-                        saving: _saving,
-                        kind: _LyricsKind.of(_lyrics),
-                        onClose: () => Navigator.of(context).pop(),
-                        onSync: _lyrics.trim().isEmpty ? null : _openSync,
-                        onEdit: _startEdit,
-                        onCancel: _cancelEdit,
-                        onSave: _save,
-                      ),
-                      Expanded(
-                        child: _editing
-                            ? _Editor(
-                                controller: _controller,
-                                scrollController: scrollController,
-                              )
-                            : _View(
-                                // A different song is a different list: new
-                                // keys, new follow state, back to the top.
-                                key: ValueKey(_track.sha),
-                                lyrics: _lyrics,
-                                artists: _artistsOf(_track),
-                                player: widget.player,
-                                scrollController: scrollController,
-                                onAddLyrics: _startEdit,
-                                onLineVoice: _setLineVoice,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
+      builder: _content,
+    );
+  }
+
+  Widget _content(BuildContext context, ScrollController scrollController) {
+    // The sheet is a route of its own, outside the player's tint, so it
+    // lights itself: the record's colour pouring in from the top, as on
+    // Now Playing.
+    return TintBuilder(
+      artSha: _track.artSha,
+      builder: (context, tint) => Stack(
+        fit: StackFit.expand,
+        children: [
+          AmbientGlow(tint: tint, strength: 0.32),
+          SafeArea(
+            // The sheet sits below the status bar already.
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
-            ],
+              child: Column(
+                children: [
+                  // A handle drawn on the glow, rather than the sheet's own
+                  // on a solid band that cut the colour off at the top.
+                  if (!widget.embedded)
+                    Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.symmetric(
+                        vertical: Space.sm + 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Tones.textMuted.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  _Header(
+                    compact: widget.embedded,
+                    track: _track,
+                    editing: _editing,
+                    saving: _saving,
+                    kind: _LyricsKind.of(_lyrics),
+                    onClose: () => Navigator.of(context).pop(),
+                    onSync: _lyrics.trim().isEmpty ? null : _openSync,
+                    onEdit: _startEdit,
+                    onCancel: _cancelEdit,
+                    onSave: _save,
+                  ),
+                  Expanded(
+                    child: _editing
+                        ? _Editor(
+                            controller: _controller,
+                            scrollController: scrollController,
+                          )
+                        : _View(
+                            // A different song is a different list: new
+                            // keys, new follow state, back to the top.
+                            key: ValueKey(_track.sha),
+                            lyrics: _lyrics,
+                            artists: _artistsOf(_track),
+                            player: widget.player,
+                            scrollController: scrollController,
+                            onAddLyrics: _startEdit,
+                            onLineVoice: _setLineVoice,
+                          ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 }
@@ -307,6 +321,7 @@ enum _LyricsKind {
 
 class _Header extends StatelessWidget {
   const _Header({
+    required this.compact,
     required this.track,
     required this.editing,
     required this.saving,
@@ -318,6 +333,8 @@ class _Header extends StatelessWidget {
     required this.onSave,
   });
 
+  /// Only the menu: in a pane beside the player, the title is already there.
+  final bool compact;
   final ManifestTrack track;
   final bool editing;
   final bool saving;
@@ -343,24 +360,29 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  track.title,
-                  style: TypeScale.display.copyWith(fontSize: 20, height: 1.15),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  editing ? 'Editing lyrics' : track.artistDisplay,
-                  style: TypeScale.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+            child: compact && !editing
+                ? const SizedBox.shrink()
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        track.title,
+                        style: TypeScale.display.copyWith(
+                          fontSize: 20,
+                          height: 1.15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        editing ? 'Editing lyrics' : track.artistDisplay,
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
           ),
           if (editing) ...[
             TextButton(

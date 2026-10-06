@@ -1,3 +1,5 @@
+import '../platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../data/download_manager.dart';
@@ -70,7 +72,9 @@ class _Body extends StatelessWidget {
     if (active > 0) {
       // "3 of 12": the song in progress counts as the next one.
       final at = (done + 1).clamp(1, total <= 0 ? 1 : total);
-      text = total <= 1 ? 'Saving to this phone' : 'Saving $at of $total';
+      text = total <= 1
+          ? 'Saving to ${Device.thisOne}'
+          : 'Saving $at of $total';
       color = Tones.text;
     } else {
       text = failed == 1 ? '1 download failed' : '$failed downloads failed';

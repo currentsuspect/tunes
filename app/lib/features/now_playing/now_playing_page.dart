@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
@@ -285,7 +287,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   ),
                                   Expanded(
                                     child: Center(
-                                      child: _SourceTag(
+                                      child: SourceTag(
                                         player: widget.player,
                                         held: downloaded,
                                         offline: widget.offline,
@@ -406,13 +408,25 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
-                                        value: 'lyrics',
-                                        child: Text(
-                                          'Lyrics',
-                                          style: TypeScale.body,
+                                      // Beside the player already when the window is wide
+                                      // and the song has lyrics; otherwise this is the way
+                                      // in (to read them, or to add some).
+                                      if (!(isWideWindow(
+                                            MediaQuery.sizeOf(context),
+                                          ) &&
+                                          (SettingsScope.maybeOf(context)
+                                                  ?.showLyrics ??
+                                              true) &&
+                                          (current.lyrics ?? '')
+                                              .trim()
+                                              .isNotEmpty))
+                                        const PopupMenuItem(
+                                          value: 'lyrics',
+                                          child: Text(
+                                            'Lyrics',
+                                            style: TypeScale.body,
+                                          ),
                                         ),
-                                      ),
                                     ],
                                   ),
                                 ],
@@ -495,69 +509,77 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 ),
                               ),
                             ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: Space.md,
+                            // The desktop player along the foot of the window has the
+                            // seek bar and the transport, so a wide page does not
+                            // repeat them.
+                            if (!isWideWindow(MediaQuery.sizeOf(context))) ...[
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: Space.md,
+                                ),
+                                child: Scrubber(
+                                  player: widget.player,
+                                  duration: duration,
+                                ),
                               ),
-                              child: Scrubber(
-                                player: widget.player,
-                                duration: duration,
-                              ),
-                            ),
-                            // Five controls on one line: the two switches that
-                            // change how the queue behaves at the edges, and
-                            // the transport between them. The play button is
-                            // paper on ink, not the accent, so it stays the
-                            // calmest thing on a screen already full of light.
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: Space.lg,
-                                vertical: Space.xs,
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  _ShuffleButton(player: widget.player),
-                                  IconButton(
-                                    onPressed: widget.player.previous,
-                                    iconSize: 36,
-                                    icon: const Icon(
-                                      Icons.skip_previous_rounded,
-                                      color: Tones.text,
+                              // Five controls on one line: the two switches that
+                              // change how the queue behaves at the edges, and
+                              // the transport between them. The play button is
+                              // paper on ink, not the accent, so it stays the
+                              // calmest thing on a screen already full of light.
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: Space.lg,
+                                  vertical: Space.xs,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    _ShuffleButton(player: widget.player),
+                                    IconButton(
+                                      onPressed: widget.player.previous,
+                                      iconSize: 36,
+                                      icon: const Icon(
+                                        Icons.skip_previous_rounded,
+                                        color: Tones.text,
+                                      ),
+                                      tooltip: 'Previous',
                                     ),
-                                    tooltip: 'Previous',
-                                  ),
-                                  _PlayButton(player: widget.player),
-                                  IconButton(
-                                    onPressed: widget.player.next,
-                                    iconSize: 36,
-                                    icon: const Icon(
-                                      Icons.skip_next_rounded,
-                                      color: Tones.text,
+                                    _PlayButton(player: widget.player),
+                                    IconButton(
+                                      onPressed: widget.player.next,
+                                      iconSize: 36,
+                                      icon: const Icon(
+                                        Icons.skip_next_rounded,
+                                        color: Tones.text,
+                                      ),
+                                      tooltip: 'Next',
                                     ),
-                                    tooltip: 'Next',
-                                  ),
-                                  _RepeatButton(player: widget.player),
-                                ],
+                                    _RepeatButton(player: widget.player),
+                                  ],
+                                ),
                               ),
-                            ),
-                            // The line being sung. A reactive surface, not a
-                            // control: it shows where the words are and opens
-                            // the full view on tap. With no lyrics it is one
-                            // quiet line offering to add them, at the same
-                            // height, so the sleeve, title and controls sit
-                            // exactly where they do for a song that has them.
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: Space.lg,
+                            ],
+                            // The line being sung, only when there is one to sing.
+                            // A song with no lyrics, a listener who has turned
+                            // them off, and a window wide enough to show them
+                            // beside the player all leave this out, rather than
+                            // holding an empty strip: the page is the player.
+                            if ((SettingsScope.maybeOf(context)?.showLyrics ??
+                                    true) &&
+                                (current.lyrics ?? '').trim().isNotEmpty &&
+                                !isWideWindow(MediaQuery.sizeOf(context)))
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: Space.lg,
+                                ),
+                                child: LyricPreview(
+                                  lyrics: current.lyrics,
+                                  player: widget.player,
+                                  onOpen: () => _openLyrics(context, current),
+                                ),
                               ),
-                              child: LyricPreview(
-                                lyrics: current.lyrics,
-                                player: widget.player,
-                                onOpen: () => _openLyrics(context, current),
-                              ),
-                            ),
                             // Says there is something below, which a scroll view on a
                             // screen that exactly fills the viewport otherwise hides.
                             // A handle, not a footer. It used to be a small
@@ -583,7 +605,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     ),
                                     const SizedBox(height: Space.xs),
                                     Text(
-                                      'Lyrics and credits',
+                                      'About this track',
                                       style: TypeScale.caption.copyWith(
                                         color: Tones.textMuted.withValues(
                                           alpha: 0.85,
@@ -612,7 +634,6 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                             artUrlFor: widget.artUrlFor,
                             onOpenArtist: (a) => _openArtist(context, a),
                             onOpenAlbum: () => _openAlbum(context, current),
-                            onOpenLyrics: () => _openLyrics(context, current),
                           ),
                         ),
                       ),
@@ -650,10 +671,11 @@ class _Backdrop extends StatelessWidget {
   }
 }
 
-/// "held offline", "streaming" or "not on this phone yet", following the
+/// "saved", "streaming" or "not here yet", following the
 /// connection live when it can.
-class _SourceTag extends StatelessWidget {
-  const _SourceTag({
+class SourceTag extends StatelessWidget {
+  const SourceTag({
+    super.key,
     required this.player,
     required this.held,
     required this.offline,
@@ -702,7 +724,7 @@ class _SourceTag extends StatelessWidget {
     final (icon, text, color) = switch (source) {
       TrackSource.saved => (
         Icons.download_done_rounded,
-        'saved on this phone',
+        'saved on ${Device.thisOne}',
         Tones.held,
       ),
       TrackSource.streaming => (
@@ -712,7 +734,7 @@ class _SourceTag extends StatelessWidget {
       ),
       TrackSource.unavailable => (
         Icons.cloud_off_rounded,
-        'not on this phone yet',
+        'not on ${Device.thisOne} yet',
         Tones.warn,
       ),
     };

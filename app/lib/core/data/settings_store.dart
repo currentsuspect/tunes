@@ -24,10 +24,12 @@ class SettingsStore extends ChangeNotifier {
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _lyricSize = 'lyrics.size';
+  static const _showLyrics = 'lyrics.show';
   static const _radioReach = 'radio.reach';
   static const _whatsNewSeen = 'app.whatsNewSeen';
   static const _serverUrl = 'server.url';
   static const _syncHistory = 'sync.history';
+  static const _volume = 'desktop.volume';
   static const _lastPlayedSha = 'playback.lastPlayedSha';
   static const _lastPositionMs = 'playback.lastPositionMs';
 
@@ -62,6 +64,13 @@ class SettingsStore extends ChangeNotifier {
     if (v == null) return fallback;
     return v == 'true';
   }
+
+  // --- desktop -------------------------------------------------------------
+
+  /// The player's own level on a computer, 0 to 1, kept between launches.
+  double get volume =>
+      (double.tryParse(_cache[_volume] ?? '') ?? 1).clamp(0, 1);
+  Future<void> setVolume(double v) => _put(_volume, v.toStringAsFixed(2));
 
   // --- sync ----------------------------------------------------------------
 
@@ -132,6 +141,11 @@ class SettingsStore extends ChangeNotifier {
     final v = int.tryParse(_cache[_lyricSize] ?? '');
     return v == null ? 1 : v.clamp(0, 2);
   }
+
+  /// Whether Now Playing shows lyrics at all. On by default; they are still a
+  /// menu item away when off, and a song with none never shows an empty space.
+  bool get showLyrics => _bool(_showLyrics, fallback: true);
+  Future<void> setShowLyrics(bool v) => _put(_showLyrics, '$v');
 
   Future<void> setLyricSize(int v) => _put(_lyricSize, '${v.clamp(0, 2)}');
 

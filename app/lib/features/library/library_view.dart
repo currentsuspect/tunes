@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
@@ -132,7 +134,7 @@ class _LibraryViewState extends State<LibraryView> {
                   const SizedBox(width: Space.sm),
                   _FilterChip(
                     icon: Icons.offline_pin_rounded,
-                    label: 'On this phone',
+                    label: 'On ${Device.thisOne}',
                     count: _heldCount,
                     selected: _onPhone,
                     onTap: () => setState(() => _onPhone = true),
@@ -518,9 +520,9 @@ class _LibraryViewState extends State<LibraryView> {
       // empty or your filter matched nothing" tells someone who typed three
       // letters that their whole library might be gone.
       if (_onPhone && widget.filter.trim().isEmpty) {
-        return const EmptyState(
+        return EmptyState(
           icon: Icons.offline_pin_outlined,
-          title: 'Nothing on this phone yet',
+          title: 'Nothing on ${Device.thisOne} yet',
           body:
               'Tap the arrow beside a song to download it. Downloaded songs '
               'play with no connection, and are all you see when offline.',

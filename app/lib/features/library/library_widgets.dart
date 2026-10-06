@@ -65,6 +65,16 @@ class TrackRow extends StatelessWidget {
             ignoring: dimmed,
             child: InkWell(
               onTap: onTap,
+              // Right-click is the long press of a mouse.
+              onSecondaryTap: _hasActions
+                  ? () => TrackActionsSheet.show(
+                      context,
+                      track: track,
+                      onPlayNext: onPlayNext!,
+                      onAddToQueue: onAddToQueue!,
+                      onEdit: onEdit!,
+                    )
+                  : null,
               onLongPress: _hasActions
                   ? () => TrackActionsSheet.show(
                       context,

@@ -15,6 +15,28 @@ class TunesNavItem {
   final String label;
 }
 
+/// A drawn glyph at any size, for places that are not the tab bar (the desktop
+/// sidebar).
+class NavGlyphIcon extends StatelessWidget {
+  const NavGlyphIcon({
+    super.key,
+    required this.glyph,
+    required this.color,
+    this.size = 22,
+  });
+
+  final NavGlyph glyph;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: size,
+    height: size,
+    child: CustomPaint(painter: _GlyphPainter(glyph, color)),
+  );
+}
+
 class _GlyphPainter extends CustomPainter {
   const _GlyphPainter(this.glyph, this.color);
 

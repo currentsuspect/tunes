@@ -7,6 +7,26 @@ class Reachability extends ChangeNotifier {
 
   bool get offline => _offline;
 
+  int _failures = 0;
+
+  /// How many checks in a row have to fail before the app says it is offline.
+  /// One missed answer is a busy box or a bad second on the network, not the
+  /// end of the connection; saying "offline" for it and "online" again a few
+  /// seconds later is what made the app flicker.
+  static const failuresToGoOffline = 3;
+
+  /// A check or a request got an answer: online at once.
+  void ok() {
+    _failures = 0;
+    setOffline(false);
+  }
+
+  /// A check or a request got no answer. Offline only once it keeps happening.
+  void failed() {
+    _failures += 1;
+    if (_failures >= failuresToGoOffline) setOffline(true);
+  }
+
   void setOffline(bool value) {
     if (value == _offline) return;
     _offline = value;
@@ -55,10 +75,10 @@ class Heartbeat {
     if (_probing) return;
     _probing = true;
     try {
-      final ok = await ping();
-      reachability.setOffline(!ok);
+      final answered = await ping();
+      answered ? reachability.ok() : reachability.failed();
     } catch (_) {
-      reachability.setOffline(true);
+      reachability.failed();
     } finally {
       _probing = false;
     }

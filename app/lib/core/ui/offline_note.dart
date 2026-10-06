@@ -1,3 +1,5 @@
+import '../platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
@@ -10,7 +12,7 @@ import '../theme/tokens.dart';
 class OfflineNote extends StatelessWidget {
   const OfflineNote({super.key});
 
-  static const message = 'Showing what is on this phone';
+  static String get message => 'Showing what is on ${Device.thisOne}';
 
   @override
   Widget build(BuildContext context) {

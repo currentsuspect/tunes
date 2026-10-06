@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -165,7 +167,7 @@ class _SearchViewState extends State<SearchView> {
                 ),
                 const SizedBox(width: Space.sm),
                 Text(
-                  'Searching what is on this phone',
+                  'Searching what is on ${Device.thisOne}',
                   style: TypeScale.mono.copyWith(fontSize: 11.5),
                 ),
               ],
@@ -188,7 +190,7 @@ class _SearchViewState extends State<SearchView> {
                   // that only checked the device means something different
                   // from one that asked the daemon too.
                   body: widget.offline
-                      ? 'Nothing downloaded to this phone matches '
+                      ? 'Nothing downloaded to ${Device.thisOne} matches '
                             '"${_query.trim()}". Songs you have not downloaded '
                             'cannot be found without a connection.'
                       : fromServer

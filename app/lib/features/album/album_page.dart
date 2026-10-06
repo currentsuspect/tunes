@@ -1,3 +1,5 @@
+import '../../core/platform/device.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
@@ -383,7 +385,7 @@ class _AlbumDownload extends StatelessWidget {
             size: 22,
             color: Tones.held,
           );
-          label = 'All $total songs are on this phone';
+          label = 'All $total songs are on ${Device.thisOne}';
         } else if (working) {
           face = Stack(
             key: const ValueKey('working'),
@@ -436,7 +438,7 @@ class _AlbumDownload extends StatelessWidget {
                           ..showSnackBar(
                             SnackBar(
                               content: Text(
-                                'All $total songs are on this phone. Remove '
+                                'All $total songs are on ${Device.thisOne}. Remove '
                                 'them one at a time from the tick beside each.',
                               ),
                             ),
