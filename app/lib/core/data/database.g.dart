@@ -3551,6 +3551,15 @@ class $PlayEventsTable extends PlayEvents
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _originMeta = const VerificationMeta('origin');
+  @override
+  late final GeneratedColumn<String> origin = GeneratedColumn<String>(
+    'origin',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3559,6 +3568,7 @@ class $PlayEventsTable extends PlayEvents
     listenedMs,
     durationMs,
     completed,
+    origin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3611,6 +3621,12 @@ class $PlayEventsTable extends PlayEvents
         completed.isAcceptableOrUnknown(data['completed']!, _completedMeta),
       );
     }
+    if (data.containsKey('origin')) {
+      context.handle(
+        _originMeta,
+        origin.isAcceptableOrUnknown(data['origin']!, _originMeta),
+      );
+    }
     return context;
   }
 
@@ -3644,6 +3660,10 @@ class $PlayEventsTable extends PlayEvents
         DriftSqlType.bool,
         data['${effectivePrefix}completed'],
       )!,
+      origin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin'],
+      ),
     );
   }
 
@@ -3672,6 +3692,12 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
   /// Whether this counted as a play under the rule in PlayHistory. Stored so
   /// the decision is auditable, and recomputable if the rule changes.
   final bool completed;
+
+  /// The device this listen happened on, when it was brought here by account
+  /// sync. Null for a listen made on this device, which is the only kind this
+  /// device sends: without the mark, another device's history would be sent
+  /// back as if it were ours.
+  final String? origin;
   const PlayEvent({
     required this.id,
     required this.sha,
@@ -3679,6 +3705,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
     required this.listenedMs,
     required this.durationMs,
     required this.completed,
+    this.origin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3689,6 +3716,9 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
     map['listened_ms'] = Variable<int>(listenedMs);
     map['duration_ms'] = Variable<int>(durationMs);
     map['completed'] = Variable<bool>(completed);
+    if (!nullToAbsent || origin != null) {
+      map['origin'] = Variable<String>(origin);
+    }
     return map;
   }
 
@@ -3700,6 +3730,9 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
       listenedMs: Value(listenedMs),
       durationMs: Value(durationMs),
       completed: Value(completed),
+      origin: origin == null && nullToAbsent
+          ? const Value.absent()
+          : Value(origin),
     );
   }
 
@@ -3715,6 +3748,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
       listenedMs: serializer.fromJson<int>(json['listenedMs']),
       durationMs: serializer.fromJson<int>(json['durationMs']),
       completed: serializer.fromJson<bool>(json['completed']),
+      origin: serializer.fromJson<String?>(json['origin']),
     );
   }
   @override
@@ -3727,6 +3761,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
       'listenedMs': serializer.toJson<int>(listenedMs),
       'durationMs': serializer.toJson<int>(durationMs),
       'completed': serializer.toJson<bool>(completed),
+      'origin': serializer.toJson<String?>(origin),
     };
   }
 
@@ -3737,6 +3772,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
     int? listenedMs,
     int? durationMs,
     bool? completed,
+    Value<String?> origin = const Value.absent(),
   }) => PlayEvent(
     id: id ?? this.id,
     sha: sha ?? this.sha,
@@ -3744,6 +3780,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
     listenedMs: listenedMs ?? this.listenedMs,
     durationMs: durationMs ?? this.durationMs,
     completed: completed ?? this.completed,
+    origin: origin.present ? origin.value : this.origin,
   );
   PlayEvent copyWithCompanion(PlayEventsCompanion data) {
     return PlayEvent(
@@ -3757,6 +3794,7 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
           ? data.durationMs.value
           : this.durationMs,
       completed: data.completed.present ? data.completed.value : this.completed,
+      origin: data.origin.present ? data.origin.value : this.origin,
     );
   }
 
@@ -3768,14 +3806,22 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
           ..write('startedAt: $startedAt, ')
           ..write('listenedMs: $listenedMs, ')
           ..write('durationMs: $durationMs, ')
-          ..write('completed: $completed')
+          ..write('completed: $completed, ')
+          ..write('origin: $origin')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, sha, startedAt, listenedMs, durationMs, completed);
+  int get hashCode => Object.hash(
+    id,
+    sha,
+    startedAt,
+    listenedMs,
+    durationMs,
+    completed,
+    origin,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3785,7 +3831,8 @@ class PlayEvent extends DataClass implements Insertable<PlayEvent> {
           other.startedAt == this.startedAt &&
           other.listenedMs == this.listenedMs &&
           other.durationMs == this.durationMs &&
-          other.completed == this.completed);
+          other.completed == this.completed &&
+          other.origin == this.origin);
 }
 
 class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
@@ -3795,6 +3842,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
   final Value<int> listenedMs;
   final Value<int> durationMs;
   final Value<bool> completed;
+  final Value<String?> origin;
   const PlayEventsCompanion({
     this.id = const Value.absent(),
     this.sha = const Value.absent(),
@@ -3802,6 +3850,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
     this.listenedMs = const Value.absent(),
     this.durationMs = const Value.absent(),
     this.completed = const Value.absent(),
+    this.origin = const Value.absent(),
   });
   PlayEventsCompanion.insert({
     this.id = const Value.absent(),
@@ -3810,6 +3859,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
     required int listenedMs,
     this.durationMs = const Value.absent(),
     this.completed = const Value.absent(),
+    this.origin = const Value.absent(),
   }) : sha = Value(sha),
        startedAt = Value(startedAt),
        listenedMs = Value(listenedMs);
@@ -3820,6 +3870,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
     Expression<int>? listenedMs,
     Expression<int>? durationMs,
     Expression<bool>? completed,
+    Expression<String>? origin,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -3828,6 +3879,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
       if (listenedMs != null) 'listened_ms': listenedMs,
       if (durationMs != null) 'duration_ms': durationMs,
       if (completed != null) 'completed': completed,
+      if (origin != null) 'origin': origin,
     });
   }
 
@@ -3838,6 +3890,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
     Value<int>? listenedMs,
     Value<int>? durationMs,
     Value<bool>? completed,
+    Value<String?>? origin,
   }) {
     return PlayEventsCompanion(
       id: id ?? this.id,
@@ -3846,6 +3899,7 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
       listenedMs: listenedMs ?? this.listenedMs,
       durationMs: durationMs ?? this.durationMs,
       completed: completed ?? this.completed,
+      origin: origin ?? this.origin,
     );
   }
 
@@ -3870,6 +3924,9 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
     if (completed.present) {
       map['completed'] = Variable<bool>(completed.value);
     }
+    if (origin.present) {
+      map['origin'] = Variable<String>(origin.value);
+    }
     return map;
   }
 
@@ -3881,7 +3938,8 @@ class PlayEventsCompanion extends UpdateCompanion<PlayEvent> {
           ..write('startedAt: $startedAt, ')
           ..write('listenedMs: $listenedMs, ')
           ..write('durationMs: $durationMs, ')
-          ..write('completed: $completed')
+          ..write('completed: $completed, ')
+          ..write('origin: $origin')
           ..write(')'))
         .toString();
   }
@@ -4151,8 +4209,23 @@ class $PlaylistsTable extends Playlists
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
   @override
-  List<GeneratedColumn> get $columns => [id, name, createdAt, updatedAt];
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    createdAt,
+    updatedAt,
+    syncId,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -4192,6 +4265,12 @@ class $PlaylistsTable extends Playlists
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
+    }
     return context;
   }
 
@@ -4217,6 +4296,10 @@ class $PlaylistsTable extends Playlists
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      ),
     );
   }
 
@@ -4234,11 +4317,17 @@ class Playlist extends DataClass implements Insertable<Playlist> {
   /// Touched on every change to its contents, so a list of playlists can be
   /// ordered by what is being worked on rather than by what is oldest.
   final int updatedAt;
+
+  /// The playlist's identity across devices. The integer id is this device's
+  /// own row number and means nothing on another; this is what account sync
+  /// matches on. Null until sync first sees the playlist, which gives it one.
+  final String? syncId;
   const Playlist({
     required this.id,
     required this.name,
     required this.createdAt,
     required this.updatedAt,
+    this.syncId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4247,6 +4336,9 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     map['name'] = Variable<String>(name);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || syncId != null) {
+      map['sync_id'] = Variable<String>(syncId);
+    }
     return map;
   }
 
@@ -4256,6 +4348,9 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       name: Value(name),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      syncId: syncId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncId),
     );
   }
 
@@ -4269,6 +4364,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       name: serializer.fromJson<String>(json['name']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      syncId: serializer.fromJson<String?>(json['syncId']),
     );
   }
   @override
@@ -4279,22 +4375,30 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       'name': serializer.toJson<String>(name),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'syncId': serializer.toJson<String?>(syncId),
     };
   }
 
-  Playlist copyWith({int? id, String? name, int? createdAt, int? updatedAt}) =>
-      Playlist(
-        id: id ?? this.id,
-        name: name ?? this.name,
-        createdAt: createdAt ?? this.createdAt,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  Playlist copyWith({
+    int? id,
+    String? name,
+    int? createdAt,
+    int? updatedAt,
+    Value<String?> syncId = const Value.absent(),
+  }) => Playlist(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    syncId: syncId.present ? syncId.value : this.syncId,
+  );
   Playlist copyWithCompanion(PlaylistsCompanion data) {
     return Playlist(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
     );
   }
 
@@ -4304,13 +4408,14 @@ class Playlist extends DataClass implements Insertable<Playlist> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncId: $syncId')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, createdAt, updatedAt);
+  int get hashCode => Object.hash(id, name, createdAt, updatedAt, syncId);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -4318,7 +4423,8 @@ class Playlist extends DataClass implements Insertable<Playlist> {
           other.id == this.id &&
           other.name == this.name &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.syncId == this.syncId);
 }
 
 class PlaylistsCompanion extends UpdateCompanion<Playlist> {
@@ -4326,17 +4432,20 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
   final Value<String> name;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<String?> syncId;
   const PlaylistsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.syncId = const Value.absent(),
   });
   PlaylistsCompanion.insert({
     this.id = const Value.absent(),
     required String name,
     required int createdAt,
     required int updatedAt,
+    this.syncId = const Value.absent(),
   }) : name = Value(name),
        createdAt = Value(createdAt),
        updatedAt = Value(updatedAt);
@@ -4345,12 +4454,14 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     Expression<String>? name,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<String>? syncId,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (syncId != null) 'sync_id': syncId,
     });
   }
 
@@ -4359,12 +4470,14 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     Value<String>? name,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<String?>? syncId,
   }) {
     return PlaylistsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      syncId: syncId ?? this.syncId,
     );
   }
 
@@ -4383,6 +4496,9 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
+    }
     return map;
   }
 
@@ -4392,7 +4508,8 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncId: $syncId')
           ..write(')'))
         .toString();
   }
@@ -6527,6 +6644,7 @@ typedef $$PlayEventsTableCreateCompanionBuilder = PlayEventsCompanion Function({
   required int listenedMs,
   Value<int> durationMs,
   Value<bool> completed,
+  Value<String?> origin,
 });
 typedef $$PlayEventsTableUpdateCompanionBuilder = PlayEventsCompanion Function({
   Value<int> id,
@@ -6535,6 +6653,7 @@ typedef $$PlayEventsTableUpdateCompanionBuilder = PlayEventsCompanion Function({
   Value<int> listenedMs,
   Value<int> durationMs,
   Value<bool> completed,
+  Value<String?> origin,
 });
 
 class $$PlayEventsTableFilterComposer
@@ -6573,6 +6692,11 @@ class $$PlayEventsTableFilterComposer
 
   ColumnFilters<bool> get completed => $composableBuilder(
     column: $table.completed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get origin => $composableBuilder(
+    column: $table.origin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6615,6 +6739,11 @@ class $$PlayEventsTableOrderingComposer
     column: $table.completed,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PlayEventsTableAnnotationComposer
@@ -6647,6 +6776,9 @@ class $$PlayEventsTableAnnotationComposer
 
   GeneratedColumn<bool> get completed =>
       $composableBuilder(column: $table.completed, builder: (column) => column);
+
+  GeneratedColumn<String> get origin =>
+      $composableBuilder(column: $table.origin, builder: (column) => column);
 }
 
 class $$PlayEventsTableTableManager
@@ -6686,6 +6818,7 @@ class $$PlayEventsTableTableManager
                 Value<int> listenedMs = const Value.absent(),
                 Value<int> durationMs = const Value.absent(),
                 Value<bool> completed = const Value.absent(),
+                Value<String?> origin = const Value.absent(),
               }) => PlayEventsCompanion(
                 id: id,
                 sha: sha,
@@ -6693,6 +6826,7 @@ class $$PlayEventsTableTableManager
                 listenedMs: listenedMs,
                 durationMs: durationMs,
                 completed: completed,
+                origin: origin,
               ),
           createCompanionCallback:
               ({
@@ -6702,6 +6836,7 @@ class $$PlayEventsTableTableManager
                 required int listenedMs,
                 Value<int> durationMs = const Value.absent(),
                 Value<bool> completed = const Value.absent(),
+                Value<String?> origin = const Value.absent(),
               }) => PlayEventsCompanion.insert(
                 id: id,
                 sha: sha,
@@ -6709,6 +6844,7 @@ class $$PlayEventsTableTableManager
                 listenedMs: listenedMs,
                 durationMs: durationMs,
                 completed: completed,
+                origin: origin,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -6875,12 +7011,14 @@ typedef $$PlaylistsTableCreateCompanionBuilder = PlaylistsCompanion Function({
   required String name,
   required int createdAt,
   required int updatedAt,
+  Value<String?> syncId,
 });
 typedef $$PlaylistsTableUpdateCompanionBuilder = PlaylistsCompanion Function({
   Value<int> id,
   Value<String> name,
   Value<int> createdAt,
   Value<int> updatedAt,
+  Value<String?> syncId,
 });
 
 class $$PlaylistsTableFilterComposer
@@ -6909,6 +7047,11 @@ class $$PlaylistsTableFilterComposer
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6941,6 +7084,11 @@ class $$PlaylistsTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PlaylistsTableAnnotationComposer
@@ -6963,6 +7111,9 @@ class $$PlaylistsTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 }
 
 class $$PlaylistsTableTableManager
@@ -7000,11 +7151,13 @@ class $$PlaylistsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<String?> syncId = const Value.absent(),
               }) => PlaylistsCompanion(
                 id: id,
                 name: name,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                syncId: syncId,
               ),
           createCompanionCallback:
               ({
@@ -7012,11 +7165,13 @@ class $$PlaylistsTableTableManager
                 required String name,
                 required int createdAt,
                 required int updatedAt,
+                Value<String?> syncId = const Value.absent(),
               }) => PlaylistsCompanion.insert(
                 id: id,
                 name: name,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                syncId: syncId,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

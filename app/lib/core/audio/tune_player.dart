@@ -24,6 +24,19 @@ abstract class TunePlayer extends ChangeNotifier {
 
   void playQueue(List<ManifestTrack> tracks, int startIndex);
 
+  /// The name of the device that is playing, when what this one shows is
+  /// another device's music and this one is only a remote for it. Null when the
+  /// sound is this device's own, which is every player but the connected one.
+  String? get remoteDeviceLabel => null;
+
+  /// True when this is a remote for another device that was told something and
+  /// has not answered, so it may not be running.
+  bool get remoteStalled => false;
+
+  /// Take the music over from the device that is playing it: carry on here, at
+  /// the same place. A no-op when nothing is playing elsewhere.
+  Future<void> playHere() async {}
+
   /// Plays [tracks] in a random order, starting from a random one, with shuffle
   /// mode on so the player shows it and a later toggle behaves.
   ///
@@ -100,6 +113,16 @@ abstract class TunePlayer extends ChangeNotifier {
     int startIndex, {
     Duration at = Duration.zero,
   }) {}
+
+  /// Swaps in newer copies of tracks already in the queue, matched by sha,
+  /// without touching what is playing.
+  ///
+  /// The queue holds the track as it was when it was queued, so a lyric saved
+  /// afterwards, or one the daemon sent since, never reached the screens that
+  /// read `current` until the app was closed and reopened. Only the metadata
+  /// changes: order, position and the decoder are left exactly as they are.
+  /// A no-op where a player holds no queue of its own.
+  void refreshTracks(Map<String, ManifestTrack> fresh) {}
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -271,6 +294,31 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   List<ManifestTrack> get queue => _queue;
+
+  @override
+  void refreshTracks(Map<String, ManifestTrack> fresh) {
+    if (fresh.isEmpty) return;
+    var changed = false;
+    ManifestTrack pick(ManifestTrack t) {
+      final n = fresh[t.sha];
+      if (n == null) return t;
+      // Rebuilt from the database every time, so identity says nothing; only a
+      // difference a screen could show is worth waking them for.
+      if (n.lyrics == t.lyrics &&
+          n.lyricsSource == t.lyricsSource &&
+          n.title == t.title &&
+          n.artist == t.artist &&
+          n.album == t.album) {
+        return t;
+      }
+      changed = true;
+      return n;
+    }
+
+    _queue = [for (final t in _queue) pick(t)];
+    _canonical = [for (final t in _canonical) pick(t)];
+    if (changed) notifyListeners();
+  }
 
   @override
   int get index => _index;

@@ -11,7 +11,11 @@ import 'manifest_store.dart';
 /// What is left on the phone is exactly what has not got there yet, which is
 /// what [reconcile] retries.
 class LyricSharing {
-  LyricSharing({required this.store, required this.put});
+  LyricSharing({required this.store, required this.put, this.onChanged});
+
+  /// Told whenever the lyrics a screen would show may have changed, so what is
+  /// already playing can be refreshed rather than waiting for a relaunch.
+  final void Function()? onChanged;
 
   final ManifestStore store;
 
@@ -22,6 +26,9 @@ class LyricSharing {
   /// because this is the listener deciding what the words should be.
   Future<void> save(String sha, String text) async {
     await store.setEdit(sha, 'lyrics', text);
+    // Before the network: the words are on this phone now, and the screens
+    // should show them now, not after the daemon has answered (or timed out).
+    onChanged?.call();
     await put(sha, text);
   }
 
@@ -49,6 +56,7 @@ class LyricSharing {
       if (server.source == 'user') continue;
       if (await put(e.key, e.value)) sent += 1;
     }
+    onChanged?.call();
     return sent;
   }
 

@@ -21,6 +21,7 @@ import 'package:tunes/core/data/queue_store.dart';
 import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/data/reachability.dart';
 import 'package:tunes/core/net/tunes_client.dart';
+import 'package:tunes/core/sync/sync_models.dart';
 import 'package:tunes/core/net/update_check.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/domain/whats_new.dart';
@@ -159,7 +160,15 @@ class _FakeClient implements TunesClient {
   String get updateApkUrl => '$baseUrl/update/apk';
 
   @override
-  Future<TunesManifest> fetchManifest() => result();
+  Future<TunesManifest> fetchManifest({bool fromCacheOnFailure = true}) =>
+      result();
+
+  @override
+  Future<int?> syncPush(List<SyncDoc> docs) async => null;
+
+  @override
+  Future<SyncPullPage?> syncPull(int after, {bool onlyLive = false}) async =>
+      null;
 
   @override
   Future<SearchResults> search(String q) {

@@ -53,6 +53,11 @@ class Playlists extends Table {
   /// Touched on every change to its contents, so a list of playlists can be
   /// ordered by what is being worked on rather than by what is oldest.
   IntColumn get updatedAt => integer()();
+
+  /// The playlist's identity across devices. The integer id is this device's
+  /// own row number and means nothing on another; this is what account sync
+  /// matches on. Null until sync first sees the playlist, which gives it one.
+  TextColumn get syncId => text().nullable()();
 }
 
 /// One track's place in one playlist.
@@ -98,6 +103,12 @@ class PlayEvents extends Table {
   /// Whether this counted as a play under the rule in PlayHistory. Stored so
   /// the decision is auditable, and recomputable if the rule changes.
   BoolColumn get completed => boolean().withDefault(const Constant(false))();
+
+  /// The device this listen happened on, when it was brought here by account
+  /// sync. Null for a listen made on this device, which is the only kind this
+  /// device sends: without the mark, another device's history would be sent
+  /// back as if it were ours.
+  TextColumn get origin => text().nullable()();
 }
 
 class Tracks extends Table {
@@ -239,7 +250,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -312,6 +323,17 @@ class TunesDatabase extends _$TunesDatabase {
         // v9 -> v10: artist tags. One new column with a default, so existing
         // rows read as "no tags" until the next sync fills them in.
         await m.addColumn(artists, artists.tagsJson);
+      }
+      if (from < 11) {
+        // v10 -> v11: a playlist's identity across devices. One nullable
+        // column; existing playlists get an id the first time sync looks at
+        // them.
+        await m.addColumn(playlists, playlists.syncId);
+      }
+      if (from < 12) {
+        // v11 -> v12: which device a listen came from, for history sync. One
+        // nullable column; everything already here happened here.
+        await m.addColumn(playEvents, playEvents.origin);
       }
     },
   );

@@ -362,7 +362,12 @@ class ManifestStore {
   /// Persist a user edit for a single field. Future syncs won't undo
   /// it. Pass null/empty to clear the edit and revert to the daemon-
   /// supplied (or embedded-tag) value.
-  Future<void> setEdit(String sha, String field, String? value) async {
+  Future<void> setEdit(
+    String sha,
+    String field,
+    String? value, {
+    int? editedAt,
+  }) async {
     final key = _validateField(field);
     if (value == null || value.isEmpty) {
       await (_db.delete(
@@ -376,10 +381,23 @@ class ManifestStore {
               sha: sha,
               field: key,
               value: value,
-              editedAt: DateTime.now().millisecondsSinceEpoch,
+              editedAt: editedAt ?? DateTime.now().millisecondsSinceEpoch,
             ),
           );
     }
+  }
+
+  /// Every title/artist/album/year a listener has corrected here, for account
+  /// sync. Lyrics are not among them: those are shared through the daemon.
+  Future<List<({String sha, String field, String value, int editedAt})>>
+  syncableEdits() async {
+    final rows = await (_db.select(
+      _db.trackEdits,
+    )..where((t) => t.field.isNotValue('lyrics'))).get();
+    return [
+      for (final r in rows)
+        (sha: r.sha, field: r.field, value: r.value, editedAt: r.editedAt),
+    ];
   }
 
   /// Every lyric a listener has typed on this phone, by track.

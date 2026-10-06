@@ -57,4 +57,21 @@ void main() {
       throwsA(isA<TunesFetchException>()),
     );
   });
+
+  test(
+    'a sync is not fooled by the cache: it fails when the daemon is down',
+    () async {
+      // The offline bug: the cached copy came back as if it were fresh, the app
+      // recorded "synced just now" and, once online again, only asked what had
+      // changed since that moment -- so anything added meanwhile never arrived.
+      await File('${tempDir.path}/manifest.json').writeAsString(
+        jsonEncode({'schema': 1, 'integrity': 'x', 'tracks': []}),
+      );
+      final client = TunesClient('http://127.0.0.1:1', tempDir);
+      await expectLater(
+        client.fetchManifest(fromCacheOnFailure: false),
+        throwsA(isA<TunesFetchException>()),
+      );
+    },
+  );
 }

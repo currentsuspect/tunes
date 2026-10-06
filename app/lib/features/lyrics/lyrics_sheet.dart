@@ -5,20 +5,25 @@ import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
-import '../../core/ui/artwork.dart';
 import '../../core/ui/cover_tint.dart';
-import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import 'karaoke_line.dart';
 import 'lyric_follow.dart';
 import 'lyrics_sync_page.dart';
 
-/// Bottom sheet that shows the lyrics for a track, with a tap-to-edit
-/// toggle. Reads the current lyrics blob from the track (already
-/// resolved by [ManifestStore] with user edits applied). When the
-/// user saves, the caller persists via [ManifestStore.setEdit] with
-/// field 'lyrics' (and the source becomes 'user' on first save).
+/// Bottom sheet that shows the lyrics for what is playing, with a tap-to-edit
+/// toggle.
+///
+/// It follows the player: when the music moves on, so do the lyrics. Reading a
+/// track handed over at open time was the old behaviour, and left the sheet
+/// showing the previous song's words under the next song's name. The one
+/// exception is while editing, when the sheet holds the track being edited so
+/// a song change cannot swap the words out from under the keyboard.
+///
+/// When the user saves, the caller persists via the lyric-sharing path and
+/// refreshes the player, which is what brings the new words back to this sheet.
 class LyricsSheet extends StatefulWidget {
   const LyricsSheet({
     super.key,
@@ -27,15 +32,17 @@ class LyricsSheet extends StatefulWidget {
     required this.onSave,
   });
 
+  /// What was playing when the sheet opened, used only until the player says
+  /// otherwise.
   final ManifestTrack track;
   final TunePlayer player;
-  final Future<void> Function(String lyrics) onSave;
+  final Future<void> Function(ManifestTrack track, String lyrics) onSave;
 
   static Future<void> show(
     BuildContext context, {
     required ManifestTrack track,
     required TunePlayer player,
-    required Future<void> Function(String lyrics) onSave,
+    required Future<void> Function(ManifestTrack track, String lyrics) onSave,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -57,24 +64,45 @@ class LyricsSheet extends StatefulWidget {
 class _LyricsSheetState extends State<LyricsSheet> {
   bool _editing = false;
   bool _saving = false;
-  // The lyrics as they now stand, which after a save is newer than the track
-  // the parent handed us -- the parent does not re-supply it. Editing has to
-  // start from this, not from `widget.track.lyrics`, or the editor opens on
-  // the pre-save text and saving again quietly reverts the user's work.
-  late String _lyrics;
+  // The track on screen. Follows the player, except while editing.
+  late ManifestTrack _track;
+  // What this sheet has just saved, by track. A save reaches the player a beat
+  // later (the store is read back and the queue refreshed), and the screen
+  // should not show the old words in that gap or after a save that never
+  // reaches a player at all. Dropped once the player agrees.
+  final Map<String, String> _saved = {};
   late TextEditingController _controller;
+
+  String get _lyrics => _saved[_track.sha] ?? _track.lyrics ?? '';
 
   @override
   void initState() {
     super.initState();
-    _lyrics = widget.track.lyrics ?? '';
+    _track = widget.player.current ?? widget.track;
     _controller = TextEditingController(text: _lyrics);
+    widget.player.addListener(_onPlayer);
   }
 
   @override
   void dispose() {
+    widget.player.removeListener(_onPlayer);
     _controller.dispose();
     super.dispose();
+  }
+
+  void _onPlayer() {
+    if (!mounted || _editing) return;
+    final now = widget.player.current;
+    if (now == null) return;
+    final saved = _saved[now.sha];
+    if (saved != null && (now.lyrics ?? '').trim() == saved.trim()) {
+      _saved.remove(now.sha);
+    }
+    final moved = now.sha != _track.sha;
+    final changed = (now.lyrics ?? '') != (_track.lyrics ?? '');
+    if (moved || changed || now.title != _track.title) {
+      setState(() => _track = now);
+    }
   }
 
   void _startEdit() {
@@ -91,15 +119,16 @@ class _LyricsSheetState extends State<LyricsSheet> {
   /// navigator, so the sheet stays underneath and reappears with the new
   /// timings already applied.
   Future<void> _openSync() async {
+    final track = _track;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => LyricsSyncPage(
-          track: widget.track,
+          track: track,
           player: widget.player,
           initialLyrics: _lyrics,
           onSave: (text) async {
-            await widget.onSave(text);
-            if (mounted) setState(() => _lyrics = text);
+            await widget.onSave(track, text);
+            if (mounted) setState(() => _saved[track.sha] = text);
           },
         ),
       ),
@@ -107,17 +136,19 @@ class _LyricsSheetState extends State<LyricsSheet> {
   }
 
   void _cancelEdit() {
-    _controller.text = _lyrics;
     FocusScope.of(context).unfocus();
     setState(() => _editing = false);
+    // The music may have moved on while typing.
+    _onPlayer();
   }
 
   Future<void> _save() async {
     if (_saving) return;
     final text = _controller.text.trim();
+    final track = _track;
     setState(() => _saving = true);
     try {
-      await widget.onSave(text);
+      await widget.onSave(track, text);
     } catch (e) {
       // Stay in the editor holding the text. Dropping back to the view on a
       // failed write would look exactly like a successful save while losing
@@ -131,11 +162,41 @@ class _LyricsSheetState extends State<LyricsSheet> {
     if (!mounted) return;
     FocusScope.of(context).unfocus();
     setState(() {
-      _lyrics = text;
+      _saved[track.sha] = text;
       _editing = false;
       _saving = false;
     });
+    _onPlayer();
   }
+
+  /// Puts one line on the left or right by writing a `v1:` / `v2:` label into
+  /// it (see [LyricVoices]). Shared like any other edit, and any other LRC
+  /// reader just sees a line that starts with a label.
+  Future<void> _setLineVoice(Lrc lrc, int index, int? voice) async {
+    final track = _track;
+    final next = LyricVoices.relabel(
+      _lyrics,
+      lrc,
+      index,
+      voice,
+      artists: _artistsOf(track),
+    );
+    if (next == null || next == _lyrics) return;
+    try {
+      await widget.onSave(track, next);
+      if (mounted) setState(() => _saved[track.sha] = next);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save lyrics: $e')));
+    }
+  }
+
+  static List<String> _artistsOf(ManifestTrack t) => [
+    t.artistDisplay,
+    t.primaryArtist,
+    ...t.featured,
+  ].whereType<String>().where((a) => a.trim().isNotEmpty).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -149,20 +210,35 @@ class _LyricsSheetState extends State<LyricsSheet> {
         // lights itself: the record's colour pouring in from the top, as on
         // Now Playing.
         return TintBuilder(
-          artSha: widget.track.artSha,
+          artSha: _track.artSha,
           builder: (context, tint) => Stack(
             fit: StackFit.expand,
             children: [
               AmbientGlow(tint: tint, strength: 0.32),
               SafeArea(
+                // The sheet sits below the status bar already.
+                top: false,
                 child: Padding(
                   padding: EdgeInsets.only(
                     bottom: MediaQuery.of(context).viewInsets.bottom,
                   ),
                   child: Column(
                     children: [
+                      // A handle drawn on the glow, rather than the sheet's own
+                      // on a solid band that cut the colour off at the top.
+                      Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.symmetric(
+                          vertical: Space.sm + 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Tones.textMuted.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
                       _Header(
-                        track: widget.track,
+                        track: _track,
                         editing: _editing,
                         saving: _saving,
                         kind: _LyricsKind.of(_lyrics),
@@ -179,10 +255,15 @@ class _LyricsSheetState extends State<LyricsSheet> {
                                 scrollController: scrollController,
                               )
                             : _View(
+                                // A different song is a different list: new
+                                // keys, new follow state, back to the top.
+                                key: ValueKey(_track.sha),
                                 lyrics: _lyrics,
+                                artists: _artistsOf(_track),
                                 player: widget.player,
                                 scrollController: scrollController,
                                 onAddLyrics: _startEdit,
+                                onLineVoice: _setLineVoice,
                               ),
                       ),
                     ],
@@ -253,63 +334,30 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = SettingsScope.maybeOf(context);
+    // One quiet line of identity and one menu. Everything that used to sit in
+    // a row here -- cover, size, timing, edit, the sync badge -- is either the
+    // same information the screen is already tinted by, or something you reach
+    // for once a song, so it lives behind the menu.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        Space.sm,
-        Space.md,
-        Space.md,
-        Space.sm,
-      ),
+      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.sm, Space.sm),
       child: Row(
         children: [
-          IconButton(
-            onPressed: onClose,
-            icon: const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: Tones.textMuted,
-            ),
-            tooltip: 'Close',
-          ),
-          Artwork(
-            url: null,
-            artSha: track.artSha,
-            size: 40,
-            borderRadius: 8,
-            fallback: GeneratedArtwork.fromTrack(
-              track,
-              size: 40,
-              borderRadius: 8,
-            ),
-          ),
-          const SizedBox(width: Space.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   track.title,
-                  style: TypeScale.display.copyWith(fontSize: 18, height: 1.15),
+                  style: TypeScale.display.copyWith(fontSize: 20, height: 1.15),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        track.artistAlbumLine,
-                        style: TypeScale.caption,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    // Says whether tapping a line will seek. Without it the
-                    // two very different bodies below look like the same
-                    // screen failing to highlight anything.
-                    if (!editing && kind.label != null) ...[
-                      const SizedBox(width: Space.sm),
-                      _Badge(kind.label!, lit: kind == _LyricsKind.wordSynced),
-                    ],
-                  ],
+                const SizedBox(height: 2),
+                Text(
+                  editing ? 'Editing lyrics' : track.artistDisplay,
+                  style: TypeScale.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -330,61 +378,62 @@ class _Header extends StatelessWidget {
               )
             else
               TextButton(onPressed: onSave, child: const Text('Save')),
-          ] else ...[
-            if (settings != null && kind != _LyricsKind.none)
-              IconButton(
-                onPressed: () =>
-                    settings.setLyricSize((settings.lyricSize + 1) % 3),
-                tooltip: 'Text size',
-                icon: Text(
-                  'Aa',
-                  style: TypeScale.display.copyWith(
-                    fontSize: 15 + settings.lyricSize * 2.5,
-                    color: Tones.textMuted,
+          ] else
+            PopupMenuButton<String>(
+              tooltip: 'Lyrics options',
+              icon: const Icon(
+                Icons.more_horiz_rounded,
+                color: Tones.textMuted,
+              ),
+              color: Tones.surfaceRaised,
+              onSelected: (v) {
+                switch (v) {
+                  case 'edit':
+                    onEdit();
+                  case 'sync':
+                    onSync?.call();
+                  case 'size':
+                    if (settings != null) {
+                      settings.setLyricSize((settings.lyricSize + 1) % 3);
+                    }
+                  case 'close':
+                    onClose();
+                }
+              },
+              itemBuilder: (_) => [
+                if (kind.label != null)
+                  PopupMenuItem<String>(
+                    enabled: false,
+                    height: 32,
+                    child: Text(
+                      kind.label!.toUpperCase(),
+                      style: TypeScale.mono.copyWith(
+                        fontSize: 10,
+                        color: Tones.textMuted,
+                      ),
+                    ),
+                  ),
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text(
+                    kind == _LyricsKind.none ? 'Add lyrics' : 'Edit lyrics',
                   ),
                 ),
-              ),
-            if (onSync != null)
-              IconButton(
-                onPressed: onSync,
-                tooltip: 'Sync to the track',
-                icon: const Icon(
-                  Icons.av_timer_rounded,
-                  color: Tones.textMuted,
-                  size: 20,
-                ),
-              ),
-            TextButton(onPressed: onEdit, child: const Text('Edit')),
-          ],
+                if (onSync != null)
+                  const PopupMenuItem(
+                    value: 'sync',
+                    child: Text('Sync to the track'),
+                  ),
+                if (settings != null && kind != _LyricsKind.none)
+                  PopupMenuItem(
+                    value: 'size',
+                    child: Text(
+                      'Text size · ${const ['Small', 'Medium', 'Large'][settings.lyricSize.clamp(0, 2)]}',
+                    ),
+                  ),
+              ],
+            ),
         ],
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge(this.text, {this.lit = false});
-  final String text;
-
-  /// Word-synced is the best a lyric gets, so it is the one badge that takes
-  /// the record's colour.
-  final bool lit;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = AccentScope.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: lit ? accent : Tones.hairline),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        text,
-        style: TypeScale.mono.copyWith(
-          fontSize: 10,
-          color: lit ? accent : Tones.textMuted,
-        ),
       ),
     );
   }
@@ -392,13 +441,22 @@ class _Badge extends StatelessWidget {
 
 class _View extends StatefulWidget {
   const _View({
+    super.key,
     required this.lyrics,
+    required this.artists,
     required this.player,
     required this.scrollController,
     required this.onAddLyrics,
+    required this.onLineVoice,
   });
 
   final String lyrics;
+
+  /// The track's own artists: the only names a line label may use.
+  final List<String> artists;
+
+  /// Puts line [index] on the left (1), the right (2), or back to unlabelled.
+  final Future<void> Function(Lrc lrc, int index, int? voice) onLineVoice;
   final TunePlayer player;
   final ScrollController scrollController;
   final VoidCallback onAddLyrics;
@@ -409,6 +467,8 @@ class _View extends StatefulWidget {
 
 class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   Lrc? _lrc;
+  // Who is singing each timed line, which decides the side it sits on.
+  List<LyricVoice> _voices = const [];
   // Drives the within-word sweep. Only the active line listens to it, so the
   // rest of the list is untouched at frame rate.
   late final PlayheadClock _playhead;
@@ -465,6 +525,9 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
 
   void _parse() {
     _lrc = widget.lyrics.trim().isEmpty ? null : LrcParser.parse(widget.lyrics);
+    _voices = LyricVoices.resolve([
+      for (final l in _lrc?.lines ?? const <LrcLine>[]) l.text,
+    ], artists: widget.artists);
   }
 
   @override
@@ -671,55 +734,144 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
           );
         }
         final line = lrc.lines[i];
+        final voice = i < _voices.length
+            ? _voices[i]
+            : LyricVoice(LyricSide.left, line.text);
         final isActive = i == activeIdx;
         final isPast = i < activeIdx;
         final opacity = activeIdx < 0 ? 0.62 : _opacityFor(i - activeIdx);
         // The line being sung is set larger than the rest, so it is the thing
-        // you read and the others are the context around it.
-        final size = isActive ? rest * 1.22 : rest;
+        // you read and the others are the context around it. A backing vocal
+        // is always set a step down so it never competes with the lead.
+        final size =
+            (isActive ? rest * 1.22 : rest) * (voice.backing ? 0.82 : 1);
+        final align = switch (voice.side) {
+          LyricSide.left => TextAlign.start,
+          LyricSide.right => TextAlign.end,
+          LyricSide.center => TextAlign.center,
+        };
+        final alignment = switch (voice.side) {
+          LyricSide.left => Alignment.centerLeft,
+          LyricSide.right => Alignment.centerRight,
+          LyricSide.center => Alignment.center,
+        };
+        final wrap = switch (voice.side) {
+          LyricSide.left => WrapAlignment.start,
+          LyricSide.right => WrapAlignment.end,
+          LyricSide.center => WrapAlignment.center,
+        };
         // The key is what _scrollToActive and _resumeIfActiveVisible resolve
         // through, so it wraps the whole row rather than the text inside it.
         return KeyedSubtree(
           key: _lineKeys[i],
           child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () => widget.player.seek(line.timestamp),
-            // Hold a line to copy it: a lyric you love is a thing you want to
-            // send to someone, and this needs no sharing plugin.
+            // Hold a line for what you can do with it: send it to someone, or
+            // say which side it is sung from.
             onLongPress: () {
               HapticFeedback.selectionClick();
-              Clipboard.setData(ClipboardData(text: line.text));
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                const SnackBar(
-                  content: Text('Line copied'),
-                  duration: Duration(seconds: 1),
-                ),
-              );
+              _lineMenu(lrc, i, voice);
             },
-            child: line.hasWordTiming
-                // Word-synced: sweep the highlight across the word being sung.
-                ? KaraokeLine(
-                    lrc: lrc,
-                    lineIndex: i,
-                    playhead: _playhead,
-                    trackEnd: widget.player.duration,
-                    isActive: isActive,
-                    isPast: isPast,
-                    restOpacity: opacity,
-                    style: TypeScale.display.copyWith(fontSize: size),
-                  )
-                : AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 320),
-                    curve: Curves.easeOutCubic,
-                    style: TypeScale.display.copyWith(
-                      fontSize: size,
-                      color: Tones.text.withValues(alpha: opacity),
-                      height: 1.25,
-                    ),
-                    child: Text(line.text),
-                  ),
+            child: Align(
+              alignment: alignment,
+              child: ConstrainedBox(
+                // A line hugging one edge reads as a reply only if it does not
+                // run all the way across to the other.
+                constraints: BoxConstraints(
+                  maxWidth: voice.side == LyricSide.center
+                      ? double.infinity
+                      : MediaQuery.of(context).size.width * 0.82,
+                ),
+                child: line.hasWordTiming
+                    // Word-synced: sweep the highlight across the word being sung.
+                    ? KaraokeLine(
+                        lrc: lrc,
+                        lineIndex: i,
+                        playhead: _playhead,
+                        trackEnd: widget.player.duration,
+                        isActive: isActive,
+                        isPast: isPast,
+                        restOpacity: opacity,
+                        textAlign: align,
+                        wrapAlignment: wrap,
+                        style: TypeScale.display.copyWith(fontSize: size),
+                      )
+                    : AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 320),
+                        curve: Curves.easeOutCubic,
+                        style: TypeScale.display.copyWith(
+                          fontSize: size,
+                          color: Tones.text.withValues(
+                            alpha: opacity * (voice.backing ? 0.8 : 1),
+                          ),
+                          height: 1.25,
+                        ),
+                        textAlign: align,
+                        child: Text(voice.text, textAlign: align),
+                      ),
+              ),
+            ),
           ),
         );
       },
+    );
+  }
+
+  void _lineMenu(Lrc lrc, int i, LyricVoice voice) {
+    final line = lrc.lines[i];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Tones.surfaceRaised,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy_rounded, size: 20),
+              title: const Text('Copy line'),
+              onTap: () {
+                Navigator.of(sheet).pop();
+                Clipboard.setData(ClipboardData(text: voice.text));
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(
+                    content: Text('Line copied'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
+            ),
+            // A label inside a word-timed line would be swept as a word, so
+            // those lines keep the side they were given.
+            if (!line.hasWordTiming && !voice.backing) ...[
+              if (voice.side != LyricSide.left)
+                ListTile(
+                  leading: const Icon(
+                    Icons.format_align_left_rounded,
+                    size: 20,
+                  ),
+                  title: const Text('Sing from the left'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    widget.onLineVoice(lrc, i, 1);
+                  },
+                ),
+              if (voice.side != LyricSide.right)
+                ListTile(
+                  leading: const Icon(
+                    Icons.format_align_right_rounded,
+                    size: 20,
+                  ),
+                  title: const Text('Sing from the right'),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    widget.onLineVoice(lrc, i, 2);
+                  },
+                ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

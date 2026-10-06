@@ -12,6 +12,7 @@ import '../../core/data/avatar.dart';
 import '../../core/auth/tunes_auth.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/nav/nav_controller.dart';
+import '../../core/sync/account_sync.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/profile_avatar.dart';
 
@@ -39,7 +40,11 @@ class SettingsPage extends StatefulWidget {
     required this.onServerChanged,
     this.onWhatsNew,
     this.supportDir,
+    this.accountSync,
   });
+
+  /// Account sync, when this build has an account. Absent in tests.
+  final AccountSync? accountSync;
 
   /// Opens the What's new page again. Absent where there is nothing to open.
   final VoidCallback? onWhatsNew;
@@ -144,9 +149,13 @@ class _SettingsPageState extends State<SettingsPage> {
     if (code == null || code.trim().isEmpty) return;
 
     setState(() => _enrolling = true);
-    final label = widget.settings.displayName.trim().isEmpty
-        ? 'Android device'
-        : "${widget.settings.displayName.trim()}'s phone";
+    // Named for the kind of device it is, because this is the name the other
+    // devices show: "playing on Computer" has to mean something.
+    final kind = Platform.isAndroid || Platform.isIOS ? 'phone' : 'computer';
+    final name = widget.settings.displayName.trim();
+    final label = name.isEmpty
+        ? (kind == 'phone' ? 'Android device' : 'Computer')
+        : "$name's $kind";
     final result = await widget.auth.enrol(code.trim(), label);
     if (!mounted) return;
     setState(() => _enrolling = false);
@@ -491,6 +500,49 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ],
                     ),
+
+                    if (widget.accountSync != null)
+                      ListenableBuilder(
+                        listenable: widget.accountSync!,
+                        builder: (context, _) {
+                          final sync = widget.accountSync!;
+                          final at = sync.lastSyncedAt;
+                          return _Group(
+                            title: 'Across your devices',
+                            children: [
+                              _ValueTile(
+                                dot: sync.reachable ? Tones.held : Tones.warn,
+                                label: sync.syncing
+                                    ? 'Syncing…'
+                                    : sync.reachable
+                                    ? 'In step'
+                                    : 'Waiting for a connection',
+                                value: at == null ? '' : _ago(at),
+                              ),
+                              _SwitchTile(
+                                title: 'Share what I listen to',
+                                detail:
+                                    'On, your plays on one device shape '
+                                    'recommendations on all of them. Off, '
+                                    'this device keeps its own taste, like a '
+                                    'TV and a phone that recommend different '
+                                    'things.',
+                                value: widget.settings.syncHistory,
+                                onChanged: (v) =>
+                                    widget.settings.setSyncHistory(v),
+                              ),
+                              _LinkTile(
+                                title: 'Sync now',
+                                detail:
+                                    'Likes, playlists, corrected titles and '
+                                    'where you are in the music follow your '
+                                    'account to every device you sign in on.',
+                                onTap: sync.syncing ? null : sync.run,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
 
                     _Group(
                       title: 'This phone',
@@ -858,7 +910,7 @@ class _Profile extends StatelessWidget {
           ),
           const SizedBox(height: Space.sm),
           Text(
-            'Your name and picture stay on this phone. Home greets you with it.',
+            'Your name follows your account to every device. Your picture stays on this one.',
             style: TypeScale.note.copyWith(
               fontSize: 13,
               color: Tones.textMuted,
@@ -1072,6 +1124,14 @@ class _StepperTile extends StatelessWidget {
 }
 
 /// A fact: a label, with an optional coloured dot, and its value in mono.
+String _ago(DateTime at) {
+  final s = DateTime.now().difference(at).inSeconds;
+  if (s < 10) return 'just now';
+  if (s < 90) return '${s}s ago';
+  if (s < 3600) return '${s ~/ 60} min ago';
+  return '${s ~/ 3600} h ago';
+}
+
 class _ValueTile extends StatelessWidget {
   const _ValueTile({
     required this.label,

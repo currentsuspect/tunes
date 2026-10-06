@@ -22,7 +22,13 @@ class KaraokeLine extends StatelessWidget {
     required this.isPast,
     this.style,
     this.restOpacity,
+    this.textAlign = TextAlign.start,
+    this.wrapAlignment = WrapAlignment.start,
   });
+
+  /// Which edge the line hangs from, for a voice that sings from the right.
+  final TextAlign textAlign;
+  final WrapAlignment wrapAlignment;
 
   final Lrc lrc;
   final int lineIndex;
@@ -51,6 +57,7 @@ class KaraokeLine extends StatelessWidget {
     if (!isActive) {
       return Text(
         line.text,
+        textAlign: textAlign,
         style: base.copyWith(
           color: restOpacity != null
               ? Tones.text.withValues(alpha: restOpacity)
@@ -67,6 +74,7 @@ class KaraokeLine extends StatelessWidget {
       builder: (context, position, _) {
         final active = LrcParser.activeWordIndex(lrc, lineIndex, position);
         return Wrap(
+          alignment: wrapAlignment,
           spacing: 0,
           runSpacing: 2,
           children: [

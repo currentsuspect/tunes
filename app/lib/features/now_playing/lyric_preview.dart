@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
 import '../lyrics/lyric_follow.dart';
 
@@ -161,11 +162,17 @@ class _LyricPreviewState extends State<LyricPreview> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _dimLine(prev != null && prev >= 0 ? lines[prev].text : ''),
+          _dimLine(
+            prev != null && prev >= 0
+                ? LyricVoices.plain(lines[prev].text)
+                : '',
+          ),
           const SizedBox(height: 4),
           _activeLine(lrc, active),
           const SizedBox(height: 4),
-          _dimLine(next < lines.length ? lines[next].text : ''),
+          _dimLine(
+            next < lines.length ? LyricVoices.plain(lines[next].text) : '',
+          ),
         ],
       ),
     );
@@ -219,7 +226,7 @@ class _LyricPreviewState extends State<LyricPreview> {
             );
             final Widget line = (parts == null || wordIndex == null)
                 ? Text(
-                    lrc.lines[active].text,
+                    LyricVoices.plain(lrc.lines[active].text),
                     style: style,
                     textAlign: TextAlign.start,
                     maxLines: 2,

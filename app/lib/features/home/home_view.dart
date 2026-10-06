@@ -29,7 +29,12 @@ class HomeView extends StatelessWidget {
     required this.onPlay,
     required this.artUrlFor,
     required this.onRefresh,
+    this.aboveFeed,
   });
+
+  /// Shown before everything else when there is something to say about right
+  /// now, such as music playing on another device. Null draws nothing.
+  final Widget? aboveFeed;
 
   final TunesManifest manifest;
 
@@ -143,6 +148,7 @@ class HomeView extends StatelessWidget {
       onRefresh: onRefresh,
       padding: const EdgeInsets.only(bottom: Space.lg),
       children: [
+        ?aboveFeed,
         if (justAddedSorted.isNotEmpty)
           _JustAddedCarousel(
             tracks: justAddedSorted,

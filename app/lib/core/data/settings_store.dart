@@ -27,6 +27,7 @@ class SettingsStore extends ChangeNotifier {
   static const _radioReach = 'radio.reach';
   static const _whatsNewSeen = 'app.whatsNewSeen';
   static const _serverUrl = 'server.url';
+  static const _syncHistory = 'sync.history';
   static const _lastPlayedSha = 'playback.lastPlayedSha';
   static const _lastPositionMs = 'playback.lastPositionMs';
 
@@ -61,6 +62,14 @@ class SettingsStore extends ChangeNotifier {
     if (v == null) return fallback;
     return v == 'true';
   }
+
+  // --- sync ----------------------------------------------------------------
+
+  /// Whether listening is shared with the account's other devices. On by
+  /// default; off keeps this device's taste to itself, so a phone and a TV can
+  /// be different listeners the way they are on a video app.
+  bool get syncHistory => _bool(_syncHistory, fallback: true);
+  Future<void> setSyncHistory(bool v) => _put(_syncHistory, '$v');
 
   // --- profile -------------------------------------------------------------
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../domain/discography.dart';
+import '../sync/sync_models.dart';
 import 'update_check.dart';
 import '../../domain/manifest.dart';
 
@@ -78,6 +79,7 @@ class TunesClient {
   }
 
   static const _timeout = Duration(seconds: 8);
+  static const _bodyTimeout = Duration(seconds: 40);
   static const _downloadTimeout = Duration(minutes: 30);
 
   File? get _cacheFile {
@@ -86,7 +88,16 @@ class TunesClient {
     return File('${dir.path}/manifest.json');
   }
 
-  Future<TunesManifest> fetchManifest() async {
+  /// The whole library from the daemon.
+  ///
+  /// [fromCacheOnFailure] hands back the last copy on disk when the daemon
+  /// cannot be reached. That is a convenience for showing something, and it
+  /// must never be mistaken for a sync: a caller that treats the cached copy as
+  /// fresh records "synced just now" while offline, and then asks the daemon
+  /// only for what changed since that moment once it is back -- everything
+  /// added in between is never fetched, which is a phone stuck on stale
+  /// content until it is closed and reopened. The sync passes false.
+  Future<TunesManifest> fetchManifest({bool fromCacheOnFailure = true}) async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
       final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
@@ -95,17 +106,23 @@ class TunesClient {
       if (res.statusCode != 200) {
         throw TunesFetchException('manifest ${res.statusCode}');
       }
-      final body = await res.transform(utf8.decoder).join();
+      // A bound on the body as well as the headers: a connection that dies
+      // half way (wifi to mobile data, a phone that slept) otherwise leaves
+      // this await open for good, and everything waiting behind it with it.
+      final body = await res
+          .transform(utf8.decoder)
+          .join()
+          .timeout(_bodyTimeout);
       final json = jsonDecode(body) as Map<String, dynamic>;
       final manifest = TunesManifest.fromJson(json);
       await _writeCache(body);
       return manifest;
     } on SocketException catch (e) {
-      final cached = await _readCache();
+      final cached = fromCacheOnFailure ? await _readCache() : null;
       if (cached != null) return cached;
       throw TunesFetchException('tunesd unreachable: ${e.message}');
     } on HttpException catch (e) {
-      final cached = await _readCache();
+      final cached = fromCacheOnFailure ? await _readCache() : null;
       if (cached != null) return cached;
       throw TunesFetchException('tunesd unreachable: ${e.message}');
     } finally {
@@ -126,7 +143,10 @@ class TunesClient {
       if (res.statusCode != 200) {
         throw TunesFetchException('changes ${res.statusCode}');
       }
-      final body = await res.transform(utf8.decoder).join();
+      final body = await res
+          .transform(utf8.decoder)
+          .join()
+          .timeout(_bodyTimeout);
       final json = jsonDecode(body) as Map<String, dynamic>;
       return ChangesResponse(
         generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
@@ -411,12 +431,86 @@ class TunesClient {
     }
   }
 
-  Future<bool> ping() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+  /// Sends changed documents to the account (see edge/src/sync.ts). Returns
+  /// the server's clock in ms, or null on any failure -- never throws, so a
+  /// phone with no signal simply keeps its changes for the next try.
+  Future<int?> syncPush(List<SyncDoc> docs) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
     try {
-      final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
+      final req = await client.postUrl(Uri.parse('$baseUrl/sync/push'));
       await _authorize(req);
-      final res = await req.close().timeout(const Duration(seconds: 2));
+      req.headers.contentType = ContentType.json;
+      req.add(
+        utf8.encode(
+          jsonEncode({
+            'docs': [for (final d in docs) d.toJson()],
+          }),
+        ),
+      );
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        await res.drain<void>();
+        return null;
+      }
+      final body = await res
+          .transform(utf8.decoder)
+          .join()
+          .timeout(_bodyTimeout);
+      final json = jsonDecode(body);
+      return json is Map ? (json['now'] as num?)?.toInt() : null;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Everything the account has changed after [after], one page. Null on any
+  /// failure.
+  Future<SyncPullPage?> syncPull(int after, {bool onlyLive = false}) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.getUrl(
+        Uri.parse(
+          '$baseUrl/sync/pull?after=$after${onlyLive ? '&only=live' : ''}',
+        ),
+      );
+      await _authorize(req);
+      final res = await req.close().timeout(_timeout);
+      if (res.statusCode != 200) {
+        await res.drain<void>();
+        return null;
+      }
+      final body = await res
+          .transform(utf8.decoder)
+          .join()
+          .timeout(_bodyTimeout);
+      return SyncPullPage.fromJson(jsonDecode(body));
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Whether the service answers, asked the cheapest way there is.
+  ///
+  /// This used to fetch /manifest, the whole library (about 3 MB), every ten
+  /// seconds, which is a lot to spend on mobile data to learn one bit.
+  /// /changes with "since now" is authenticated like the manifest and answers
+  /// in a few bytes, from the daemon and the edge alike.
+  Future<bool> ping() async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final since = Uri.encodeComponent(
+        DateTime.now().toUtc().toIso8601String(),
+      );
+      final req = await client.getUrl(
+        Uri.parse('$baseUrl/changes?since=$since'),
+      );
+      await _authorize(req);
+      final res = await req.close().timeout(const Duration(seconds: 4));
+      await res.drain<void>().timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
     } catch (_) {
       return false;

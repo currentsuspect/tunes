@@ -26,6 +26,29 @@ class LikesStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// sha to when it was liked, for account sync.
+  Map<String, int> get likedAtBySha => Map.unmodifiable(_likedAt);
+
+  /// Takes another device's decision: liked at [likedAt], or (null) not liked.
+  /// Returns whether anything changed.
+  Future<bool> applyRemote(String sha, int? likedAt) async {
+    if (likedAt == null) {
+      if (_likedAt.remove(sha) == null) return false;
+      notifyListeners();
+      await (_db.delete(_db.likedTracks)..where((t) => t.sha.equals(sha))).go();
+      return true;
+    }
+    if (_likedAt[sha] == likedAt) return false;
+    _likedAt[sha] = likedAt;
+    notifyListeners();
+    await _db
+        .into(_db.likedTracks)
+        .insertOnConflictUpdate(
+          LikedTracksCompanion.insert(sha: sha, likedAt: likedAt),
+        );
+    return true;
+  }
+
   bool isLiked(String sha) => _likedAt.containsKey(sha);
 
   int get count => _likedAt.length;

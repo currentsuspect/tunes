@@ -22,6 +22,14 @@ import 'core/data/lyric_sharing.dart';
 import 'core/data/download_store.dart';
 import 'core/data/playback_cache.dart';
 import 'core/data/likes_store.dart';
+import 'core/sync/account_sync.dart';
+import 'core/sync/client_transport.dart';
+import 'core/sync/connect_control.dart';
+import 'core/sync/connect_player.dart';
+import 'core/sync/now_sync.dart';
+import 'core/sync/sync_domains.dart';
+import 'core/sync/sync_engine.dart';
+import 'features/sync/continue_card.dart';
 import 'core/data/manifest_store.dart';
 import 'core/data/play_history.dart';
 import 'core/data/playlist_store.dart';
@@ -73,6 +81,15 @@ const _channel = String.fromEnvironment('CHANNEL', defaultValue: 'local');
 const _tunesdUrl = String.fromEnvironment(
   'TUNESD_URL',
   defaultValue: 'http://192.168.100.6:4780',
+);
+
+/// Where accounts live: sign-in tokens, media grants and sync. Separate from
+/// the library address because a computer on the same network as the box reads
+/// its library from the box directly, yet its account is still the one the
+/// edge knows about.
+const _accountUrl = String.fromEnvironment(
+  'ACCOUNT_URL',
+  defaultValue: 'https://tunes.aestra.studio',
 );
 
 Future<void> main() async {
@@ -131,7 +148,12 @@ Future<void> main() async {
   // Identity, and the signed capabilities it mints. The refresh token lives in
   // the keystore; access tokens are memory-only; media grants are cached until
   // they expire. Nothing here ships inside the APK.
-  final auth = TunesAuth(post: client.postJson, store: SecureTokenStore());
+  // The account service is always the edge, wherever the library is read from.
+  final accountClient = TunesClient(_accountUrl);
+  final auth = TunesAuth(
+    post: accountClient.postJson,
+    store: SecureTokenStore(),
+  );
   final grants = MediaGrants(auth: auth);
   // Streamed bytes land here, LRU-capped, so replaying a track reads from
   // disk instead of fetching from the cloud again. Explicit downloads stay
@@ -160,6 +182,7 @@ Future<void> main() async {
     final res = await auth.accessToken();
     return res is AuthOk ? res.accessToken : null;
   };
+  accountClient.bearer = client.bearer;
   final player = MediaKitTunePlayer(
     // Download first, stream cache second, signed URL last -- and resolving
     // a URL also enqueues a background cache of the same bytes, so the
@@ -295,6 +318,78 @@ Future<void> main() async {
     if (write != null) unawaited(settings.setLastPosition(write));
   });
 
+  // Account sync: likes, playlists, edits and the name follow the listener
+  // from device to device, and where the music is shows on the others.
+  final remoteNow = RemoteNow();
+  final library = LibraryIndex();
+  String? myDeviceId;
+  ConnectControl? control;
+  final syncEngine = SyncEngine(
+    transport: ClientSyncTransport(accountClient),
+    domains: [
+      LikesDomain(likes),
+      PlaylistsDomain(playlists),
+      EditsDomain(manifestStore),
+      ProfileDomain(settings),
+      HistoryDomain(
+        history,
+        settings,
+        () async => myDeviceId ??= await auth.deviceId(),
+      ),
+    ],
+    memory: DbSyncMemory(db),
+    deviceId: () async => myDeviceId ??= await auth.deviceId(),
+    special: (doc, devices) {
+      remoteNow.ingest(doc, devices, myDeviceId);
+      control?.onDoc(doc, myDeviceId);
+    },
+  );
+  final accountSync = AccountSync(engine: syncEngine);
+  NowPublisher(
+    player: player,
+    push: syncEngine.pushNow,
+    skew: () => syncEngine.skewMs,
+  ).start();
+  // What the screens talk to: this device's player, or a window onto another
+  // device's music when one is playing and this one is silent.
+  final connected = ConnectPlayer(
+    local: player,
+    remote: remoteNow,
+    resolve: library.bySha,
+    serverNow: accountSync.serverNowMs,
+    send: (doc) => syncEngine.pushNow([doc]),
+  );
+  control = ConnectControl(
+    local: player,
+    engine: syncEngine,
+    serverNow: accountSync.serverNowMs,
+    isBusy: () =>
+        player.playing ||
+        connected.isRemote ||
+        remoteNow.isLive(accountSync.serverNowMs()),
+  )..start();
+  accountSync.control = control;
+  // Turning history sharing off drops what other devices sent, so this device's
+  // taste is its own again; turning it on asks for everything afresh, since
+  // what was skipped while it was off has already gone past the cursor.
+  var sharingHistory = settings.syncHistory;
+  settings.addListener(() {
+    if (settings.syncHistory == sharingHistory) return;
+    sharingHistory = settings.syncHistory;
+    if (sharingHistory) {
+      unawaited(
+        syncEngine.memory.writeCursor(0).then((_) => accountSync.poke()),
+      );
+    } else {
+      unawaited(history.dropForeign());
+    }
+  });
+  likes.addListener(accountSync.poke);
+  playlists.addListener(accountSync.poke);
+  reachability.addListener(() {
+    if (!reachability.offline) accountSync.poke();
+  });
+
   player.onFirstPlay = ensureAudioService;
   player.onRestored = ensureAudioService;
   // Not awaited: it only has to be in place before the first track, and the
@@ -311,7 +406,7 @@ Future<void> main() async {
           client: client,
           grants: grants,
           auth: auth,
-          player: player,
+          player: connected,
           store: store,
           artStore: artStore,
           reachability: reachability,
@@ -321,10 +416,15 @@ Future<void> main() async {
           history: history,
           likes: likes,
           playlists: playlists,
+          accountSync: accountSync,
+          remoteNow: remoteNow,
+          localPlayer: player,
+          library: library,
         ),
       ),
     ),
   );
+  accountSync.start();
 }
 
 /// Every path that needs a signed grant: artwork for tracks, releases and
@@ -374,6 +474,10 @@ class TunesApp extends StatefulWidget {
     required this.history,
     required this.likes,
     required this.playlists,
+    this.accountSync,
+    this.remoteNow,
+    this.localPlayer,
+    this.library,
   });
 
   final TunesClient client;
@@ -393,6 +497,13 @@ class TunesApp extends StatefulWidget {
   final PlayHistory history;
   final LikesStore likes;
   final PlaylistStore playlists;
+
+  /// Account sync and where the listener's music is on other devices. Absent
+  /// in tests, which have no account.
+  final AccountSync? accountSync;
+  final RemoteNow? remoteNow;
+  final TunePlayer? localPlayer;
+  final LibraryIndex? library;
 
   @override
   State<TunesApp> createState() => _TunesAppState();
@@ -458,6 +569,10 @@ class _TunesAppState extends State<TunesApp> {
   );
 
   Widget _shell() => AppShell(
+    accountSync: widget.accountSync,
+    remoteNow: widget.remoteNow,
+    localPlayer: widget.localPlayer,
+    library: widget.library,
     client: widget.client,
     grants: widget.grants,
     artStore: widget.artStore,
@@ -488,7 +603,20 @@ class AppShell extends StatefulWidget {
     required this.settings,
     required this.history,
     required this.downloads,
+    this.accountSync,
+    this.remoteNow,
+    this.localPlayer,
+    this.library,
   });
+
+  final AccountSync? accountSync;
+  final RemoteNow? remoteNow;
+
+  /// The device's own player when [player] is the connected one in front of it.
+  final TunePlayer? localPlayer;
+
+  /// Kept up to date with the library so another device's music can be named.
+  final LibraryIndex? library;
 
   final TunesClient client;
 
@@ -518,6 +646,11 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
+
+  /// This device's own player, for everything that is about this device's
+  /// listening (history, radio, where to resume). [AppShell.player] is what
+  /// the screens show, which can be another device's music.
+  TunePlayer get _local => widget.localPlayer ?? widget.player;
 
   /// Navigation history and the one-instance-per-identity pane registry.
   /// Panels are destinations rendered by this shell, not pushed routes:
@@ -596,7 +729,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final LyricSharing _lyricSharing = LyricSharing(
     store: widget.manifestStore,
     put: widget.client.putLyrics,
+    onChanged: () => unawaited(_refreshPlayerTracks()),
   );
+
+  /// Puts what the store now says about every queued track in front of the
+  /// screens that read the player. The queue keeps the copy it was given, so
+  /// without this a saved lyric, or one the daemon sent, was invisible on Now
+  /// Playing and in the lyrics sheet until the app was closed and reopened.
+  Future<void> _refreshPlayerTracks() async {
+    final shas = {for (final t in widget.player.queue) t.sha};
+    if (shas.isEmpty) return;
+    final fresh = <String, ManifestTrack>{};
+    for (final sha in shas) {
+      try {
+        fresh[sha] = await widget.manifestStore.trackBySha(sha);
+      } catch (_) {
+        // Not in the store (dropped from the library): keep what is queued.
+      }
+    }
+    if (mounted) widget.player.refreshTracks(fresh);
+  }
 
   @override
   void initState() {
@@ -608,11 +760,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _downloads.addListener(_onDownloadsChanged);
     _wasOffline = widget.reachability.offline;
     widget.reachability.addListener(_onReachability);
+    widget.accountSync?.onChanged = _onAccountSynced;
     _refreshTimer = Timer.periodic(_refreshEvery, (_) {
       if (_foreground && mounted) _reload();
     });
-    widget.player.addListener(_trackRecents);
-    widget.player.addListener(_feedRadio);
+    _local.addListener(_trackRecents);
+    _local.addListener(_feedRadio);
     widget.player.onQueueEnded = _pickRadio;
     // Recents used to live only in memory, so closing the app forgot what you
     // had been listening to. They come from the recorded history now.
@@ -647,10 +800,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (widget.accountSync?.onChanged == _onAccountSynced) {
+      widget.accountSync?.onChanged = null;
+    }
     widget.reachability.removeListener(_onReachability);
-    widget.player.removeListener(_trackRecents);
+    _local.removeListener(_trackRecents);
     _refreshTimer?.cancel();
-    widget.player.removeListener(_feedRadio);
+    _local.removeListener(_feedRadio);
     widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
     _nav.removeListener(_onNavChanged);
@@ -675,13 +831,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Pin the exact resume point. The player listener persists the position
     // every five seconds, so without this a close could lose most of a
     // track's progress -- and the sha, if the track changed within the gap.
-    final current = widget.player.current;
+    final current = _local.current;
     await widget.settings.setLastPlayedSha(current?.sha);
     // Not a zero from a stopped player: backing out halts the player, the
     // engine then reports 0:00, and the lifecycle change that follows used to
     // write that over the place just saved (see PositionSaver).
-    final position = widget.player.position;
-    if (widget.player.playing || position > Duration.zero) {
+    final position = _local.position;
+    if (_local.playing || position > Duration.zero) {
       await widget.settings.setLastPosition(position);
     }
   }
@@ -689,6 +845,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
+    widget.accountSync?.setForeground(_foreground);
     // Always on coming back, offline or not: a sync that succeeds is also how
     // an app that thinks it is offline finds out it is not.
     if (state == AppLifecycleState.resumed) {
@@ -842,8 +999,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _trackRecents() {
-    final current = widget.player.current;
-    if (widget.player.playing && current != null) {
+    final current = _local.current;
+    if (_local.playing && current != null) {
       final next = [
         current,
         ..._recents.where((t) => t.sha != current.sha),
@@ -864,7 +1021,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// the identity, so replaying one track on loop does not count as playing
   /// it a dozen times.
   void _feedRadio() {
-    final player = widget.player;
+    final player = _local;
     final current = player.current;
     if (current?.sha != _radioPrev?.sha) {
       final prev = _radioPrev;
@@ -916,6 +1073,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       taste: _taste,
       current: seed,
     );
+  }
+
+  /// Another device changed something that shapes the library (a corrected
+  /// title or artist): re-read it from the store, and refresh what is queued.
+  /// Likes and playlists announce themselves and need nothing here.
+  void _onAccountSynced(Set<SyncDomain> changed) {
+    if (!changed.any((d) => d is EditsDomain)) return;
+    unawaited(() async {
+      final fresh = await _manifestFromStore();
+      if (!mounted) return;
+      setState(() => _manifest = fresh);
+      unawaited(_refreshPlayerTracks());
+    }());
   }
 
   Future<void> _hydrateFromStore() async {
@@ -1015,7 +1185,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_queueRestored) return;
     // Something is already playing -- the app was reopened rather than
     // restarted, or playback began before the manifest landed. Leave it.
-    if (widget.player.current != null) {
+    if (_local.current != null) {
       _queueRestored = true;
       return;
     }
@@ -1028,7 +1198,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (tracks.isEmpty) return;
       _queueRestored = true;
       final index = restoreIndexFor(tracks, widget.settings.lastPlayedSha);
-      widget.player.restoreQueue(
+      _local.restoreQueue(
         tracks,
         index,
         // Only resume mid-track when that is genuinely useful: not eight
@@ -1066,11 +1236,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final tracks = await widget.manifestStore.allTracksNewestFirst();
     final releases = await widget.manifestStore.allReleases();
     final artists = await widget.manifestStore.allArtists();
+    widget.library?.update(tracks);
     return TunesManifest(tracks: tracks, releases: releases, artists: artists);
   }
 
+  /// When the sync in flight began, so one that never comes back can be told
+  /// from one that is merely slow.
+  DateTime? _syncStartedAt;
+
+  /// A sync was asked for while another was running (the connection came
+  /// back during the offline attempt). Run once more when this one ends.
+  bool _syncAgain = false;
+
+  static const _syncPatience = Duration(seconds: 75);
+
+  /// One sync at a time, but never a stuck one.
+  ///
+  /// `_syncing` is the only thing that stops a second sync, so a first that
+  /// hangs -- a socket that died with the phone's network switch -- used to
+  /// block every later one, including the one the reconnect triggers: the app
+  /// stayed on stale content until it was closed and reopened. Now a sync has a
+  /// deadline, always lets go of the flag, and a request made while one runs is
+  /// remembered instead of dropped.
   Future<void> _sync() async {
-    if (_syncing) return;
+    final started = _syncStartedAt;
+    if (_syncing) {
+      final stuck =
+          started != null && DateTime.now().difference(started) > _syncPatience;
+      if (!stuck) {
+        _syncAgain = true;
+        return;
+      }
+    }
+    _syncStartedAt = DateTime.now();
+    try {
+      await _syncOnce().timeout(_syncPatience);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _lastSyncError ??= TimeoutException('sync took too long');
+        });
+      }
+    } finally {
+      _syncStartedAt = null;
+    }
+    if (_syncAgain && mounted) {
+      _syncAgain = false;
+      unawaited(_sync());
+    }
+  }
+
+  Future<void> _syncOnce() async {
+    if (!mounted) return;
     setState(() {
       _syncing = true;
       _lastSyncError = null;
@@ -1102,7 +1320,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       TunesManifest? raw;
       Object? fetchError;
       try {
-        raw = await widget.client.fetchManifest();
+        raw = await widget.client.fetchManifest(fromCacheOnFailure: false);
         widget.reachability.setOffline(false);
       } catch (e) {
         fetchError = e;
@@ -1119,6 +1337,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (mounted && applyOk) {
           final fresh = await _manifestFromStore();
           if (mounted) setState(() => _manifest = fresh);
+          unawaited(_refreshPlayerTracks());
           // The first load happens before the manifest exists, so recents
           // cannot resolve their tracks until now.
           unawaited(_onHistoryChanged());
@@ -1294,6 +1513,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _nav.openPanel(
       TunesPanels.settings,
       () => SettingsPage(
+        accountSync: widget.accountSync,
         settings: widget.settings,
         auth: widget.auth,
         onWhatsNew: _openWhatsNew,
@@ -1767,6 +1987,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         recents: playable(_recents),
       ),
       _ => HomeView(
+        aboveFeed: widget.remoteNow == null || widget.accountSync == null
+            ? null
+            : ContinueCard(
+                remote: widget.remoteNow!,
+                player: widget.player,
+                manifest: manifest,
+                serverNow: widget.accountSync!.serverNowMs,
+                onContinue: (tracks, index, at) {
+                  // Load it where it was, then play: the place is restored the
+                  // way a relaunch restores it, so it resumes at the second.
+                  widget.player.restoreQueue(tracks, index, at: at);
+                  widget.player.play();
+                },
+              ),
         manifest: manifest,
         missingAlbums: offline ? const [] : _missingAlbums,
         onRefresh: _refresh,

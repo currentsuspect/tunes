@@ -118,6 +118,80 @@ class PlayHistory extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- account sync -----------------------------------------------------------
+
+  /// Listens made on this device, as `[startedAt, sha, listenedMs, durationMs,
+  /// completed]`, by UTC day (yyyymmdd), each day in time order so the same
+  /// listens always give the same text.
+  Future<Map<String, List<List<Object>>>> localEventsByDay() async {
+    final rows =
+        await (_db.select(_db.playEvents)
+              ..where((e) => e.origin.isNull())
+              ..orderBy([(e) => OrderingTerm.asc(e.startedAt)]))
+            .get();
+    final out = <String, List<List<Object>>>{};
+    for (final r in rows) {
+      out.putIfAbsent(dayOf(r.startedAt), () => []).add([
+        r.startedAt,
+        r.sha,
+        r.listenedMs,
+        r.durationMs,
+        r.completed ? 1 : 0,
+      ]);
+    }
+    return out;
+  }
+
+  static String dayOf(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}${two(d.month)}${two(d.day)}';
+  }
+
+  /// Another device's listens for one day, replacing what was held for that
+  /// device and day. Null [events] removes them.
+  Future<void> replaceFromDevice(
+    String device,
+    String day,
+    List<List<Object?>>? events,
+  ) async {
+    final start = DateTime.utc(
+      int.parse(day.substring(0, 4)),
+      int.parse(day.substring(4, 6)),
+      int.parse(day.substring(6, 8)),
+    ).millisecondsSinceEpoch;
+    await _db.transaction(() async {
+      await (_db.delete(_db.playEvents)..where(
+            (e) =>
+                e.origin.equals(device) &
+                e.startedAt.isBetweenValues(start, start + 86400000 - 1),
+          ))
+          .go();
+      for (final e in events ?? const <List<Object?>>[]) {
+        await _db
+            .into(_db.playEvents)
+            .insert(
+              PlayEventsCompanion.insert(
+                sha: e[1] as String,
+                startedAt: (e[0] as num).toInt(),
+                listenedMs: (e[2] as num).toInt(),
+                durationMs: Value((e[3] as num).toInt()),
+                completed: Value(e[4] == 1),
+                origin: Value(device),
+              ),
+            );
+      }
+    });
+    notifyListeners();
+  }
+
+  /// Wipes listens that came from other devices (sharing was turned off), so
+  /// this device's taste is its own again.
+  Future<void> dropForeign() async {
+    await (_db.delete(_db.playEvents)..where((e) => e.origin.isNotNull())).go();
+    notifyListeners();
+  }
+
   // --- reading -------------------------------------------------------------
 
   /// Distinct tracks most recently played, newest first.

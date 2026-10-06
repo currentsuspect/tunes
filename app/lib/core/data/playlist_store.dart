@@ -1,4 +1,7 @@
 import 'package:drift/drift.dart';
+
+import 'dart:math';
+
 import 'package:flutter/widgets.dart';
 
 import 'database.dart';
@@ -28,6 +31,23 @@ class PlaylistSummary {
 /// liked, what is missing. This is the one thing that is purely a decision,
 /// so it is stored exactly as given: in the order it was put in, duplicates
 /// and all.
+/// A playlist as it travels between devices.
+class SyncedPlaylist {
+  const SyncedPlaylist({
+    required this.syncId,
+    required this.name,
+    required this.shas,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String syncId;
+  final String name;
+  final List<String> shas;
+  final int createdAt;
+  final int updatedAt;
+}
+
 class PlaylistStore extends ChangeNotifier {
   PlaylistStore(this._db);
 
@@ -237,6 +257,99 @@ class PlaylistStore extends ChangeNotifier {
             ..where((it) => it.id.equals(rows[i].id)))
           .write(PlaylistItemsCompanion(position: Value(i)));
     }
+  }
+
+  // --- account sync ----------------------------------------------------------
+
+  /// Every playlist as account sync needs it. A playlist that has no identity
+  /// across devices yet is given one here, which is what makes it findable
+  /// from another device.
+  Future<List<SyncedPlaylist>> forSync() async {
+    final lists = await _db.select(_db.playlists).get();
+    final out = <SyncedPlaylist>[];
+    for (final p in lists) {
+      var id = p.syncId;
+      if (id == null) {
+        id = _newSyncId();
+        await (_db.update(_db.playlists)..where((r) => r.id.equals(p.id)))
+            .write(PlaylistsCompanion(syncId: Value(id)));
+      }
+      out.add(
+        SyncedPlaylist(
+          syncId: id,
+          name: p.name,
+          shas: await itemsOf(p.id),
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// Takes another device's version of a playlist: creates it, or replaces
+  /// the name and contents of the one with this [SyncedPlaylist.syncId].
+  Future<void> applyRemote(SyncedPlaylist remote) async {
+    await _db.transaction(() async {
+      final existing = await (_db.select(
+        _db.playlists,
+      )..where((p) => p.syncId.equals(remote.syncId))).getSingleOrNull();
+      late final int id;
+      if (existing == null) {
+        id = await _db
+            .into(_db.playlists)
+            .insert(
+              PlaylistsCompanion.insert(
+                name: _clean(remote.name),
+                createdAt: remote.createdAt,
+                updatedAt: remote.updatedAt,
+                syncId: Value(remote.syncId),
+              ),
+            );
+      } else {
+        id = existing.id;
+        await (_db.update(_db.playlists)..where((p) => p.id.equals(id))).write(
+          PlaylistsCompanion(
+            name: Value(_clean(remote.name)),
+            updatedAt: Value(remote.updatedAt),
+          ),
+        );
+        await (_db.delete(
+          _db.playlistItems,
+        )..where((i) => i.playlistId.equals(id))).go();
+      }
+      for (var i = 0; i < remote.shas.length; i++) {
+        await _db
+            .into(_db.playlistItems)
+            .insert(
+              PlaylistItemsCompanion.insert(
+                playlistId: id,
+                sha: remote.shas[i],
+                position: i,
+                addedAt: remote.updatedAt,
+              ),
+            );
+      }
+    });
+    notifyListeners();
+  }
+
+  /// Another device deleted this playlist.
+  Future<bool> deleteRemote(String syncId) async {
+    final existing = await (_db.select(
+      _db.playlists,
+    )..where((p) => p.syncId.equals(syncId))).getSingleOrNull();
+    if (existing == null) return false;
+    await delete(existing.id);
+    return true;
+  }
+
+  static String _newSyncId() {
+    final r = Random.secure();
+    String hex(int n) =>
+        List.generate(n, (_) => r.nextInt(16).toRadixString(16)).join();
+    final variant = (8 + r.nextInt(4)).toRadixString(16);
+    return '${hex(8)}-${hex(4)}-4${hex(3)}-$variant${hex(3)}-${hex(12)}';
   }
 
   Future<void> _touch(int playlistId) async {

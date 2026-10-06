@@ -363,10 +363,21 @@ class _SwipeableBodyState extends State<_SwipeableBody> {
                         children: [
                           TextSpan(text: track.artistDisplay),
                           const TextSpan(text: '  ·  '),
-                          TextSpan(
-                            text: widget.source.label,
-                            style: TextStyle(color: widget.source.color),
-                          ),
+                          // Another device's music says so, in the accent: the
+                          // sound is not here, and the buttons are a remote.
+                          if (widget.player.remoteDeviceLabel != null)
+                            TextSpan(
+                              text:
+                                  'playing on ${widget.player.remoteDeviceLabel}',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            )
+                          else
+                            TextSpan(
+                              text: widget.source.label,
+                              style: TextStyle(color: widget.source.color),
+                            ),
                         ],
                       ),
                       style: TypeScale.caption,

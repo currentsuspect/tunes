@@ -391,7 +391,7 @@ void main() {
             body: LyricsSheet(
               track: _trackWithLyrics(_longLrc(20)),
               player: player,
-              onSave: (_) async {},
+              onSave: (_, _) async {},
             ),
           ),
         ),

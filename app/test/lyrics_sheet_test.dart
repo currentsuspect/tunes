@@ -70,7 +70,7 @@ ManifestTrack _track({String? lyrics}) => ManifestTrack(
 Future<void> _pump(
   WidgetTester tester, {
   String? lyrics,
-  required Future<void> Function(String) onSave,
+  required Future<void> Function(ManifestTrack, String) onSave,
   _StubPlayer? player,
 }) async {
   await tester.pumpWidget(
@@ -87,6 +87,19 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
+/// The lyrics options live behind one menu rather than a row of buttons.
+Future<void> _menu(WidgetTester tester, String item) async {
+  await tester.tap(find.byTooltip('Lyrics options'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(item));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openMenu(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Lyrics options'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('plain text lyrics are shown, not a blank sheet', (tester) async {
     // The regression: the view read `lrc.lines`, which holds only *timed*
@@ -94,7 +107,7 @@ void main() {
     await _pump(
       tester,
       lyrics: 'first line\nsecond line',
-      onSave: (_) async {},
+      onSave: (_, _) async {},
     );
     expect(find.textContaining('first line'), findsOneWidget);
     expect(find.textContaining('second line'), findsOneWidget);
@@ -106,7 +119,7 @@ void main() {
   ) async {
     // The regression: _lrc was parsed once in initState and never again, so
     // pasting lyrics into a track that had none left "No lyrics yet" up.
-    await _pump(tester, onSave: (_) async {});
+    await _pump(tester, onSave: (_, _) async {});
     expect(find.text('No lyrics yet'), findsOneWidget);
 
     await tester.tap(find.text('Add lyrics'));
@@ -129,16 +142,16 @@ void main() {
     await _pump(
       tester,
       lyrics: 'original words',
-      onSave: (s) async => saved.add(s),
+      onSave: (_, s) async => saved.add(s),
     );
 
-    await tester.tap(find.text('Edit'));
+    await _menu(tester, 'Edit lyrics');
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'replacement words');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Edit'));
+    await _menu(tester, 'Edit lyrics');
     await tester.pumpAndSettle();
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller!.text, 'replacement words');
@@ -150,9 +163,13 @@ void main() {
 
   testWidgets('cancel leaves the stored lyrics alone', (tester) async {
     final saved = <String>[];
-    await _pump(tester, lyrics: 'keep me', onSave: (s) async => saved.add(s));
+    await _pump(
+      tester,
+      lyrics: 'keep me',
+      onSave: (_, s) async => saved.add(s),
+    );
 
-    await tester.tap(find.text('Edit'));
+    await _menu(tester, 'Edit lyrics');
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'discard me');
     await tester.tap(find.text('Cancel'));
@@ -168,7 +185,7 @@ void main() {
   ) async {
     // Dropping back to the view would look identical to a successful save
     // while losing everything the user typed.
-    await _pump(tester, onSave: (_) async => throw StateError('disk full'));
+    await _pump(tester, onSave: (_, _) async => throw StateError('disk full'));
     await tester.tap(find.text('Add lyrics'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'hard-won words');
@@ -182,9 +199,10 @@ void main() {
   });
 
   testWidgets('says whether the lyrics carry timing', (tester) async {
-    await _pump(tester, lyrics: 'no timestamps here', onSave: (_) async {});
-    expect(find.text('Plain text'), findsOneWidget);
-    expect(find.text('Synced'), findsNothing);
+    await _pump(tester, lyrics: 'no timestamps here', onSave: (_, _) async {});
+    await _openMenu(tester);
+    expect(find.text('PLAIN TEXT'), findsOneWidget);
+    expect(find.text('SYNCED'), findsNothing);
   });
 
   testWidgets('timed lyrics are marked synced and seek on tap', (tester) async {
@@ -192,10 +210,13 @@ void main() {
     await _pump(
       tester,
       lyrics: '[00:10.00]ten seconds in\n[00:20.00]twenty seconds in',
-      onSave: (_) async {},
+      onSave: (_, _) async {},
       player: player,
     );
-    expect(find.text('Synced'), findsOneWidget);
+    await _openMenu(tester);
+    expect(find.text('SYNCED'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5)); // close the menu
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('twenty seconds in'));
     await tester.pumpAndSettle();
@@ -206,7 +227,7 @@ void main() {
     tester,
   ) async {
     final saved = <String>[];
-    await _pump(tester, onSave: (s) async => saved.add(s));
+    await _pump(tester, onSave: (_, s) async => saved.add(s));
     await tester.tap(find.text('Add lyrics'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '\n\n  words  \n\n');
@@ -224,7 +245,7 @@ void main() {
     await _pump(
       tester,
       lyrics: '[00:12.34]first line\nsecond line\nthird line',
-      onSave: (_) async {},
+      onSave: (_, _) async {},
     );
     expect(find.textContaining('first line'), findsOneWidget);
     expect(find.textContaining('second line'), findsOneWidget);
@@ -237,8 +258,97 @@ void main() {
     await _pump(
       tester,
       lyrics: '[00:12.34]first line\nsecond line',
-      onSave: (_) async {},
+      onSave: (_, _) async {},
     );
-    expect(find.text('Synced'), findsOneWidget);
+    await _openMenu(tester);
+    expect(find.text('SYNCED'), findsOneWidget);
   });
+
+  testWidgets('follows the player to the next song', (tester) async {
+    final player = _MovingPlayer(_track(lyrics: 'first song words'));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LyricsSheet(
+            track: player.current!,
+            player: player,
+            onSave: (_, _) async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('first song words'), findsOneWidget);
+
+    player.moveTo(
+      _track(lyrics: 'second song words')
+          .copyWithTitle('NEXT ONE', sha: 'b' * 64),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('second song words'), findsOneWidget);
+    expect(find.textContaining('first song words'), findsNothing);
+    expect(find.text('NEXT ONE'), findsOneWidget);
+  });
+
+  testWidgets('a backing vocal sits on the right, the lead on the left', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      lyrics: '[00:10.00]lead line here\n[00:12.00](backing echo)',
+      onSave: (_, _) async {},
+    );
+    final lead = tester.getTopLeft(find.text('lead line here')).dx;
+    final echo = tester.getTopRight(find.text('(backing echo)')).dx;
+    final width = tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    expect(lead, lessThan(width / 4));
+    expect(echo, greaterThan(width * 3 / 4));
+  });
+
+  testWidgets(
+    'a saved lyric shows at once, even if the player never refreshes',
+    (tester) async {
+      await _pump(tester, onSave: (_, _) async {});
+      await tester.tap(find.text('Add lyrics'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'brand new words');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('brand new words'), findsOneWidget);
+    },
+  );
+}
+
+/// A player whose current track can be moved, as playing on does.
+class _MovingPlayer extends _StubPlayer {
+  _MovingPlayer(this._now);
+  ManifestTrack _now;
+  @override
+  ManifestTrack? get current => _now;
+  void moveTo(ManifestTrack t) {
+    _now = t;
+    notifyListeners();
+  }
+}
+
+extension on ManifestTrack {
+  ManifestTrack copyWithTitle(String title, {required String sha}) =>
+      ManifestTrack(
+        sha: sha,
+        size: size,
+        codec: codec,
+        sampleRate: sampleRate,
+        channels: channels,
+        bitrate: bitrate,
+        durationMs: durationMs,
+        title: title,
+        artist: artist,
+        album: album,
+        year: year,
+        artSha: artSha,
+        releaseId: releaseId,
+        trackNumber: trackNumber,
+        discNumber: discNumber,
+        lyrics: lyrics,
+      );
 }

@@ -120,12 +120,12 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       context,
       track: track,
       player: widget.player,
-      onSave: (text) async {
+      onSave: (saved, text) async {
         final share = widget.shareLyrics;
         if (share != null) {
-          await share(track.sha, text);
+          await share(saved.sha, text);
         } else {
-          await widget.manifestStore.setEdit(track.sha, 'lyrics', text);
+          await widget.manifestStore.setEdit(saved.sha, 'lyrics', text);
         }
       },
     );
@@ -286,6 +286,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   Expanded(
                                     child: Center(
                                       child: _SourceTag(
+                                        player: widget.player,
                                         held: downloaded,
                                         offline: widget.offline,
                                         reachability: widget.reachability,
@@ -653,28 +654,155 @@ class _Backdrop extends StatelessWidget {
 /// connection live when it can.
 class _SourceTag extends StatelessWidget {
   const _SourceTag({
+    required this.player,
     required this.held,
     required this.offline,
     required this.reachability,
   });
 
+  final TunePlayer player;
   final bool held;
   final bool offline;
   final Reachability? reachability;
 
   @override
   Widget build(BuildContext context) {
+    final remote = player.remoteDeviceLabel;
+    if (remote != null) {
+      return _StatusPill(
+        icon: player.remoteStalled
+            ? Icons.portable_wifi_off_rounded
+            : _kind(remote).contains('computer')
+            ? Icons.computer_rounded
+            : Icons.smartphone_rounded,
+        text: player.remoteStalled
+            ? "${_kind(remote)} isn't answering"
+            : 'playing on ${_kind(remote)}',
+        color: player.remoteStalled
+            ? Tones.warn
+            : Theme.of(context).colorScheme.primary,
+        // The music is elsewhere and these controls drive it. This brings it
+        // here, from the same second.
+        action: 'Play here',
+        onTap: player.playHere,
+      );
+    }
     final r = reachability;
     if (r == null) {
-      return SourcePill(
-        source: sourceFor(held: held, offline: offline),
-      );
+      return _sourcePill(sourceFor(held: held, offline: offline));
     }
     return ListenableBuilder(
       listenable: r,
-      builder: (context, _) => SourcePill(
-        source: sourceFor(held: held, offline: r.offline),
+      builder: (context, _) =>
+          _sourcePill(sourceFor(held: held, offline: r.offline)),
+    );
+  }
+
+  static Widget _sourcePill(TrackSource source) {
+    final (icon, text, color) = switch (source) {
+      TrackSource.saved => (
+        Icons.download_done_rounded,
+        'saved on this phone',
+        Tones.held,
       ),
+      TrackSource.streaming => (
+        Icons.cloud_queue_rounded,
+        'streaming',
+        Tones.textMuted,
+      ),
+      TrackSource.unavailable => (
+        Icons.cloud_off_rounded,
+        'not on this phone yet',
+        Tones.warn,
+      ),
+    };
+    return _StatusPill(icon: icon, text: text, color: color);
+  }
+
+  /// "Dylan's phone" -> "phone": the kind of device is what you need to see.
+  static String _kind(String label) {
+    final m = RegExp(r"'s\s+(.+)$").firstMatch(label);
+    return (m?.group(1) ?? label).toLowerCase();
+  }
+}
+
+/// Where the sound is, at the top of Now Playing: an icon and a few words on a
+/// faint wash of the colour that means it, with an optional action set apart
+/// at the end. One shape for held, streaming, missing and on another device,
+/// so they read as states of the same thing rather than four different tags.
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({
+    required this.icon,
+    required this.text,
+    required this.color,
+    this.action,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+  final String? action;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = Container(
+      padding: EdgeInsets.fromLTRB(10, 5, action == null ? 12 : 5, 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TypeScale.mono.copyWith(
+                fontSize: 11.5,
+                height: 1.2,
+                color: color,
+              ),
+            ),
+          ),
+          if (action != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Text(
+                action!,
+                maxLines: 1,
+                style: TypeScale.mono.copyWith(
+                  fontSize: 11,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                  color: Tones.base,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    return Semantics(
+      button: onTap != null,
+      label: action == null ? text : '$text. $action',
+      child: onTap == null
+          ? body
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              child: body,
+            ),
     );
   }
 }

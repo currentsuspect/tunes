@@ -25,6 +25,7 @@ import {
 import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
 import { handlePublish } from "./publish.js";
+import { handleSync } from "./sync.js";
 import {
   accountById,
   deviceById,
@@ -222,6 +223,12 @@ export default {
       if (!target || target.account_id !== claims.sub) return reject(404);
       return json({ revoked: await revokeDevice(env.DB, target.id) });
     }
+
+    // ---- /sync/push, /sync/pull ------------------------------------------
+    // What follows a listener between devices. Needs the database, so it sits
+    // above the stateless media path below.
+    const synced = await handleSync(req, env, Date.now());
+    if (synced) return synced;
 
     // ---- everything else: the media edge ----------------------------------
     // ---- POST /internal/publish ------------------------------------------
