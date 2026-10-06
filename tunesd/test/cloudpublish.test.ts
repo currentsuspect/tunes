@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { publishCloud, selectNewRows } from "../src/cloudpublish.js";
+import { publishCloud, selectNewRows, selectAudioToBackfill, publishAudioFile } from "../src/cloudpublish.js";
 import { State } from "../src/state.js";
 
 const log = { info: () => {}, warn: (...a: unknown[]) => void a, error: () => {}, debug: () => {} } as any;
@@ -123,5 +123,96 @@ describe("selectNewRows", () => {
       rows: [],
       watermark: "2026-01-02",
     });
+  });
+});
+
+describe("selectAudioToBackfill", () => {
+  const A = "a".repeat(64);
+  const B = "b".repeat(64);
+  const C = "c".repeat(64);
+  const present = (sha: string) => sha !== C;
+
+  it("keeps caller order with no cap, skipping published and absent", () => {
+    expect(selectAudioToBackfill([B, A, B, C], {}, present)).toEqual([B, A]);
+    expect(selectAudioToBackfill([B, A], { [B]: "2026-09-12" }, present)).toEqual([A]);
+    expect(selectAudioToBackfill(["nope", null, undefined], {}, present)).toEqual([]);
+  });
+});
+
+describe("publishAudioFile", () => {
+  const SHA = "e".repeat(64);
+
+  function putter(status: number, throws = false) {
+    const seen: { url: unknown; init: unknown }[] = [];
+    const fetchFn = vi.fn(async (url: unknown, init: any) => {
+      seen.push({ url, init });
+      if (throws) throw new Error("down");
+      return { ok: status >= 200 && status < 300, status };
+    });
+    return { seen, fetchFn };
+  }
+
+  it("PUTs bytes to the audio route with the service key", async () => {
+    const { seen, fetchFn } = putter(200);
+    const bytes = new Uint8Array([0x66, 0x4c, 0x61, 0x43]);
+    const ok = await publishAudioFile({
+      baseUrl: "https://edge/internal",
+      key: "k",
+      sha: SHA,
+      bytes,
+      log,
+      fetchFn: fetchFn as any,
+    });
+    expect(ok).toBe(true);
+    expect(seen[0]!.url).toBe(`https://edge/internal/audio/${SHA}`);
+    expect((seen[0]!.init as any).method).toBe("PUT");
+    expect((seen[0]!.init as any).body).toBe(bytes);
+  });
+
+  it("refuses oversize, malformed, rejected, and failed transfers", async () => {
+    const b = putter(200);
+    expect(
+      await publishAudioFile({
+        baseUrl: "https://edge/internal", key: "k", sha: SHA,
+        bytes: new Uint8Array(64 * 1024 * 1024 + 1), log, fetchFn: b.fetchFn as any,
+      })
+    ).toBe(false);
+    expect(b.fetchFn).not.toHaveBeenCalled();
+    expect(
+      await publishAudioFile({
+        baseUrl: "https://edge/internal", key: "k", sha: "nope",
+        bytes: new Uint8Array([1]), log, fetchFn: b.fetchFn as any,
+      })
+    ).toBe(false);
+    const rej = putter(401);
+    expect(
+      await publishAudioFile({
+        baseUrl: "https://edge/internal", key: "k", sha: SHA,
+        bytes: new Uint8Array([1]), log, fetchFn: rej.fetchFn as any,
+      })
+    ).toBe(false);
+    const down = putter(0, true);
+    expect(
+      await publishAudioFile({
+        baseUrl: "https://edge/internal", key: "k", sha: SHA,
+        bytes: new Uint8Array([1]), log, fetchFn: down.fetchFn as any,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("publishAudioFile URL", () => {
+  it("PUTs to <base>/audio/<sha>, so the base is the /internal prefix", async () => {
+    const urls: string[] = [];
+    const ok = await publishAudioFile({
+      baseUrl: "https://t.example/internal",
+      key: "k",
+      sha: "a".repeat(64),
+      bytes: new Uint8Array([1]),
+      log,
+      fetchFn: (async (u: unknown) => (urls.push(String(u)), new Response("{}"))) as any,
+    });
+    expect(ok).toBe(true);
+    expect(urls).toEqual([`https://t.example/internal/audio/${"a".repeat(64)}`]);
   });
 });

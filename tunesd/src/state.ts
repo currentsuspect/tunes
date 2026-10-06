@@ -108,6 +108,18 @@ export class State {
    * only rows newer than its watermark, so a cycle is usually an empty diff
    * instead of 637 upserts. D1's free tier counts writes, and a full rewrite
    * every five minutes tripped it. */
+  /** Every channel a track was ever seen in, including ones no longer
+   * configured. A retired channel's tracks still live in Telegram, and the
+   * cloud fetcher can only play what it has a source for. */
+  channelIdsSeen(): string[] {
+    const ids = new Set<string>();
+    for (const key of Object.keys(this.data.seen)) {
+      const i = key.lastIndexOf(":");
+      if (i > 0) ids.add(key.slice(0, i));
+    }
+    return [...ids];
+  }
+
   sightingsFor(channelIds: string[]): { sha: string; chat: number; msg: number; addedAt: string | null }[] {
     const live = new Set(channelIds);
     const out: { sha: string; chat: number; msg: number; addedAt: string | null }[] = [];
