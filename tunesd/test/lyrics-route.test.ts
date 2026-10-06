@@ -18,6 +18,7 @@ let store: LyricStore;
 let server: ManifestServer;
 let base: string;
 let changed = 0;
+let builds = 0;
 
 function manifest(): ManifestV3 {
   return {
@@ -36,10 +37,14 @@ beforeEach(async () => {
   const port = 41000 + Math.floor(Math.random() * 2000);
   base = `http://127.0.0.1:${port}`;
   changed = 0;
+  builds = 0;
   server = new ManifestServer(
     {} as never,
     join(dir, "covers"),
-    async () => manifest(),
+    async () => {
+      builds += 1;
+      return manifest();
+    },
     port,
     { info() {}, warn() {}, error() {}, debug() {} } as never,
     undefined,
@@ -130,5 +135,26 @@ describe("/changes tells phones about new lyrics", () => {
       await fetch(`${base}/changes?since=${encodeURIComponent(after)}`)
     ).json()) as { lyricsChanged: string[] };
     expect(r.lyricsChanged).toEqual([]);
+  });
+});
+
+describe("GET /changes", () => {
+  it("answers from the cached manifest instead of rebuilding it on every call", async () => {
+    // Every phone asks this every half minute or so. Rebuilding the whole
+    // manifest each time made it take seconds on a busy box, long enough that
+    // the app's own connection check gave up and called a good connection lost.
+    for (let i = 0; i < 5; i++) {
+      const r = await fetch(`${base}/changes?since=2020-01-01T00:00:00Z`);
+      expect(r.status).toBe(200);
+    }
+    expect(builds).toBe(1);
+  });
+
+  it("still sees new lyrics at once, because saving them drops the cache", async () => {
+    await fetch(`${base}/changes?since=2020-01-01T00:00:00Z`);
+    await put(SHA, { lyrics: "[00:01.00] hello" });
+    const r = await fetch(`${base}/changes?since=2020-01-01T00:00:00Z`);
+    const body = (await r.json()) as { lyricsChanged: string[] };
+    expect(body.lyricsChanged).toContain(SHA);
   });
 });
