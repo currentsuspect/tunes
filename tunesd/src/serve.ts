@@ -151,7 +151,7 @@ export class ManifestServer {
           // entire manifest on every poll.
           const since = url.searchParams.get("since");
           const cutoff = since ? Date.parse(since) : NaN;
-          const manifest = await this.getManifest(true);
+          const manifest = await this.getManifest();
           const cutoffMs = Number.isFinite(cutoff) ? cutoff : -Infinity;
           const added = manifest.tracks
             .filter((t) => {
