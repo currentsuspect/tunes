@@ -1,3 +1,5 @@
+import { loadReplacements, resourceLost } from "./resource.js";
+import { SlskdApi, slskdConfig } from "./soulseek.js";
 import { auditDue, auditSources } from "./audit.js";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
@@ -1165,6 +1167,10 @@ async function main(): Promise<void> {
     };
 
     let lastDropped = -1;
+    // What the last manifest left out because no copy could play; the
+    // Soulseek pass (resource.ts) looks for these.
+    let lastGoneProbes: ProbeResult[] = [];
+    const replacementsFile = join(env.dataDir, "replacements.json");
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
@@ -1208,6 +1214,9 @@ async function main(): Promise<void> {
       );
       const keptShas = new Set(playableProbes.map((p) => p.sha));
       const goneProbes = allProbes.filter((p) => !keptShas.has(p.sha));
+      lastGoneProbes = goneProbes;
+      const replacements = await loadReplacements(replacementsFile);
+      const replacedBy = new Map(Object.entries(replacements.bySha).map(([lost, r]) => [lost, r.sha]));
       if (dropped !== lastDropped) {
         lastDropped = dropped;
         log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
@@ -1223,7 +1232,8 @@ async function main(): Promise<void> {
         embeddedArt,
         releaseArt,
         lyricStore.forManifest(),
-        goneProbes
+        goneProbes,
+        replacedBy
       );
     };
 
@@ -1278,7 +1288,47 @@ async function main(): Promise<void> {
       } finally {
         auditRunning = false;
       }
+      await resourceIfConfigured();
     };
+
+    // Songs with no copy left are looked for on Soulseek (slskd), one at a
+    // time, capped per day. Off unless slskd is configured.
+    const slsk = slskdConfig();
+    let resourceRunning = false;
+    const resourceIfConfigured = async (): Promise<void> => {
+      if (!slsk || resourceRunning) return;
+      resourceRunning = true;
+      try {
+        const m = await manifestBuilder();
+        const pointed = new Set(m.tracks.flatMap((t) => t.dupeShas));
+        const lost = lastGoneProbes.filter((p) => !pointed.has(p.sha));
+        if (lost.length === 0) return;
+        log.info({ event: "SOULSEEK_PASS", lost: lost.length });
+        const r = await resourceLost(lost, {
+          api: new SlskdApi(slsk.url, slsk.apiKey),
+          downloadsDir: join(env.dataDir, "soulseek", "downloads"),
+          probe: (path, size) => probeFile("pending", size, path),
+          commit: async (path, size) => {
+            const staging = await store.beginStaging();
+            await rename(path, staging.path);
+            return (await staging.done(size)).sha;
+          },
+          ledgerPath: replacementsFile,
+          log,
+        });
+        log.info({ event: "SOULSEEK_PASS_DONE", ...r });
+        if (r.found > 0) {
+          await runEnrichPass();
+          publishSoon.request();
+        }
+      } catch (e) {
+        log.error({ event: "SOULSEEK_PASS_FAILED", err: String(e) });
+      } finally {
+        resourceRunning = false;
+      }
+    };
+    setTimeout(() => void resourceIfConfigured(), 6 * 60_000).unref?.();
+    setInterval(() => void resourceIfConfigured(), 6 * 60 * 60_000).unref?.();
     setTimeout(() => void auditIfDue(), 3 * 60_000).unref?.();
     setInterval(() => void auditIfDue(), 6 * 60 * 60_000).unref?.();
 

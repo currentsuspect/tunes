@@ -243,7 +243,8 @@ export function buildManifest(
   embeddedArtBySha: Map<string, string> = new Map(),
   releaseArtByKey: Map<string, string> = new Map(),
   lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map(),
-  goneProbes: ProbeResult[] = []
+  goneProbes: ProbeResult[] = [],
+  replacedBy: Map<string, string> = new Map()
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -414,10 +415,16 @@ export function buildManifest(
       const c = copies.find((t) => !supersededBy.has(t.sha));
       if (c) listed.set(audio, c);
     }
+    const bySha = new Map(canonicalTracks.map((t) => [t.sha, t]));
     for (const g of goneProbes) {
       const audio = g.audioSha;
-      if (audio == null || audio === "") continue;
-      const c = listed.get(audio);
+      // A live copy of the same audio first; else a recorded re-sourcing
+      // (resource.ts) whose new file is listed.
+      let c = audio ? listed.get(audio) : undefined;
+      if (!c) {
+        const r = replacedBy.get(g.sha);
+        c = r ? bySha.get(r) : undefined;
+      }
       if (!c || c.sha === g.sha || c.dupeShas.includes(g.sha)) continue;
       c.dupeShas.push(g.sha);
     }
