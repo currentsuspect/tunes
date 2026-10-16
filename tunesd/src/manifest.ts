@@ -242,7 +242,8 @@ export function buildManifest(
   addedAtBySha: Map<string, string> = new Map(),
   embeddedArtBySha: Map<string, string> = new Map(),
   releaseArtByKey: Map<string, string> = new Map(),
-  lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map()
+  lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map(),
+  goneProbes: ProbeResult[] = []
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -399,6 +400,31 @@ export function buildManifest(
   }
   const canonicalTracks =
     supersededBy.size === 0 ? tracks : tracks.filter((t) => !supersededBy.has(t.sha));
+
+  // Copies that can no longer play (their source message is gone, and they
+  // are not held anywhere) are not listed, but they are not forgotten either:
+  // each points at the listed copy of the same recording through its
+  // dupeShas, so a like, a playlist entry or a play count kept under the dead
+  // sha follows the song to a copy that plays. Identity is untouched: a dead
+  // sha is never handed another file's bytes, it is only resolved to the
+  // recording's live copy.
+  if (goneProbes.length > 0) {
+    const listed = new Map<string, ManifestTrack>();
+    for (const [audio, copies] of byAudio) {
+      const c = copies.find((t) => !supersededBy.has(t.sha));
+      if (c) listed.set(audio, c);
+    }
+    for (const g of goneProbes) {
+      const audio = g.audioSha;
+      if (audio == null || audio === "") continue;
+      const c = listed.get(audio);
+      if (!c || c.sha === g.sha || c.dupeShas.includes(g.sha)) continue;
+      c.dupeShas.push(g.sha);
+    }
+    for (const c of listed.values()) {
+      if (c.dupeShas.length > 1) c.dupeShas.sort();
+    }
+  }
 
   // Tracks whose album came from the file itself, not from a provider.
   const fileStatedAlbum = new Set(

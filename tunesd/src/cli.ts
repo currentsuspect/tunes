@@ -1,3 +1,4 @@
+import { auditDue, auditSources } from "./audit.js";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -1164,6 +1165,9 @@ async function main(): Promise<void> {
     };
 
     let lastDropped = -1;
+    // Songs R2 holds play from there whatever happened to their Telegram
+    // message. The ledger is loaded further down; until then it is empty.
+    let cloudHeld: Record<string, string> = {};
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
@@ -1194,12 +1198,17 @@ async function main(): Promise<void> {
       }
       // Only list what can be played: held here, or sourced from a channel we
       // still ingest from. Hidden, never deleted (see playableOnly).
-      const liveShas = new Set(state.sightingsFor(channelIds).map((r) => r.sha));
+      // A source Telegram has said is gone does not count (see audit.ts).
+      const liveShas = new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));
+      for (const sha of Object.keys(cloudHeld)) liveShas.add(sha);
+      const allProbes = [...probeCache.values()];
       const { kept: playableProbes, dropped } = playableOnly(
-        [...probeCache.values()],
+        allProbes,
         (sha) => store.has(sha),
         liveShas
       );
+      const keptShas = new Set(playableProbes.map((p) => p.sha));
+      const goneProbes = allProbes.filter((p) => !keptShas.has(p.sha));
       if (dropped !== lastDropped) {
         lastDropped = dropped;
         log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
@@ -1214,7 +1223,8 @@ async function main(): Promise<void> {
         state.allAddedAt(),
         embeddedArt,
         releaseArt,
-        lyricStore.forManifest()
+        lyricStore.forManifest(),
+        goneProbes
       );
     };
 
@@ -1254,6 +1264,25 @@ async function main(): Promise<void> {
     // The download pacing is untouched; this only changes when results appear.
     const publishSoon = coalesce(publishNow, 30_000);
 
+    // A play that finds its source gone shows the live copy next manifest.
+    onDemand.onGone = () => publishSoon.request();
+
+    // Every source checked about once a week, a few minutes after start so it
+    // never competes with the first scan. Reads only; see audit.ts.
+    let auditRunning = false;
+    const auditIfDue = async (): Promise<void> => {
+      if (auditRunning || !auditDue(state.data.auditedAt, new Date())) return;
+      auditRunning = true;
+      try {
+        const r = await auditSources(client, state, log, { channelIds });
+        if (r.gone > 0) publishSoon.request();
+      } finally {
+        auditRunning = false;
+      }
+    };
+    setTimeout(() => void auditIfDue(), 3 * 60_000).unref?.();
+    setInterval(() => void auditIfDue(), 6 * 60 * 60_000).unref?.();
+
     // New audio goes up to R2 from the local copy straight away, so a friend's
     // first play of it is a cache hit rather than a cold Telegram fetch.
     const audioLedgerFile = join(env.dataDir, "audio-published.json");
@@ -1264,6 +1293,7 @@ async function main(): Promise<void> {
     } catch {
       void undefined; // first run
     }
+    cloudHeld = audioLedger;
     // publishAudioFile appends /audio/<sha> itself, so the base is the
     // /internal prefix (…/internal/publish -> …/internal), not …/internal/audio.
     const audioBase = env.publishUrl?.replace(/\/publish\/?$/, "") ?? "";

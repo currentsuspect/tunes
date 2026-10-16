@@ -949,6 +949,28 @@ describe("exact-audio dedupe", () => {
     expect(m.tracks[0]?.dupeShas).toEqual([sha("b"), sha("c")]);
   });
 
+  it("points a copy that can no longer play at the listed one", () => {
+    // sha("a") is the lowest, but its source is gone: it is not listed, and the
+    // live copy carries it as a dupe so likes and playlists follow the song.
+    const m = buildManifest(
+      [probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "Team ceo" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map(), new Map(),
+      [probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Team ceo" } })]
+    );
+    expect(m.tracks.map((t) => t.sha)).toEqual([sha("c")]);
+    expect(m.tracks[0]?.dupeShas).toEqual([sha("a")]);
+  });
+
+  it("drops a gone copy with no live twin rather than inventing one", () => {
+    const m = buildManifest(
+      [probe({ sha: sha("c"), audioSha: "cccc", tags: { title: "Other" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map(), new Map(),
+      [probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Gone" } })]
+    );
+    expect(m.tracks.map((t) => t.sha)).toEqual([sha("c")]);
+    expect(m.tracks[0]?.dupeShas).toEqual([]);
+  });
+
   it("does not merge different recordings that share a title", () => {
     const m = buildManifest([
       probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Intro", artist: "A" } }),

@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import type { Log } from "../logger.js";
-import { PermanentError, RetryableError } from "./ports.js";
+import { PermanentError, RetryableError, SourceGoneError } from "./ports.js";
 import { TelegramClient, Api } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
 import { NewMessage } from "teleproto/events/index.js";
@@ -223,6 +223,25 @@ export class MtprotoClient {
     }
   }
 
+  /** Which of [ids] in [chatId] no longer hold audio: deleted, emptied, or
+   * edited to something else. One call for up to 100 ids, no downloads. */
+  async missingAudio(chatId: number, ids: number[]): Promise<number[]> {
+    try {
+      const client = await this.connect();
+      const peer = await this.peer(chatId);
+      const fetched = await client.getMessages(peer, { ids });
+      const present = new Set<number>();
+      for (const m of fetched as unknown as Array<Api.Message | undefined>) {
+        if (!m || (m as { className?: string }).className === "MessageEmpty") continue;
+        if (MtprotoClient.audioDocOf(m) == null) continue;
+        present.add(Number(m.id));
+      }
+      return ids.filter((id) => !present.has(id));
+    } catch (e) {
+      throw this.onInvokeError(e);
+    }
+  }
+
   async downloadAudioTo(
     chatId: number,
     messageId: number,
@@ -233,9 +252,11 @@ export class MtprotoClient {
       const peer = await this.peer(chatId);
       const fetched = await client.getMessages(peer, { ids: [messageId] });
       const msg = fetched[0];
-      if (!msg) throw new PermanentError(`Source message ${messageId} not found in ${chatId}`);
+      if (!msg || (msg as { className?: string }).className === "MessageEmpty") {
+        throw new SourceGoneError(`Source message ${messageId} not found in ${chatId}`);
+      }
       const doc = MtprotoClient.audioDocOf(msg as Api.Message);
-      if (!doc) throw new PermanentError(`Source message ${messageId} has no audio media`);
+      if (!doc) throw new SourceGoneError(`Source message ${messageId} has no audio media`);
       await client.downloadMedia(msg as Api.Message, {
         outputFile: outPath,
         progressCallback: (downloaded: unknown) => {
