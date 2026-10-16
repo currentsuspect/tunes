@@ -1165,9 +1165,6 @@ async function main(): Promise<void> {
     };
 
     let lastDropped = -1;
-    // Songs R2 holds play from there whatever happened to their Telegram
-    // message. The ledger is loaded further down; until then it is empty.
-    let cloudHeld: Record<string, string> = {};
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
@@ -1199,8 +1196,10 @@ async function main(): Promise<void> {
       // Only list what can be played: held here, or sourced from a channel we
       // still ingest from. Hidden, never deleted (see playableOnly).
       // A source Telegram has said is gone does not count (see audit.ts).
+      // Neither does R2: it is the fetch worker's evicting cache, and the
+      // publish ledger kept saying "held" for copies long since evicted
+      // (all 42 gone-source copies it claimed were missing, 16 Oct).
       const liveShas = new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));
-      for (const sha of Object.keys(cloudHeld)) liveShas.add(sha);
       const allProbes = [...probeCache.values()];
       const { kept: playableProbes, dropped } = playableOnly(
         allProbes,
@@ -1293,7 +1292,6 @@ async function main(): Promise<void> {
     } catch {
       void undefined; // first run
     }
-    cloudHeld = audioLedger;
     // publishAudioFile appends /audio/<sha> itself, so the base is the
     // /internal prefix (…/internal/publish -> …/internal), not …/internal/audio.
     const audioBase = env.publishUrl?.replace(/\/publish\/?$/, "") ?? "";
