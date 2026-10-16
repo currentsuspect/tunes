@@ -113,6 +113,11 @@ export class SlskdApi {
     return null;
   }
 
+  /** Forgets finished, failed and cancelled transfers. */
+  async clearFinished(): Promise<void> {
+    await this.call("DELETE", "/transfers/downloads/all/completed");
+  }
+
   /** Cancels and forgets a transfer, so slow peers do not linger. */
   async cancel(username: string, filename: string): Promise<void> {
     const d = await this.call<{ directories?: Array<{ files: Array<{ filename: string; id: string }> }> }>(

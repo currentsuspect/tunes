@@ -122,7 +122,14 @@ export async function acquire(
       await api.cancel(c.username, c.file.filename);
       continue;
     }
-    const path = await findDownloaded(downloadsDir, c.file.filename);
+    // slskd says Succeeded a moment before it moves the file out of its
+    // incomplete folder; looking once at that instant found nothing and the
+    // song was downloaded again from the next peer.
+    let path: string | null = null;
+    for (let i = 0; i < 20 && !path; i++) {
+      path = await findDownloaded(downloadsDir, c.file.filename);
+      if (!path) await sleep(Math.min(poll, 1000));
+    }
     if (path) {
       log.info({ event: "SOULSEEK_DOWNLOADED", lossless: c.lossless, secs: Math.round((Date.now() - started) / 1000) });
       return { path, candidate: c };
@@ -181,6 +188,10 @@ export async function resourceLost(
 ): Promise<{ found: number; missed: number; skipped: number }> {
   const ledger = await loadReplacements(deps.ledgerPath);
   const cap = deps.dailyCap ?? 40;
+  // Only this pass writes here; anything left is from a pass that was cut
+  // short (a restart mid-download) and is never going to be committed.
+  await rm(deps.downloadsDir, { recursive: true, force: true });
+  await deps.api.clearFinished?.().catch(() => undefined);
   let found = 0;
   let missed = 0;
   let skipped = 0;

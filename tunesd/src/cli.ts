@@ -1301,7 +1301,15 @@ async function main(): Promise<void> {
       try {
         const m = await manifestBuilder();
         const pointed = new Set(m.tracks.flatMap((t) => t.dupeShas));
-        const lost = lastGoneProbes.filter((p) => !pointed.has(p.sha));
+        // Songs lost to a deleted message (audit, play) first: those were
+        // playing until recently. Then the ones hidden for longer, whose only
+        // source was a channel no longer ingested.
+        const recentlyGone = new Set(
+          state.sightingsFor(channelIds).filter((r) => state.isGone(String(r.chat), r.msg)).map((r) => r.sha)
+        );
+        const lost = lastGoneProbes
+          .filter((p) => !pointed.has(p.sha))
+          .sort((a, b) => Number(recentlyGone.has(b.sha)) - Number(recentlyGone.has(a.sha)));
         if (lost.length === 0) return;
         log.info({ event: "SOULSEEK_PASS", lost: lost.length });
         const r = await resourceLost(lost, {
