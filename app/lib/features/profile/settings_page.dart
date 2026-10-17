@@ -20,6 +20,7 @@ import '../../core/ui/profile_avatar.dart';
 import '../../domain/listening_stats.dart';
 import '../../domain/manifest.dart';
 import '../stats/listening_page.dart';
+import 'eq_sheet.dart';
 
 /// Who you are and how the app behaves.
 ///
@@ -376,6 +377,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     _Group(
                       title: 'Listening',
                       children: [
+                        _LinkTile(
+                          title: 'Headphone EQ: ${s.eqProfile?.name ?? 'Off'}',
+                          detail:
+                              'Tune how your headphones sound, for everything '
+                              'that plays here.',
+                          onTap: () => showEqSheet(context, s),
+                        ),
                         _SwitchTile(
                           title: 'Gapless playback',
                           detail:

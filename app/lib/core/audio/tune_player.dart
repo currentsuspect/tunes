@@ -104,6 +104,10 @@ abstract class TunePlayer extends ChangeNotifier {
   /// what backend they are talking to.
   Future<void> setGapless(bool on) async {}
 
+  /// An mpv audio filter chain (`af`), for the headphone EQ; empty is none.
+  /// A no-op on players that cannot filter.
+  Future<void> setAudioFilter(String af) async {}
+
   /// Loads a queue without playing it, so a relaunch can put the listener back
   /// where they were.
   ///
@@ -273,6 +277,7 @@ class MediaKitTunePlayer extends TunePlayer {
     _processPeer = created;
     _player = created;
     unawaited(_applyGapless(created));
+    unawaited(_applyFilter(created));
     _attachStreams(created);
     return created;
   }
@@ -864,6 +869,29 @@ class MediaKitTunePlayer extends TunePlayer {
   /// not exported from media_kit's public entry point -- and importing its
   /// `src/` path would tie us to a file that is free to move. The call is
   /// guarded, so a backend without the method simply does not get gapless.
+  String _af = '';
+
+  @override
+  Future<void> setAudioFilter(String af) async {
+    _af = af;
+    final player = _player;
+    if (player != null) await _applyFilter(player);
+  }
+
+  /// The headphone EQ (domain/eq.dart), set the same guarded way as
+  /// gapless. A chain mpv refuses is dropped rather than left half-applied,
+  /// so a bad profile never silences playback.
+  Future<void> _applyFilter(Player player) async {
+    try {
+      final platform = player.platform as dynamic;
+      await platform.setProperty('af', _af);
+    } catch (_) {
+      try {
+        await (player.platform as dynamic).setProperty('af', '');
+      } catch (_) {}
+    }
+  }
+
   Future<void> _applyGapless(Player player) async {
     try {
       final platform = player.platform as dynamic;

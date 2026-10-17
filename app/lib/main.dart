@@ -376,6 +376,17 @@ Future<void> main() async {
   // exist yet.
   unawaited(player.setGapless(settings.gapless));
 
+  // The headphone EQ (Settings > Sound): applied now, and again whenever the
+  // chosen profile or its filters change.
+  var appliedAf = settings.eqProfile?.toMpvAf() ?? '';
+  unawaited(player.setAudioFilter(appliedAf));
+  settings.addListener(() {
+    final af = settings.eqProfile?.toMpvAf() ?? '';
+    if (af == appliedAf) return;
+    appliedAf = af;
+    unawaited(player.setAudioFilter(af));
+  });
+
   // Watches the player from here on, so a listen is recorded whether it was
   // started from the library, a notification, or a headset button.
   final history = PlayHistory(db, player);

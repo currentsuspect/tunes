@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/widgets.dart';
 
+import '../../domain/eq.dart';
 import '../radio/session.dart' show RadioMode;
 
 import 'database.dart';
@@ -36,6 +39,8 @@ class SettingsStore extends ChangeNotifier {
   static const _showLyrics = 'lyrics.show';
   static const _radioReach = 'radio.reach';
   static const _radioMode = 'radio.mode';
+  static const _eqActive = 'eq.active';
+  static const _eqCustom = 'eq.custom';
   static const _whatsNewSeen = 'app.whatsNewSeen';
   static const _serverUrl = 'server.url';
   static const _syncHistory = 'sync.history';
@@ -239,6 +244,37 @@ class SettingsStore extends ChangeNotifier {
   }
 
   Future<void> setRadioMode(RadioMode m) => _put(_radioMode, m.name);
+
+  /// The headphone EQ that is on, by id; null is off.
+  String? get eqActive {
+    final v = _cache[_eqActive];
+    return v == null || v.isEmpty ? null : v;
+  }
+
+  Future<void> setEqActive(String? id) => _put(_eqActive, id ?? '');
+
+  /// EQ profiles the listener pasted in, newest last.
+  List<EqProfile> get eqCustom {
+    try {
+      final raw = jsonDecode(_cache[_eqCustom] ?? '[]') as List;
+      return [for (final j in raw) ?EqProfile.fromJson(j)];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> setEqCustom(List<EqProfile> all) =>
+      _put(_eqCustom, jsonEncode([for (final p in all) p.toJson()]));
+
+  /// Every profile on offer: the built-in ones, then the listener's.
+  List<EqProfile> get eqProfiles => [...BuiltInEq.all, ...eqCustom];
+
+  /// The profile that is on, if it still exists.
+  EqProfile? get eqProfile {
+    final id = eqActive;
+    if (id == null) return null;
+    return eqProfiles.where((p) => p.id == id).firstOrNull;
+  }
 
   /// The track that was playing when the app was last closed.
   ///
