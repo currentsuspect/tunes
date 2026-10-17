@@ -1207,6 +1207,9 @@ async function main(): Promise<void> {
       // (all 42 gone-source copies it claimed were missing, 16 Oct).
       const liveShas = new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));
       const allProbes = [...probeCache.values()];
+      // Loaded before anything below reads it (redundant files are left out
+      // of the playable list; replacements point lost copies at live ones).
+      const replacements = await loadReplacements(replacementsFile);
       const { kept: playableUnfiltered, dropped } = playableOnly(
         allProbes,
         (sha) => store.has(sha),
@@ -1216,7 +1219,6 @@ async function main(): Promise<void> {
       const keptShas = new Set(playableProbes.map((p) => p.sha));
       const goneProbes = allProbes.filter((p) => !keptShas.has(p.sha));
       lastGoneProbes = goneProbes;
-      const replacements = await loadReplacements(replacementsFile);
       const replacedBy = new Map(Object.entries(replacements.bySha).map(([lost, r]) => [lost, r.sha]));
       // Redundant re-sourced files stand behind the copy already listed.
       for (const [file, target] of Object.entries(replacements.redundant)) replacedBy.set(file, target);
