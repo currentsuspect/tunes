@@ -5,6 +5,7 @@ import { TelegramClient, Api } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
 import { NewMessage } from "teleproto/events/index.js";
 import { FloodWaitError, SlowModeWaitError } from "teleproto/errors/index.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 
 export interface AudioRef {
   messageId: number;
@@ -289,8 +290,12 @@ export class MtprotoClient {
     try {
       const client = await this.connect();
       const peer = await this.peer(chatId);
-      const msg = (await client.sendFile(peer, {
-        file: filePath,
+      // Named, not a bare path: store objects are named by sha with no
+      // extension, and the library takes the file type from the name. A bare
+      // path went up as an untyped document (17 Oct).
+      const file = new CustomFile(meta.fileName, statSync(filePath).size, filePath);
+      const sent = (await client.sendFile(peer, {
+        file,
         caption: meta.caption ?? "",
         forceDocument: false,
         attributes: [
@@ -302,9 +307,16 @@ export class MtprotoClient {
           new Api.DocumentAttributeFilename({ fileName: meta.fileName }),
         ],
       })) as Api.Message;
-      const doc = MtprotoClient.audioDocOf(msg);
-      if (!doc) throw new Error("upload did not come back as an audio document");
-      return { messageId: msg.id, size: Number(doc.size) };
+      // Judged on the message as Telegram holds it, read back, not on the
+      // send's reply.
+      const [back] = await client.getMessages(peer, { ids: [sent.id] });
+      const doc = back ? MtprotoClient.audioDocOf(back as Api.Message) : null;
+      if (!doc) {
+        // Not playable as audio: take it down again so no stray copy is left.
+        await client.deleteMessages(peer, [sent.id], { revoke: true }).catch(() => undefined);
+        throw new Error("upload did not come back as an audio document");
+      }
+      return { messageId: sent.id, size: Number(doc.size) };
     } catch (e) {
       throw this.onInvokeError(e);
     }
