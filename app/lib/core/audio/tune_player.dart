@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'queue_order.dart';
 import 'restore_seek.dart';
+import 'source_plan.dart';
 import '../../domain/manifest.dart';
 import '../platform/diag_log.dart';
 import 'transport_rules.dart';
@@ -123,6 +124,16 @@ abstract class TunePlayer extends ChangeNotifier {
   /// changes: order, position and the decoder are left exactly as they are.
   /// A no-op where a player holds no queue of its own.
   void refreshTracks(Map<String, ManifestTrack> fresh) {}
+
+  /// Points queued songs at their copy on the phone where one has landed since
+  /// the queue opened. The song playing is only reopened when [touchCurrent]:
+  /// offline its stream is about to fail, online it is left to finish. A no-op
+  /// where a player holds no queue of its own.
+  void refreshSources({bool touchCurrent = false}) {}
+
+  /// The connection is back. A song held while offline picks up where it
+  /// stopped. A no-op where a player holds no queue of its own.
+  void networkReturned() {}
 }
 
 class MediaKitTunePlayer extends TunePlayer {
@@ -147,6 +158,41 @@ class MediaKitTunePlayer extends TunePlayer {
   /// still opens, with unsigned URLs that the edge will refuse. A visible 403
   /// beats a queue that silently refuses to start.
   Future<void> Function(List<ManifestTrack> tracks)? prepareQueue;
+
+  /// Whether the app has decided it is offline. Signing a queue is a network
+  /// round trip that cannot succeed then, and waiting it out held every tap
+  /// silent for the length of a timeout.
+  bool Function()? isOffline;
+
+  /// Asks, now, whether the server can be reached. Called when a stream fails:
+  /// the heartbeat needs three missed checks ten seconds apart to say offline,
+  /// and in that gap every failure read as a bad file, so the queue was
+  /// skipped through song by song until it ran out.
+  Future<bool> Function()? checkOnline;
+
+  /// The song last heard playing, how far in, and when. mpv moves on to the
+  /// next entry by itself when one fails to load, so by the time an error
+  /// arrives the index can already be a song that never made a sound.
+  int _heardIndex = -1;
+  String? _heardSha;
+  Duration _heardAt = Duration.zero;
+  DateTime? _heardWhen;
+
+  /// Offline with nothing on the phone to play: paused on the song that was
+  /// playing, at its spot, until the connection is back or play is pressed.
+  /// The decoder's own reports are ignored meanwhile, since it keeps failing
+  /// and moving on underneath.
+  bool _heldForNetwork = false;
+
+  /// Songs given up on in a row, online. Reset once a song plays. A run of
+  /// them means something other than the songs is wrong, and skipping on
+  /// would only fail through the whole queue.
+  int _skipsInRow = 0;
+
+  /// The address each decoder entry was opened with, in decoder order. Kept so
+  /// an entry whose song has reached the phone since can be found and moved
+  /// onto the copy (see [planSources]).
+  List<String> _opened = const [];
 
   Future<void> Function()? onFirstPlay;
 
@@ -394,6 +440,8 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
+    _heldForNetwork = false;
+    _heardWhen = null;
     if (tracks.isEmpty) return;
     _claimLive();
     if (!_firstPlayDone && onFirstPlay != null) {
@@ -433,21 +481,78 @@ class MediaKitTunePlayer extends TunePlayer {
   /// The prepare step is awaited but its failure is swallowed: a queue that
   /// opens with unsigned URLs fails loudly at the edge, which is far easier to
   /// diagnose than a play button that does nothing.
+  ///
+  /// It is only awaited when the first song has to stream. One that is on the
+  /// phone starts at once and the rest are signed behind it; offline nothing
+  /// is signed at all, since the round trip can only time out.
   Future<void> _openQueue(
     Player player,
     List<ManifestTrack> tracks,
     int index, {
     required bool play,
   }) async {
-    try {
-      await prepareQueue?.call(tracks);
-    } catch (_) {
-      // Fall through and open anyway.
+    final offline = isOffline?.call() ?? false;
+    final startsLocal =
+        index >= 0 &&
+        index < tracks.length &&
+        isLocalUri(trackUriFor(tracks[index]));
+    final prepare = prepareQueue;
+    if (prepare != null && !offline) {
+      if (startsLocal) {
+        unawaited(
+          prepare(tracks).then((_) => refreshSources(), onError: (_) {}),
+        );
+      } else {
+        try {
+          await prepare(tracks);
+        } catch (_) {
+          // Fall through and open anyway.
+        }
+      }
     }
+    final uris = [for (final t in tracks) trackUriFor(t)];
+    _opened = uris;
     await player.open(
-      Playlist(tracks.map((t) => Media(trackUriFor(t))).toList(), index: index),
+      Playlist([for (final u in uris) Media(u)], index: index),
       play: play,
     );
+  }
+
+  @override
+  void refreshSources({bool touchCurrent = false}) {
+    final player = _player;
+    if (player == null || _queue.isEmpty) return;
+    final plan = planSources(
+      opened: _opened,
+      resolved: [for (final t in _queue) trackUriFor(t)],
+      index: _index,
+      touchCurrent: touchCurrent,
+    );
+    if (plan.reopenCurrent) {
+      DiagLog.log('player: reopening ${_queue[_index].sha} from the phone');
+      // Reopening rebuilds every entry, so the tail is covered too.
+      unawaited(_reopenHere(player, _position));
+      return;
+    }
+    if (plan.rebuildTail) _rebuildTail(_queue);
+  }
+
+  /// Opens the queue again where it is, picking up each song's best address,
+  /// and returns to [at] in the song on. Used when that song's stream is gone
+  /// but its bytes are on the phone.
+  ///
+  /// [play] defaults to whatever the decoder last said; after a failure that
+  /// can read as paused, so the retry paths pass true.
+  Future<void> _reopenHere(Player player, Duration at, {bool? play}) async {
+    final resume = at > const Duration(seconds: 2);
+    if (resume) {
+      _pendingSeek = at;
+      _pendingSeekSince = DateTime.now();
+      _lastSeekRetry = null;
+      _seekRetries = 0;
+    }
+    await _openQueue(player, _queue, _index, play: play ?? _playing);
+    if (resume) unawaited(player.seek(at));
   }
 
   List<ManifestTrack> _shuffledWithStart(
@@ -494,6 +599,13 @@ class MediaKitTunePlayer extends TunePlayer {
     if (player == null) return;
     if (_queue.isEmpty) return;
     _claimLive();
+    if (_heldForNetwork) {
+      // Tried again by hand: reopen where it stopped. Still offline, it
+      // fails and holds again.
+      _heldForNetwork = false;
+      unawaited(_reopenHere(player, _position, play: true));
+      return;
+    }
     player.play();
     final target = _restoreAt;
     if (target != null) {
@@ -525,6 +637,8 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void next() {
+    _heldForNetwork = false;
+    _heardWhen = null;
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
@@ -613,6 +727,8 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void previous() {
+    _heldForNetwork = false;
+    _heardWhen = null;
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
@@ -651,6 +767,8 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void playAt(int index) {
+    _heldForNetwork = false;
+    _heardWhen = null;
     final player = _player;
     if (player == null) return;
     if (index < 0 || index >= _queue.length) return;
@@ -668,6 +786,13 @@ class MediaKitTunePlayer extends TunePlayer {
     // follows is a first press again, not the second of a pair.
     _restartedAt = null;
     _clearPendingSeek();
+    _heardWhen = null;
+    if (_heldForNetwork) {
+      // Nothing is loaded to seek in: move the spot it will resume from.
+      _position = target;
+      notifyListeners();
+      return;
+    }
     _player?.seek(target);
   }
 
@@ -788,23 +913,36 @@ class MediaKitTunePlayer extends TunePlayer {
       _queue = next;
       return;
     }
-    final keep = _index + 1;
-    final before = _queue.length;
     _queue = next;
     onQueuePlayed?.call(next);
+    _rebuildTail(next);
+  }
+
+  /// Replaces every decoder entry after the song on with [next]'s, each at its
+  /// best address now. The song on is never touched.
+  void _rebuildTail(List<ManifestTrack> next) {
     final player = _player;
     if (player == null) return;
     _reorderFlight = _reorderFlight.then((_) async {
+      // Read when the edit runs, not when it was asked for: an earlier edit in
+      // the flight may have moved on.
+      final keep = _index + 1;
+      final before = _opened.length;
+      if (keep > next.length || keep > before) return;
       try {
         final tail = next.sublist(keep);
-        await prepareQueue?.call(tail);
+        if (!(isOffline?.call() ?? false)) {
+          await prepareQueue?.call(tail);
+        }
+        final uris = [for (final t in tail) trackUriFor(t)];
         // From the back, so no removal shifts the index of one still to go.
         for (var i = before - 1; i >= keep; i--) {
           await player.remove(i);
         }
-        for (final t in tail) {
-          await player.add(Media(trackUriFor(t)));
+        for (final u in uris) {
+          await player.add(Media(u));
         }
+        _opened = [..._opened.take(keep), ...uris];
       } catch (_) {
         // The decoder refusing an edit is no reason to stop the music: the
         // current song keeps playing and the next play rebuilds the queue.
@@ -866,8 +1004,19 @@ class MediaKitTunePlayer extends TunePlayer {
     );
     _peerSubs.add(
       player.stream.position.listen((p) {
+        if (_heldForNetwork) return;
         if (_swallowStaleRestoreReport(player, p)) return;
         _position = p;
+        if (_playing &&
+            p > Duration.zero &&
+            _index >= 0 &&
+            _index < _queue.length) {
+          _heardIndex = _index;
+          _heardSha = _queue[_index].sha;
+          _heardAt = p;
+          _heardWhen = DateTime.now();
+          if (p > const Duration(seconds: 5)) _skipsInRow = 0;
+        }
         if ((p - _lastNotifiedPosition).abs() >=
             const Duration(milliseconds: 250)) {
           _lastNotifiedPosition = p;
@@ -889,6 +1038,7 @@ class MediaKitTunePlayer extends TunePlayer {
         // it the mini-player) back to the start. Only a populated playlist may
         // move the index; our own stop()/halt() manage _queue themselves.
         if (pl.medias.isEmpty) return;
+        if (_heldForNetwork) return;
         if (pl.index >= 0) {
           if (pl.index != _index) {
             // A different track is playing -- skipped to, or arrived at on its
@@ -909,7 +1059,7 @@ class MediaKitTunePlayer extends TunePlayer {
     // index the queue has run out; radio may continue it, otherwise it stops.
     _peerSubs.add(
       player.stream.completed.listen((done) {
-        if (done) _onNaturalEnd();
+        if (done && !_heldForNetwork) _onNaturalEnd();
       }),
     );
   }
@@ -922,46 +1072,133 @@ class MediaKitTunePlayer extends TunePlayer {
   Duration _retryFrom = Duration.zero;
 
   void _retryOpen(Player player) {
+    // Errors while held are the decoder failing on, offline; already handled.
+    if (_heldForNetwork) return;
     if (_index < 0 || _index >= _queue.length) return;
-    // One failure can report several errors; only the first starts a retry.
+    // One failure can report several errors; only the first is handled.
     if (_retryWaiting) return;
-    final sha = _queue[_index].sha;
+    _retryWaiting = true;
+    unawaited(
+      _onStreamFailed(player).whenComplete(() => _retryWaiting = false),
+    );
+  }
+
+  Future<void> _onStreamFailed(Player player) async {
+    var index = _index;
+    var from = _position;
+    final sha = _queue[index].sha;
+    var resolved = [for (final t in _queue) trackUriFor(t)];
+    // The song's bytes are on the phone now: play those, from the same spot,
+    // instead of asking the server again.
+    if (isLocalUri(resolved[index])) {
+      DiagLog.log('player: stream dropped, song is on the phone');
+      await _resumeAt(player, index, from);
+      return;
+    }
+    final online =
+        await (checkOnline?.call() ??
+            Future<bool>.value(!(isOffline?.call() ?? false)));
+    if (!online) {
+      // Where the listener actually was. Offline, mpv moves on to the next
+      // entry by itself when one fails, without a sound; the song heard last,
+      // a few seconds ago at or before the current index, is the one to come
+      // back to. Only offline, and never past an explicit move (next, back, a
+      // tap, a seek clear it): online it threw the listener back to the song
+      // they had just skipped, over and over.
+      final heard = _heardWhen;
+      if (heard != null &&
+          DateTime.now().difference(heard) < const Duration(seconds: 15) &&
+          _heardIndex >= 0 &&
+          _heardIndex <= _index &&
+          _heardIndex < _queue.length &&
+          _queue[_heardIndex].sha == _heardSha) {
+        index = _heardIndex;
+        from = _heardAt;
+      }
+      // A song that has to stream cannot play offline however often it is
+      // retried, and skipping through the queue only fails song after song.
+      // Go to the next song on the phone; with none, stay on this one.
+      resolved = [for (final t in _queue) trackUriFor(t)];
+      if (index < resolved.length && isLocalUri(resolved[index])) {
+        await _resumeAt(player, index, from);
+        return;
+      }
+      final to = nextLocalAfter(resolved, index);
+      if (to != null) {
+        DiagLog.log('player: offline, skipping to $to (on the phone)');
+        await _resumeAt(player, to, Duration.zero);
+        return;
+      }
+      DiagLog.log('player: offline, holding at $index');
+      _holdForNetwork(player, index, from);
+      return;
+    }
+    // Online: the song itself failed. Retry it twice, a little later each
+    // time, then move on. A cold track can fail its first open while the
+    // server is still fetching it. Only the song on now: if the listener
+    // moved while the check ran, the failure is not theirs any more.
+    if (_index != index || index >= _queue.length) return;
+    if (_queue[index].sha != sha) return;
     if (sha != _retrySha) {
       _retrySha = sha;
       _retries = 0;
     }
     // A drop well after the last one is a new problem, not the same one again.
-    if (_retries > 0 && _position > _retryFrom + const Duration(seconds: 15)) {
+    if (_retries > 0 && from > _retryFrom + const Duration(seconds: 15)) {
       _retries = 0;
     }
-    final index = _index;
     if (_retries >= 2) {
       _retries = 0;
+      _skipsInRow += 1;
+      if (_skipsInRow >= 3) {
+        // Three songs in a row would not play though the server answers:
+        // stop here rather than fail through everything. Play tries again.
+        DiagLog.log('player: three songs failed in a row, holding');
+        _skipsInRow = 0;
+        _holdForNetwork(player, index, from);
+        return;
+      }
       next();
       return;
     }
     final wait = Duration(seconds: _retries == 0 ? 1 : 3);
     _retries += 1;
-    _retryFrom = _position;
-    _retryWaiting = true;
-    Future<void>.delayed(wait, () {
-      _retryWaiting = false;
-      // Only if the listener has not moved on in the meantime.
-      if (_index != index || index >= _queue.length) return;
-      if (_queue[index].sha != sha) return;
-      // Pick up where it dropped: starting the song over, up to three times,
-      // read as the track repeating before it was skipped.
-      if (_retryFrom > const Duration(seconds: 2)) {
-        _pendingSeek = _retryFrom;
-        _pendingSeekSince = DateTime.now();
-        _lastSeekRetry = null;
-        _seekRetries = 0;
-      }
-      player.jump(index);
-      if (_retryFrom > const Duration(seconds: 2)) {
-        unawaited(player.seek(_retryFrom));
-      }
-    });
+    _retryFrom = from;
+    await Future<void>.delayed(wait);
+    // Only if the listener has not moved on in the meantime.
+    if (_index != index || index >= _queue.length) return;
+    if (_queue[index].sha != sha) return;
+    // Pick up where it dropped: starting the song over, up to three times,
+    // read as the track repeating before it was skipped.
+    await _reopenHere(player, _retryFrom, play: true);
+  }
+
+  /// Puts the listener on [index] at [at] and plays it from its best address.
+  Future<void> _resumeAt(Player player, int index, Duration at) async {
+    _clearPendingSeek();
+    _index = index;
+    _position = at;
+    notifyListeners();
+    await _reopenHere(player, at, play: true);
+  }
+
+  void _holdForNetwork(Player player, int index, Duration at) {
+    _heldForNetwork = true;
+    _clearPendingSeek();
+    _index = index;
+    _position = at;
+    _playing = false;
+    unawaited(player.pause());
+    notifyListeners();
+  }
+
+  @override
+  void networkReturned() {
+    final player = _player;
+    if (!_heldForNetwork || player == null) return;
+    DiagLog.log('player: connection back, resuming');
+    _heldForNetwork = false;
+    unawaited(_reopenHere(player, _position, play: true));
   }
 
   @override

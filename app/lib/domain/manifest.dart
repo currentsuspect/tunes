@@ -288,11 +288,46 @@ class SearchResults {
   }
 }
 
+/// One of an artist's genres as the box names it (tunesd genres.ts).
+class ArtistGenre {
+  const ArtistGenre({
+    required this.name,
+    required this.family,
+    required this.weight,
+  });
+
+  final String name;
+  final String family;
+
+  /// 0..1, strongest first.
+  final double weight;
+
+  /// The family's own broad genre ("Hip-Hop" in Hip-Hop): less telling than
+  /// a specific room like "Rage".
+  bool get broad => name == family;
+
+  static ArtistGenre? tryParse(Object? j) {
+    if (j is! Map) return null;
+    final n = j['name'];
+    final f = j['family'];
+    final w = j['weight'];
+    if (n is! String || n.isEmpty || f is! String || f.isEmpty) return null;
+    return ArtistGenre(name: n, family: f, weight: w is num ? w.toDouble() : 0);
+  }
+
+  Map<String, Object> toJson() => {
+    'name': name,
+    'family': family,
+    'weight': weight,
+  };
+}
+
 class ManifestArtist {
   const ManifestArtist({
     required this.name,
     required this.artSha,
     this.tags = const [],
+    this.genres = const [],
   });
 
   final String name;
@@ -303,6 +338,9 @@ class ManifestArtist {
   /// field.
   final List<String> tags;
 
+  /// Clean genres, strongest first. Empty from a box that predates them.
+  final List<ArtistGenre> genres;
+
   factory ManifestArtist.fromJson(Map<String, dynamic> json) {
     return ManifestArtist(
       name: (json['name'] as String?) ?? '',
@@ -310,6 +348,10 @@ class ManifestArtist {
       tags: [
         for (final t in (json['tags'] as List<dynamic>? ?? const []))
           if (t is String && t.trim().isNotEmpty) t.trim(),
+      ],
+      genres: [
+        for (final g in (json['genres'] as List<dynamic>? ?? const []))
+          ?ArtistGenre.tryParse(g),
       ],
     );
   }
@@ -320,11 +362,26 @@ class TunesManifest {
     required this.tracks,
     required this.releases,
     this.artists = const [],
+    this.integrity,
+    this.pointers = const {},
   });
 
   final List<ManifestTrack> tracks;
+
+  /// Copies of a recording that are not listed, each pointing at the copy
+  /// that is: the daemon's `dupeShas`. A copy can stop being listed because
+  /// its source was deleted while an identical one survives; anything this
+  /// phone kept under the old sha (a like, a playlist entry, plays, the
+  /// queue) is moved onto the listed one (ManifestStore.repoint).
+  final Map<String, String> pointers;
   final List<ManifestRelease> releases;
   final List<ManifestArtist> artists;
+
+  /// The daemon's fingerprint of this whole manifest. It moves whenever
+  /// anything in it does -- a new song, but also a song whose tags or cover
+  /// arrived after it was first shown -- so it is how the app tells that a
+  /// library it already has has changed.
+  final String? integrity;
 
   /// The library as it is without a connection: only the songs [held] says are
   /// on the phone, the records that have any of them left, and each record cut
@@ -383,14 +440,30 @@ class TunesManifest {
     final artists = (json['artists'] as List<dynamic>? ?? const [])
         .map((a) => ManifestArtist.fromJson(a as Map<String, dynamic>))
         .toList();
+    final pointers = <String, String>{};
+    for (final t in json['tracks'] as List<dynamic>? ?? const []) {
+      final m = t as Map<String, dynamic>;
+      final listed = m['sha'] as String;
+      for (final d in m['dupeShas'] as List<dynamic>? ?? const []) {
+        if (d is String && d != listed) pointers[d] = listed;
+      }
+    }
     if (releases.isEmpty) {
       return TunesManifest(
         tracks: tracks,
         releases: groupReleases(tracks),
         artists: artists,
+        integrity: json['integrity'] as String?,
+        pointers: pointers,
       );
     }
-    return TunesManifest(tracks: tracks, releases: releases, artists: artists);
+    return TunesManifest(
+      tracks: tracks,
+      releases: releases,
+      artists: artists,
+      integrity: json['integrity'] as String?,
+      pointers: pointers,
+    );
   }
 
   List<ManifestTrack> tracksFor(String releaseId) {

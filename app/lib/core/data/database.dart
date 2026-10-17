@@ -214,6 +214,11 @@ class Artists extends Table {
   /// providers had nothing on has an empty list, which is the truth.
   TextColumn get tagsJson => text().withDefault(const Constant('[]'))();
 
+  /// Clean genres the box derives from those tags (tunesd genres.ts), as a
+  /// JSON array of {name, family, weight}, strongest first. What genre
+  /// mixes read; empty until a box that sends them has synced.
+  TextColumn get genresJson => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column> get primaryKey => {name};
 }
@@ -250,7 +255,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -334,6 +339,11 @@ class TunesDatabase extends _$TunesDatabase {
         // v11 -> v12: which device a listen came from, for history sync. One
         // nullable column; everything already here happened here.
         await m.addColumn(playEvents, playEvents.origin);
+      }
+      if (from < 13) {
+        // v12 -> v13: clean artist genres. One column with a default, so
+        // existing rows read as "no genres" until the next sync.
+        await m.addColumn(artists, artists.genresJson);
       }
     },
   );

@@ -129,7 +129,7 @@ class _Body extends StatelessWidget {
                           style: TypeScale.mono.copyWith(color: Tones.text),
                         ),
                       const SizedBox(width: Space.xs),
-                      const Icon(
+                      Icon(
                         Icons.keyboard_arrow_up_rounded,
                         size: 18,
                         color: Tones.textMuted,
@@ -139,7 +139,7 @@ class _Body extends StatelessWidget {
                 ),
                 if (active > 0)
                   if (progress == null)
-                    const LinearProgressIndicator(
+                    LinearProgressIndicator(
                       minHeight: 2.5,
                       backgroundColor: Tones.hairline,
                       color: Tones.primary,

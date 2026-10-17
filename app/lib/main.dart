@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/rendering.dart' show HitTestResult, RenderEditable;
@@ -10,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
+import 'core/audio/stream_relay.dart';
 import 'core/net/update_check.dart';
 import 'core/net/update_installer.dart';
 import 'core/platform/device.dart';
@@ -54,6 +56,7 @@ import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
 import 'core/theme/theme.dart';
+import 'core/theme/theme_controller.dart';
 import 'core/theme/tokens.dart';
 import 'core/ui/offline_note.dart';
 import 'core/ui/downloads_bar.dart';
@@ -86,6 +89,10 @@ const _buildNumber = String.fromEnvironment(
   defaultValue: 'local',
 );
 const _channel = String.fromEnvironment('CHANNEL', defaultValue: 'local');
+
+/// Whether streamed songs go through [StreamRelay].
+const _relayOn = true;
+
 const _tunesdUrl = String.fromEnvironment(
   'TUNESD_URL',
   defaultValue: 'http://192.168.100.6:4780',
@@ -169,19 +176,65 @@ Future<void> main() async {
   // evicts it. One transfer at a time, behind playback in priority.
   final cacheStore = DownloadStore(Directory('${support.path}/stream-cache'));
   await cacheStore.load();
-  final streamCache = StreamCache(cacheStore);
+  final streamCache = StreamCache(cacheStore, maxBytes: settings.cacheBytes);
   await streamCache.load();
+  settings.addListener(() {
+    final size = settings.cacheBytes;
+    if (size == streamCache.maxBytes) return;
+    streamCache.maxBytes = size;
+    unawaited(streamCache.sweep());
+  });
   final caching = DownloadManager(
     client: client,
     store: cacheStore,
     maxConcurrent: 1,
   );
+  // Streamed songs play through the phone so every byte heard lands in the
+  // cache (core/audio/stream_relay.dart). The player is wired to it below;
+  // until it is listening, songs stream straight from the server as before.
+  late final TunePlayer Function() playerRef;
+  final relay = StreamRelay(
+    dir: cacheStore.dir,
+    upstreamFor: (sha) async {
+      final path = '/t/$sha';
+      if (!grants.has(path)) {
+        try {
+          await grants.prime([path]);
+        } catch (_) {
+          // Unsigned, the edge refuses it: a visible failure, not a hang.
+        }
+      }
+      return Uri.parse('${client.baseUrl}${grants.urlFor(path) ?? path}');
+    },
+    onRefused: (sha) => grants.forget('/t/$sha'),
+    commit: (sha, path) async {
+      await cacheStore.add(sha, path);
+      // Songs still to come that are now complete play from the file.
+      playerRef().refreshSources();
+      unawaited(streamCache.sweepSoon());
+    },
+  );
+  try {
+    // Partial files from a previous run cannot be trusted: which of their
+    // bytes are real was only known in memory.
+    await relay.dropPartials(cacheStore.contains);
+    // A kill switch: off, songs stream straight from the server as before.
+    if (_relayOn) await relay.start();
+  } catch (e) {
+    DiagLog.log('relay: could not start ($e); streaming directly');
+  }
   final resolver = TrackResolver(
     store: store,
     cache: streamCache,
     caching: caching,
     client: client,
     grants: grants,
+    relay: relay,
+    prefetchOk: () async => switch (settings.prefetchNext) {
+      0 => false,
+      2 => true,
+      _ => await onWifi(),
+    },
   );
   // Everything the client fetches itself now carries the device's token. Set
   // after both exist because they are mutually referential: the client is the
@@ -198,16 +251,28 @@ Future<void> main() async {
     // are the only moments new bytes can have landed.
     trackUriFor: (track) {
       final uri = resolver.uriFor(track);
-      unawaited(streamCache.sweep());
+      unawaited(streamCache.sweepSoon());
       return uri;
     },
     // Mint for the whole queue in one round trip before it opens. Downloaded
     // tracks are skipped: they resolve to a local path and never touch the
     // network, so signing them would be pure latency.
-    prepareQueue: (tracks) => grants.prime([
-      for (final t in tracks)
-        if (store.pathFor(t.sha) == null) '/t/${t.sha}',
-    ]),
+    // Anything on the phone -- downloaded or in the stream cache -- is skipped
+    // the same way.
+    // Through the relay nothing needs signing before the queue opens: the
+    // relay signs each song as it fetches it. Signed ahead anyway, in the
+    // background, so that fetch does not wait on a round trip.
+    prepareQueue: (tracks) async {
+      final paths = [
+        for (final t in tracks)
+          if (!resolver.isLocal(t)) '/t/${t.sha}',
+      ];
+      if (relay.port != null) {
+        unawaited(grants.prime(paths).catchError((_) {}));
+        return;
+      }
+      await grants.prime(paths);
+    },
     onQueuePlayed: (tracks) {
       // Mirror the play queue into the persistent store so the
       // QueueSheet reflects what's playing, and the queue survives
@@ -216,9 +281,19 @@ Future<void> main() async {
       unawaited(queueStore.replace(tracks.map((t) => t.sha).toList()));
     },
   );
+  playerRef = () => player;
+
   // Keep what is playing and warm what is next, but only once playback has
   // started, so nothing competes with the stream the listener is waiting on.
-  final follower = StreamFollower(keep: resolver.keep, warm: resolver.warm);
+  // On Wi-Fi a song is kept whole after 3 s of play; on mobile data only
+  // after 30 s, once it has clearly been chosen rather than skipped past.
+  final follower = StreamFollower(
+    keep: resolver.keep,
+    warm: resolver.warm,
+    afterFor: () => reachability.wifi
+        ? const Duration(seconds: 3)
+        : const Duration(seconds: 30),
+  );
   player.addListener(
     () => follower.tick(
       queue: player.queue,
@@ -252,7 +327,7 @@ Future<void> main() async {
       );
       await AudioService.init(
         builder: () => handler,
-        config: const AudioServiceConfig(
+        config: AudioServiceConfig(
           androidNotificationChannelId:
               'com.currentsuspect.tunes.channel.audio',
           androidNotificationChannelName: 'Tunes playback',
@@ -396,7 +471,51 @@ Future<void> main() async {
   playlists.addListener(accountSync.poke);
   reachability.addListener(() {
     if (!reachability.offline) accountSync.poke();
+    // Gone offline: whatever is queued and already on the phone plays from
+    // there, the song on included, instead of failing a stream first.
+    if (reachability.offline) player.refreshSources(touchCurrent: true);
+    if (!reachability.offline) {
+      // Back online: sign what is queued again (a queue opened offline holds
+      // unsigned addresses the server refuses), move it onto the new
+      // addresses, and pick up a song held for the connection.
+      final pending = [
+        for (final t in player.queue)
+          if (!resolver.isLocal(t)) '/t/${t.sha}',
+      ];
+      unawaited(
+        grants
+            .prime(pending)
+            .catchError((_) {})
+            .whenComplete(player.refreshSources),
+      );
+      player.networkReturned();
+    }
   });
+  player.isOffline = () => reachability.offline;
+  // Asked when a stream fails, so a failure offline is known as one straight
+  // away instead of after the heartbeat's three strikes.
+  player.checkOnline = () async {
+    if (!await hasNetworkAddress()) {
+      reachability.setOffline(true);
+      return false;
+    }
+    // Bounded: while this runs, further stream errors are ignored, so a
+    // check that hung during a network change stalled error handling for
+    // good and mpv skipped through the queue on its own.
+    final answered = await client.ping().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => false,
+    );
+    if (answered) {
+      reachability.ok();
+    } else {
+      // A failed stream and a failed ping together: offline enough.
+      reachability.setOffline(true);
+    }
+    return answered;
+  };
+  // A song that has finished saving moves off the server in the queue too.
+  caching.onSaved = (_) => player.refreshSources();
 
   player.onFirstPlay = ensureAudioService;
   player.onRestored = ensureAudioService;
@@ -526,18 +645,24 @@ class _TunesAppState extends State<TunesApp> {
   // the route was rebuilt by leaving and coming back.
   late final DownloadManager _downloads;
 
+  /// Picks the look (theme, light or dark, auto by time of day) and redraws
+  /// the app in it.
+  late final ThemeController _theme;
+
   @override
   void initState() {
     super.initState();
+    _theme = ThemeController(widget.settings);
     _downloads = DownloadManager(
       client: widget.client,
       store: widget.store,
       artStore: widget.artStore,
-    );
+    )..onSaved = (_) => widget.player.refreshSources();
   }
 
   @override
   void dispose() {
+    _theme.dispose();
     _downloads.dispose();
     super.dispose();
   }
@@ -556,12 +681,15 @@ class _TunesAppState extends State<TunesApp> {
           playlists: widget.playlists,
           child: DownloadScope(
             manager: _downloads,
-            child: MaterialApp(
-              title: 'tunes',
-              debugShowCheckedModeBanner: false,
-              theme: buildTunesTheme(mq),
-              navigatorObservers: [_rootGuard],
-              home: _shell(),
+            child: ListenableBuilder(
+              listenable: _theme,
+              builder: (context, _) => MaterialApp(
+                title: 'tunes',
+                debugShowCheckedModeBanner: false,
+                theme: buildTunesTheme(mq),
+                navigatorObservers: [_rootGuard],
+                home: _shell(),
+              ),
             ),
           ),
         ),
@@ -653,6 +781,9 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  /// Picks this launch's greeting voice; fixed for the session so Home does
+  /// not change its mind every time it rebuilds.
+  final _greetingSeed = math.Random().nextInt(1 << 30);
   int _tab = 0;
 
   /// This device's own player, for everything that is about this device's
@@ -692,6 +823,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _syncing = false;
   Object? _lastSyncError;
   DateTime? _lastSyncAt;
+
+  /// The fingerprint of the manifest last applied. /changes only lists songs
+  /// that are new, so a song shown the moment it landed -- titled from its
+  /// file name, no cover yet -- and then filled in by the daemon a minute
+  /// later never counted as a change, and the phone kept the placeholder
+  /// until it was restarted. A moved fingerprint means fetch it all again.
+  String? _syncedIntegrity;
+
+  /// When a moved fingerprint alone last caused a full fetch. The copy the
+  /// phone downloads is published by the box in batches and can lag the
+  /// fingerprint /changes reports, so without a limit a lagging copy would
+  /// mean 5 MB on every poll until it caught up. Five minutes apart at most.
+  DateTime? _integrityRefetchAt;
   final Set<String> _downloading = {};
   DownloadManager get _downloads => widget.downloads;
   final String _libraryFilter = '';
@@ -1318,7 +1462,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final changes = await widget.client.fetchChanges(lastSync);
         // New lyrics add no track, so they are asked about separately: a
         // phone that only checked for added tracks would never see them.
-        if (changes.addedShas.isEmpty && changes.lyricsChanged.isEmpty) {
+        final now = DateTime.now();
+        final drifted =
+            _syncedIntegrity != null && changes.integrity != _syncedIntegrity;
+        final mayRefetch =
+            _integrityRefetchAt == null ||
+            now.difference(_integrityRefetchAt!) > const Duration(minutes: 5);
+        final same = !drifted || !mayRefetch;
+        if (drifted &&
+            mayRefetch &&
+            changes.addedShas.isEmpty &&
+            changes.lyricsChanged.isEmpty) {
+          _integrityRefetchAt = now;
+        }
+        if (changes.addedShas.isEmpty &&
+            changes.lyricsChanged.isEmpty &&
+            same) {
           needFull = false;
           widget.reachability.ok();
           synced = true;
@@ -1342,6 +1501,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         try {
           await widget.manifestStore.apply(raw);
           applyOk = true;
+          if (raw.pointers.isNotEmpty) {
+            // Likes kept under a copy that stopped being listed were moved
+            // onto the listed copy; read them again, which also tells account
+            // sync, so the account learns the new sha rather than handing the
+            // old one back on the next pull.
+            final likes = mounted
+                ? context.getInheritedWidgetOfExactType<LikesScope>()?.notifier
+                : null;
+            await likes?.load();
+            widget.accountSync?.poke();
+          }
+          _syncedIntegrity = raw.integrity;
         } catch (e) {
           if (mounted) setState(() => _lastSyncError = e);
         }
@@ -1538,6 +1709,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         downloadCount: widget.store.shas.length,
         store: widget.store,
         history: widget.history,
+        library: {
+          for (final t in _manifest?.tracks ?? const <ManifestTrack>[])
+            t.sha: t,
+        },
+        artUrlFor: _artUrlFor,
         supportDir: widget.store.dir,
         onResync: _reload,
         onServerChanged: (url) async {
@@ -1616,11 +1792,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.cloud_off_outlined,
-              color: Tones.textMuted,
-              size: 40,
-            ),
+            Icon(Icons.cloud_off_outlined, color: Tones.textMuted, size: 40),
             const SizedBox(height: Space.md),
             Text('No library yet', style: TypeScale.title),
             const SizedBox(height: Space.sm),
@@ -1849,7 +2021,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // Lyrics beside the player only when there are lyrics to show and the
         // listener wants them; otherwise the player has the room to itself.
         if (showPane) ...[
-          const VerticalDivider(width: 1, color: Tones.hairline),
+          VerticalDivider(width: 1, color: Tones.hairline),
           Expanded(
             flex: 6,
             child: LyricsSheet(
@@ -2046,20 +2218,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           if (_tab == 0)
                             ListenableBuilder(
                               listenable: widget.settings,
-                              builder: (context, _) => Text(
-                                greetingFor(
-                                  DateTime.now(),
-                                  widget.settings.displayName,
+                              // Shrinks rather than cuts off: Crayon's hand
+                              // lettering is wider than the serif, and "Back
+                              // for more, Dy..." is no greeting.
+                              builder: (context, _) => FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  greetingFor(
+                                    DateTime.now(),
+                                    widget.settings.displayName,
+                                    seed: _greetingSeed,
+                                  ),
+                                  style: TypeScale.wordmark.copyWith(
+                                    fontSize: 28,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                style: TypeScale.wordmark.copyWith(
-                                  fontSize: 28,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             )
                           else
-                            const Text('tunes', style: TypeScale.wordmark),
+                            Text('tunes', style: TypeScale.wordmark),
                           // The library's size belongs to the wordmark, not
                           // to the feed. It used to scroll away with the
                           // first rail, which made it read as a caption on
@@ -2095,7 +2275,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// its furniture. Tab roots only -- panels paint their own chrome.
   Widget _buildBottomNav() {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Tones.base,
         border: Border(top: BorderSide(color: Tones.hairline)),
       ),

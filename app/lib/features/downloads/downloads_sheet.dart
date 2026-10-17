@@ -26,7 +26,7 @@ class DownloadsSheet extends StatelessWidget {
       context: context,
       backgroundColor: Tones.base,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -71,7 +71,7 @@ class DownloadsSheet extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text('Downloads', style: TypeScale.heading),
                       ),
                       if (manager.activeCount > 0)

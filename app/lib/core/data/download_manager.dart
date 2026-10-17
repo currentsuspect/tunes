@@ -80,6 +80,10 @@ class DownloadManager extends ChangeNotifier {
   /// wi-fi is not fighting itself for bandwidth.
   final int maxConcurrent;
 
+  /// Told each time a song's file is complete on the phone, so playback can
+  /// move a queued song off the server and onto the copy.
+  void Function(String sha)? onSaved;
+
   final Map<String, DownloadJob> _jobs = {};
   final Map<String, CancelSignal> _signals = {};
   final Queue<String> _waiting = Queue<String>();
@@ -224,6 +228,7 @@ class DownloadManager extends ChangeNotifier {
       await store.add(sha, path);
       _jobs.remove(sha);
       _batchDone += 1;
+      onSaved?.call(sha);
     } on DownloadCancelled {
       // Not a failure: the user asked for this. Leave no trace.
       _jobs.remove(sha);

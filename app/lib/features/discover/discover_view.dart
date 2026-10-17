@@ -184,7 +184,7 @@ class _DashedBorder extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rrect = RRect.fromRectAndRadius(
       Offset.zero & size,
-      const Radius.circular(RadiusTokens.card),
+      Radius.circular(RadiusTokens.card),
     );
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -242,16 +242,18 @@ class _ThreadRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(
-                        width: 132,
-                        height: 132,
-                        child: Artwork(
-                          url: t.artSha == null ? null : artUrlFor(t.artSha!),
-                          size: 132,
-                          fallback: GeneratedArtwork.fromTrack(
-                            t,
+                      PressTarget(
+                        child: SizedBox(
+                          width: 132,
+                          height: 132,
+                          child: Artwork(
+                            url: t.artSha == null ? null : artUrlFor(t.artSha!),
                             size: 132,
-                            borderRadius: RadiusTokens.card,
+                            fallback: GeneratedArtwork.fromTrack(
+                              t,
+                              size: 132,
+                              borderRadius: RadiusTokens.card,
+                            ),
                           ),
                         ),
                       ),
@@ -355,7 +357,7 @@ class _ArtistSection extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(width: Space.xs),
-                  const Icon(
+                  Icon(
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
                     size: 20,
@@ -382,14 +384,16 @@ class _ArtistSection extends StatelessWidget {
                       children: [
                         // A dashed outline and a dimmer sleeve: a place on the shelf
                         // that is empty, not a picture that failed to load.
-                        _Ghost(
-                          size: 140,
-                          child: Opacity(
-                            opacity: 0.7,
-                            child: MissingCover(
-                              album: album,
-                              artUrlFor: artUrlFor,
-                              size: 140,
+                        PressTarget(
+                          child: _Ghost(
+                            size: 140,
+                            child: Opacity(
+                              opacity: 0.7,
+                              child: MissingCover(
+                                album: album,
+                                artUrlFor: artUrlFor,
+                                size: 140,
+                              ),
                             ),
                           ),
                         ),

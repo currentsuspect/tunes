@@ -24,7 +24,7 @@ class WhatsNewPage extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const AmbientGlow(tint: Tones.primary, strength: 0.34),
+          AmbientGlow(tint: Tones.primary, strength: 0.34),
           SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

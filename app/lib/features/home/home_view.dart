@@ -81,7 +81,7 @@ class HomeView extends StatelessWidget {
       // a gesture has to be offered rather than discovered.
       return TunesRefreshList(
         onRefresh: onRefresh,
-        children: const [
+        children: [
           SizedBox(height: 120),
           Padding(
             padding: EdgeInsets.all(_sectionPadding),
@@ -292,17 +292,19 @@ class _DynamicRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(
-                        width: 132,
-                        height: 132,
-                        child: Artwork(
-                          url: t.artSha == null ? null : artUrlFor(t.artSha!),
-                          artSha: t.artSha,
-                          size: 132,
-                          fallback: GeneratedArtwork.fromTrack(
-                            t,
+                      PressTarget(
+                        child: SizedBox(
+                          width: 132,
+                          height: 132,
+                          child: Artwork(
+                            url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                            artSha: t.artSha,
                             size: 132,
-                            borderRadius: RadiusTokens.card,
+                            fallback: GeneratedArtwork.fromTrack(
+                              t,
+                              size: 132,
+                              borderRadius: RadiusTokens.card,
+                            ),
                           ),
                         ),
                       ),
@@ -379,12 +381,14 @@ class _MixesRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      MixMosaic(
-                        name: m.title,
-                        covers: covers,
-                        tint: Tones.primary,
-                        artUrlFor: artUrlFor,
-                        side: 140,
+                      PressTarget(
+                        child: MixMosaic(
+                          name: m.title,
+                          covers: covers,
+                          tint: Tones.primary,
+                          artUrlFor: artUrlFor,
+                          side: 140,
+                        ),
                       ),
                       const SizedBox(height: Space.sm),
                       Text(
@@ -451,15 +455,17 @@ class _UnheardRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Artwork(
-                        url: r.artSha == null ? null : artUrlFor(r.artSha!),
-                        artSha: r.artSha,
-                        size: 132,
-                        fallback: GeneratedArtwork(
-                          title: r.title,
-                          artist: r.artist,
+                      PressTarget(
+                        child: Artwork(
+                          url: r.artSha == null ? null : artUrlFor(r.artSha!),
+                          artSha: r.artSha,
                           size: 132,
-                          borderRadius: RadiusTokens.card,
+                          fallback: GeneratedArtwork(
+                            title: r.title,
+                            artist: r.artist,
+                            size: 132,
+                            borderRadius: RadiusTokens.card,
+                          ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -541,18 +547,20 @@ class _JustAddedCarousel extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Artwork(
-                        url: t.artSha == null ? null : artUrlFor(t.artSha!),
-                        artSha: t.artSha,
-                        size: 132,
-                        // Square, like every other sleeve on this page. It was
-                        // cropped to a letterbox here, so the same record
-                        // looked different in this rail than anywhere else.
-                        fallback: GeneratedArtwork(
-                          title: t.title,
-                          artist: t.artistDisplay,
+                      PressTarget(
+                        child: Artwork(
+                          url: t.artSha == null ? null : artUrlFor(t.artSha!),
+                          artSha: t.artSha,
                           size: 132,
-                          borderRadius: RadiusTokens.card,
+                          // Square, like every other sleeve on this page. It was
+                          // cropped to a letterbox here, so the same record
+                          // looked different in this rail than anywhere else.
+                          fallback: GeneratedArtwork(
+                            title: t.title,
+                            artist: t.artistDisplay,
+                            size: 132,
+                            borderRadius: RadiusTokens.card,
+                          ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -636,11 +644,13 @@ class _MissingAlbums extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Opacity(
-                        // Reads as "not here yet" beside the fully-opaque
-                        // covers of everything the library actually holds.
-                        opacity: 0.72,
-                        child: MissingCover(album: a, artUrlFor: artUrlFor),
+                      PressTarget(
+                        child: Opacity(
+                          // Reads as "not here yet" beside the fully-opaque
+                          // covers of everything the library actually holds.
+                          opacity: 0.72,
+                          child: MissingCover(album: a, artUrlFor: artUrlFor),
+                        ),
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
@@ -697,7 +707,7 @@ class _MissingList extends StatelessWidget {
         for (final r in releases.take(4)) ...[
           Padding(
             padding: EdgeInsets.symmetric(horizontal: sectionPadding),
-            child: InkWell(
+            child: PressRow(
               onTap: () => onAlbumTap(r),
               borderRadius: BorderRadius.circular(RadiusTokens.control),
               child: Padding(
@@ -744,17 +754,14 @@ class _MissingList extends StatelessWidget {
                       total: r.totalTracks ?? 0,
                     ),
                     const SizedBox(width: Space.xs),
-                    const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Tones.textMuted,
-                    ),
+                    Icon(Icons.chevron_right_rounded, color: Tones.textMuted),
                   ],
                 ),
               ),
             ),
           ),
           if (r != releases.take(4).last)
-            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            Divider(height: 1, thickness: 0.5, color: Tones.hairline),
         ],
       ],
     );
@@ -830,15 +837,17 @@ class _ReleasedThisYear extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Artwork(
-                        url: r.artSha == null ? null : artUrlFor(r.artSha!),
-                        artSha: r.artSha,
-                        size: 132,
-                        fallback: GeneratedArtwork(
-                          title: r.title,
-                          artist: r.artist,
+                      PressTarget(
+                        child: Artwork(
+                          url: r.artSha == null ? null : artUrlFor(r.artSha!),
+                          artSha: r.artSha,
                           size: 132,
-                          borderRadius: RadiusTokens.card,
+                          fallback: GeneratedArtwork(
+                            title: r.title,
+                            artist: r.artist,
+                            size: 132,
+                            borderRadius: RadiusTokens.card,
+                          ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),
@@ -902,7 +911,7 @@ class _ArtistsRail extends StatelessWidget {
               final artSha = manifest.artistArt(e.key);
               return SizedBox(
                 width: 76,
-                child: InkWell(
+                child: PressRow(
                   onTap: () => onArtistTap(e.key),
                   borderRadius: BorderRadius.circular(RadiusTokens.control),
                   child: Column(
@@ -971,15 +980,17 @@ class _AlbumsRail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Artwork(
-                        url: r.artSha == null ? null : artUrlFor(r.artSha!),
-                        artSha: r.artSha,
-                        size: 130,
-                        fallback: GeneratedArtwork(
-                          title: r.title,
-                          artist: r.artist,
+                      PressTarget(
+                        child: Artwork(
+                          url: r.artSha == null ? null : artUrlFor(r.artSha!),
+                          artSha: r.artSha,
                           size: 130,
-                          borderRadius: RadiusTokens.card,
+                          fallback: GeneratedArtwork(
+                            title: r.title,
+                            artist: r.artist,
+                            size: 130,
+                            borderRadius: RadiusTokens.card,
+                          ),
                         ),
                       ),
                       const SizedBox(height: Space.xs),

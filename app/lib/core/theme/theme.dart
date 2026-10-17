@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'tokens.dart';
 
 ThemeData buildTunesTheme(MediaQueryData mq) {
+  final look = Looks.current;
+  final scheme = look.isDark ? ColorScheme.dark : ColorScheme.light;
   final base = ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
-    colorScheme: ColorScheme.dark(
+    brightness: look.brightness,
+    colorScheme: scheme(
       surface: Tones.base,
       surfaceContainerLow: Tones.surface,
       surfaceContainerHigh: Tones.surfaceRaised,
@@ -53,11 +55,11 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
               ? Tones.text
               : Tones.textMuted,
         ),
-        side: const WidgetStatePropertyAll(BorderSide(color: Tones.hairline)),
+        side: WidgetStatePropertyAll(BorderSide(color: Tones.hairline)),
         textStyle: WidgetStatePropertyAll(
           TypeScale.caption.copyWith(fontSize: 13),
         ),
-        iconColor: const WidgetStatePropertyAll(Tones.primary),
+        iconColor: WidgetStatePropertyAll(Tones.primary),
         overlayColor: WidgetStatePropertyAll(
           Tones.primary.withValues(alpha: 0.08),
         ),
@@ -68,11 +70,11 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(RadiusTokens.card),
-        side: const BorderSide(color: Tones.hairline),
+        side: BorderSide(color: Tones.hairline),
       ),
       margin: EdgeInsets.zero,
     ),
-    dividerTheme: const DividerThemeData(
+    dividerTheme: DividerThemeData(
       color: Tones.hairline,
       thickness: 1,
       space: 1,

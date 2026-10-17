@@ -293,6 +293,13 @@ class ConnectPlayer extends TunePlayer {
       local.refreshTracks(fresh);
 
   @override
+  void refreshSources({bool touchCurrent = false}) =>
+      local.refreshSources(touchCurrent: touchCurrent);
+
+  @override
+  void networkReturned() => local.networkReturned();
+
+  @override
   Future<ManifestTrack?> Function(ManifestTrack lastPlayed)? get onQueueEnded =>
       local.onQueueEnded;
   @override

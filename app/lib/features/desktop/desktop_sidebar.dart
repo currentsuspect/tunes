@@ -43,7 +43,7 @@ class DesktopSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: width,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Tones.base,
         border: Border(right: BorderSide(color: Tones.hairline)),
       ),
@@ -53,7 +53,7 @@ class DesktopSidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(
                 Space.lg,
                 Space.lg,
@@ -73,7 +73,7 @@ class DesktopSidebar extends StatelessWidget {
                 ),
                 label: _items[i].$2,
               ),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(
                 Space.lg,
                 Space.lg,
@@ -82,7 +82,7 @@ class DesktopSidebar extends StatelessWidget {
               ),
               child: Divider(height: 1, color: Tones.hairline),
             ),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xs),
               child: Text('PLAYLISTS', style: TypeScale.mono),
             ),
@@ -93,7 +93,7 @@ class DesktopSidebar extends StatelessWidget {
                 activeId: activePlaylistId,
               ),
             ),
-            const Divider(height: 1, color: Tones.hairline),
+            Divider(height: 1, color: Tones.hairline),
             InkWell(
               onTap: onSettings,
               child: Padding(
@@ -110,7 +110,7 @@ class DesktopSidebar extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const Icon(
+                    Icon(
                       Icons.settings_outlined,
                       size: 18,
                       color: Tones.textMuted,
@@ -216,7 +216,7 @@ class _PlaylistList extends StatelessWidget {
         builder: (context, snap) {
           final lists = snap.data ?? const <PlaylistSummary>[];
           if (lists.isEmpty) {
-            return const Padding(
+            return Padding(
               padding: EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
               child: Text(
                 'Playlists you make show up here.',
@@ -231,7 +231,7 @@ class _PlaylistList extends StatelessWidget {
                 _Row(
                   selected: activeId == p.id,
                   onTap: () => onPlaylist(p),
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.queue_music_rounded,
                     size: 22,
                     color: Tones.textMuted,

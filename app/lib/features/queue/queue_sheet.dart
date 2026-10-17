@@ -26,7 +26,7 @@ class QueueSheet extends StatefulWidget {
       context: context,
       backgroundColor: Tones.surface,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -96,14 +96,10 @@ class _QueueSheetState extends State<QueueSheet> {
                         ? null
                         : () => widget.queueStore.clear(),
                   ),
-                  const Divider(
-                    height: 1,
-                    thickness: 0.5,
-                    color: Tones.hairline,
-                  ),
+                  Divider(height: 1, thickness: 0.5, color: Tones.hairline),
                   Expanded(
                     child: entries.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Padding(
                               padding: EdgeInsets.all(Space.xl),
                               child: Text(
@@ -176,13 +172,13 @@ class _Header extends StatelessWidget {
         children: [
           IconButton(
             onPressed: onClose,
-            icon: const Icon(
+            icon: Icon(
               Icons.keyboard_arrow_down_rounded,
               color: Tones.textMuted,
             ),
           ),
           const SizedBox(width: Space.sm),
-          const Expanded(child: Text('Queue', style: TypeScale.title)),
+          Expanded(child: Text('Queue', style: TypeScale.title)),
           if (onClear != null)
             TextButton(onPressed: onClear, child: const Text('Clear')),
         ],
@@ -217,7 +213,7 @@ class _QueueRow extends StatelessWidget {
         children: [
           ReorderableDragStartListener(
             index: index,
-            child: const Padding(
+            child: Padding(
               padding: EdgeInsets.all(Space.md),
               child: Icon(Icons.drag_handle_rounded, color: Tones.textMuted),
             ),
@@ -266,11 +262,7 @@ class _QueueRow extends StatelessWidget {
           ),
           IconButton(
             onPressed: onRemove,
-            icon: const Icon(
-              Icons.close_rounded,
-              color: Tones.textMuted,
-              size: 20,
-            ),
+            icon: Icon(Icons.close_rounded, color: Tones.textMuted, size: 20),
             tooltip: 'Remove from queue',
           ),
           const SizedBox(width: Space.sm),

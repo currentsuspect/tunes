@@ -62,7 +62,7 @@ class _DesktopPlayBarState extends State<DesktopPlayBar> {
   Widget build(BuildContext context) {
     return Container(
       height: DesktopPlayBar.height,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Tones.base,
         border: Border(top: BorderSide(color: Tones.hairline)),
       ),
@@ -121,7 +121,7 @@ class _DesktopPlayBarState extends State<DesktopPlayBar> {
                       IconButton(
                         tooltip: 'Queue',
                         onPressed: widget.onQueue,
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.queue_music_rounded,
                           color: Tones.textMuted,
                         ),
@@ -262,7 +262,7 @@ class _Transport extends StatelessWidget {
         IconButton(
           tooltip: 'Previous',
           onPressed: player.previous,
-          icon: const Icon(Icons.skip_previous_rounded, color: Tones.text),
+          icon: Icon(Icons.skip_previous_rounded, color: Tones.text),
         ),
         const SizedBox(width: 4),
         Material(
@@ -285,7 +285,7 @@ class _Transport extends StatelessWidget {
         IconButton(
           tooltip: 'Next',
           onPressed: player.next,
-          icon: const Icon(Icons.skip_next_rounded, color: Tones.text),
+          icon: Icon(Icons.skip_next_rounded, color: Tones.text),
         ),
         IconButton(
           tooltip: 'Repeat',

@@ -20,7 +20,7 @@ class ManualFindSheet extends StatelessWidget {
       context: context,
       backgroundColor: Tones.surface,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -48,9 +48,9 @@ class ManualFindSheet extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: Space.md),
-            const Text('Find artist / album manually', style: TypeScale.title),
+            Text('Find artist / album manually', style: TypeScale.title),
             const SizedBox(height: Space.sm),
-            const Text(
+            Text(
               'Auto-enrichment could not resolve this track. Pick a '
               'source below — copy the URL, open it in a browser, '
               'identify the track, then come back here and use '
@@ -137,7 +137,7 @@ class _SearchRow extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Copy URL',
-            icon: const Icon(Icons.copy_rounded, color: Tones.textMuted),
+            icon: Icon(Icons.copy_rounded, color: Tones.textMuted),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: url));
               if (!context.mounted) return;

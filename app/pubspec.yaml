@@ -101,6 +101,24 @@ flutter:
         - asset: assets/fonts/DMMono-Regular.ttf
         - asset: assets/fonts/DMMono-Medium.ttf
           weight: 500
+    # Noir
+    - family: BodoniModa
+      fonts:
+        - asset: assets/fonts/BodoniModa.ttf
+        - asset: assets/fonts/BodoniModa-Italic.ttf
+          style: italic
+    - family: InstrumentSans
+      fonts:
+        - asset: assets/fonts/InstrumentSans.ttf
+    - family: IBMPlexMono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
+    # Crayon
+    - family: ShantellSans
+      fonts:
+        - asset: assets/fonts/ShantellSans.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

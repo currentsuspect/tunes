@@ -115,8 +115,10 @@ void main() {
     );
 
     test('does nothing until the track has played a while', () {
+      // Three seconds: through the relay, keeping a song costs no second
+      // download, so it starts sooner than the old eight.
       tick(0, 0);
-      tick(0, 3);
+      tick(0, 2);
       expect(kept, isEmpty);
       expect(warmed, isEmpty);
     });

@@ -308,7 +308,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Tones.surfaceRaised,
-        title: const Text('Keep these timings?', style: TypeScale.title),
+        title: Text('Keep these timings?', style: TypeScale.title),
         content: Text(
           'You have timed ${_draft.timedLineCount} '
           'line${_draft.timedLineCount == 1 ? '' : 's'} that have not been '
@@ -357,7 +357,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         backgroundColor: Tones.surface,
         appBar: AppBar(
           backgroundColor: Tones.surface,
-          title: const Text('Sync lyrics', style: TypeScale.title),
+          title: Text('Sync lyrics', style: TypeScale.title),
         ),
         body: Center(
           child: Padding(
@@ -390,7 +390,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Sync lyrics', style: TypeScale.title),
+              Text('Sync lyrics', style: TypeScale.title),
               Text(
                 widget.track.title,
                 style: TypeScale.caption,
@@ -422,7 +422,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
           children: [
             _Transport(player: widget.player, playhead: _playhead),
             _Scrubber(player: widget.player, playhead: _playhead),
-            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             _ModeBar(
               mode: _mode,
               canWordSync: _draft.lineStarts[_selectedLine] != null,
@@ -504,7 +504,7 @@ class _Transport extends StatelessWidget {
               final p = player.position - const Duration(seconds: 5);
               player.seek(p.isNegative ? Duration.zero : p);
             },
-            icon: const Icon(Icons.replay_5_rounded, color: Tones.text),
+            icon: Icon(Icons.replay_5_rounded, color: Tones.text),
           ),
           ListenableBuilder(
             listenable: player,
@@ -523,7 +523,7 @@ class _Transport extends StatelessWidget {
             tooltip: 'Forward 5 seconds',
             onPressed: () =>
                 player.seek(player.position + const Duration(seconds: 5)),
-            icon: const Icon(Icons.forward_5_rounded, color: Tones.text),
+            icon: Icon(Icons.forward_5_rounded, color: Tones.text),
           ),
           const SizedBox(width: Space.sm),
           // Centiseconds, because that is the resolution being recorded and a

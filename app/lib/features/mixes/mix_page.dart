@@ -5,6 +5,7 @@ import '../../core/data/playlist_store.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/playing_bars.dart';
@@ -107,7 +108,7 @@ class _MixPageState extends State<MixPage> {
                       child: IconButton(
                         onPressed: () => NavScope.of(context).back(),
                         tooltip: 'Back',
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.arrow_back_rounded,
                           color: Tones.textMuted,
                         ),
@@ -252,7 +253,7 @@ class _Header extends StatelessWidget {
                 label: const Text('Shuffle'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Tones.text,
-                  side: const BorderSide(color: Tones.hairline),
+                  side: BorderSide(color: Tones.hairline),
                 ),
               ),
               if (onSave != null)
@@ -366,7 +367,7 @@ class _SongRow extends StatelessWidget {
       listenable: player,
       builder: (context, _) {
         final active = player.current?.sha == track.sha;
-        return InkWell(
+        return PressRow(
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(

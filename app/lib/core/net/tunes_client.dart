@@ -395,11 +395,17 @@ class TunesClient {
   /// cache. A hint only: the server declines when it is busy with real
   /// playback, and every failure here is swallowed, because the track still
   /// plays when it is reached either way.
-  Future<void> warm(String sha) async {
+  ///
+  /// [signedPath] is the song's signed `/t/<sha>?…` path: the fetch worker
+  /// only takes media grants, and the device token this used to send was
+  /// refused (401) every time, so no song was ever warmed.
+  Future<void> warm(String sha, {String? signedPath}) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
     try {
-      final req = await client.getUrl(Uri.parse('$baseUrl/t/$sha?warm=1'));
-      await _authorize(req);
+      final path = signedPath ?? '/t/$sha';
+      final sep = path.contains('?') ? '&' : '?';
+      final req = await client.getUrl(Uri.parse('$baseUrl$path${sep}warm=1'));
+      if (signedPath == null) await _authorize(req);
       final res = await req.close().timeout(const Duration(seconds: 60));
       await res.drain<void>();
     } catch (_) {

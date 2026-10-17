@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../audio/stream_relay.dart';
 import '../auth/media_grants.dart';
 import '../net/tunes_client.dart';
 import '../../domain/manifest.dart';
@@ -21,13 +22,14 @@ import 'download_store.dart';
 /// here until the manager commits it, so a half-written file can never be
 /// mistaken for a hit.
 class StreamCache {
-  StreamCache(this.store, {this.maxBytes = 2 * 1024 * 1024 * 1024});
+  StreamCache(this.store, {this.maxBytes = 5 * 1024 * 1024 * 1024});
 
   final DownloadStore store;
 
-  /// Two gigabytes: a few hundred FLACs, small against a phone, large enough
-  /// that yesterday's rotation is still here.
-  final int maxBytes;
+  /// How much the cache may hold. Set from Settings (see
+  /// [SettingsStore.cacheBytes]); a smaller size takes effect at the next
+  /// sweep.
+  int maxBytes;
 
   Map<String, int> _touched = {};
   DateTime? _persistedAt;
@@ -65,6 +67,27 @@ class StreamCache {
       _persist();
     }
     return path;
+  }
+
+  Future<void>? _sweeping;
+  DateTime? _sweptAt;
+
+  /// [sweep], at most once per [every] and never two at a time. Resolving a
+  /// queue asks for one per song, and each sweep sizes every file in the
+  /// cache: a long queue opening meant hundreds of full passes over the disk.
+  Future<void> sweepSoon({Duration every = const Duration(seconds: 30)}) {
+    final running = _sweeping;
+    if (running != null) return running;
+    final last = _sweptAt;
+    if (last != null && DateTime.now().difference(last) < every) {
+      return Future<void>.value();
+    }
+    final run = sweep().whenComplete(() {
+      _sweeping = null;
+      _sweptAt = DateTime.now();
+    });
+    _sweeping = run;
+    return run;
   }
 
   /// Evicts least-recently-used entries until the cache fits [maxBytes].
@@ -126,6 +149,8 @@ class TrackResolver {
     required this.caching,
     required this.client,
     required this.grants,
+    this.relay,
+    this.prefetchOk,
   });
 
   final DownloadStore store;
@@ -133,6 +158,14 @@ class TrackResolver {
   final DownloadManager caching;
   final TunesClient client;
   final MediaGrants grants;
+
+  /// Plays streamed songs through the phone, keeping every byte (see
+  /// [StreamRelay]). Null, or not started, means straight from the server.
+  final StreamRelay? relay;
+
+  /// Whether fetching a whole song ahead of being reached is wanted now (the
+  /// listener's choice, and whether the phone is on Wi-Fi).
+  final Future<bool> Function()? prefetchOk;
 
   String uriFor(ManifestTrack track) {
     final sha = track.sha;
@@ -145,9 +178,21 @@ class TrackResolver {
     //
     // Streams ride /t/ (cloud fetch path: DO + R2 + Telegram), same host,
     // same device grant shape. Explicit downloads stay on origin /track.
+    final relayed = relay?.urlFor(sha);
+    if (relayed != null) return relayed;
     final baseUrl = client.baseUrl;
     final signed = grants.urlFor('/t/$sha');
     return '$baseUrl${signed ?? '/t/$sha'}';
+  }
+
+  Future<void> _warmSigned(String sha) async {
+    final path = '/t/$sha';
+    try {
+      if (!grants.has(path)) await grants.prime([path]);
+    } catch (_) {
+      // Unsigned, the worker refuses it; warming is only a hint.
+    }
+    await client.warm(sha, signedPath: grants.urlFor(path));
   }
 
   /// Whether the bytes for [track] are already on this phone, either way.
@@ -157,12 +202,29 @@ class TrackResolver {
   /// Keep a copy of a track that is already playing, so the next play is a
   /// disk read. Idempotent: finished and in-flight shas are skipped.
   void keep(ManifestTrack track) {
-    if (!isLocal(track)) caching.enqueue(track.sha);
+    if (isLocal(track)) return;
+    final r = relay;
+    if (r != null && r.port != null) {
+      // The relay already has what was heard; it fetches the rest now.
+      r.keepAll(track.sha);
+    } else {
+      caching.enqueue(track.sha);
+    }
   }
 
-  /// Ask the server to have a cold track ready for when it is reached.
+  /// Ask the server to have a cold track ready for when it is reached, and,
+  /// where the listener allows it, bring the whole song onto the phone.
   void warm(ManifestTrack track) {
-    if (!isLocal(track)) unawaited(client.warm(track.sha));
+    if (isLocal(track)) return;
+    unawaited(_warmSigned(track.sha));
+    final r = relay;
+    final ok = prefetchOk;
+    if (r == null || r.port == null || ok == null) return;
+    unawaited(
+      ok().then((yes) {
+        if (yes) r.prefetch(track.sha);
+      }),
+    );
   }
 }
 
@@ -177,13 +239,18 @@ class StreamFollower {
   StreamFollower({
     required this.keep,
     required this.warm,
-    this.after = const Duration(seconds: 8),
+    this.after = const Duration(seconds: 3),
+    this.afterFor,
     this.ahead = 2,
   });
 
   final void Function(ManifestTrack) keep;
   final void Function(ManifestTrack) warm;
   final Duration after;
+
+  /// Overrides [after] per tick when set: on Wi-Fi a song is kept almost at
+  /// once, on mobile data only once it has clearly been chosen.
+  final Duration Function()? afterFor;
   final int ahead;
 
   String? _sha;
@@ -202,7 +269,7 @@ class StreamFollower {
       _sha = current.sha;
       _started = false;
     }
-    if (_started || !playing || position < after) return;
+    if (_started || !playing || position < (afterFor?.call() ?? after)) return;
     _started = true;
     keep(current);
     for (var i = index + 1; i <= index + ahead && i < queue.length; i++) {

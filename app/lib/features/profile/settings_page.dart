@@ -17,6 +17,9 @@ import '../../core/nav/nav_controller.dart';
 import '../../core/sync/account_sync.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/profile_avatar.dart';
+import '../../domain/listening_stats.dart';
+import '../../domain/manifest.dart';
+import '../stats/listening_page.dart';
 
 /// Who you are and how the app behaves.
 ///
@@ -43,7 +46,13 @@ class SettingsPage extends StatefulWidget {
     this.onWhatsNew,
     this.supportDir,
     this.accountSync,
+    this.library = const {},
+    this.artUrlFor,
   });
+
+  /// The library by sha, for the listening page's names and covers.
+  final Map<String, ManifestTrack> library;
+  final String Function(String sha)? artUrlFor;
 
   /// Account sync, when this build has an account. Absent in tests.
   final AccountSync? accountSync;
@@ -115,12 +124,12 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: Tones.surface,
-        title: const Text('Invite code', style: TypeScale.title),
+        title: Text('Invite code', style: TypeScale.title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Paste the code you were sent. It works once, on this device.',
               style: TypeScale.caption,
             ),
@@ -142,7 +151,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Enrol'),
+            child: Text('Enrol'),
           ),
         ],
       ),
@@ -189,29 +198,29 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: Tones.surface,
-        title: const Text('Server', style: TypeScale.title),
+        title: Text('Server', style: TypeScale.title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Where your tunesd is. Include the port.',
               style: TypeScale.caption,
             ),
-            const SizedBox(height: Space.sm),
+            SizedBox(height: Space.sm),
             TextField(
               controller: controller,
               autofocus: true,
               keyboardType: TextInputType.url,
               autocorrect: false,
               style: TypeScale.body,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'http://100.100.235.90:4780',
               ),
               onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
             ),
-            const SizedBox(height: Space.sm),
-            const Text(
+            SizedBox(height: Space.sm),
+            Text(
               'Leave it empty to go back to the address this build came with.',
               style: TypeScale.caption,
             ),
@@ -220,11 +229,11 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
+            child: Text('Save'),
           ),
         ],
       ),
@@ -237,7 +246,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       // The library on screen is still the old server's until something asks
       // again, so say that rather than letting it look like nothing happened.
-      const SnackBar(content: Text('Server changed — refetching the library')),
+      SnackBar(content: Text('Server changed — refetching the library')),
     );
   }
 
@@ -295,19 +304,11 @@ class _SettingsPageState extends State<SettingsPage> {
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Space.xs,
-                  Space.sm,
-                  Space.sm,
-                  0,
-                ),
+                padding: EdgeInsets.fromLTRB(Space.xs, Space.sm, Space.sm, 0),
                 child: IconButton(
                   onPressed: () => NavScope.of(context).back(),
                   tooltip: 'Back',
-                  icon: const Icon(
-                    Icons.arrow_back_rounded,
-                    color: Tones.textMuted,
-                  ),
+                  icon: Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
                 ),
               ),
             ),
@@ -315,24 +316,41 @@ class _SettingsPageState extends State<SettingsPage> {
               child: ListenableBuilder(
                 listenable: s,
                 builder: (context, _) => ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    0,
-                    Space.lg,
-                    Space.xl,
-                  ),
+                  padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl),
                   children: [
                     Text(
                       'Settings',
                       style: TypeScale.display.copyWith(fontSize: 34),
                     ),
-                    const SizedBox(height: Space.lg),
+                    SizedBox(height: Space.lg),
                     _Profile(
                       name: s.displayName,
                       path: s.avatarPath,
                       controller: _name,
                       onAvatar: _editAvatar,
                       onName: s.setDisplayName,
+                    ),
+                    SizedBox(height: Space.sm),
+                    _ListeningCard(
+                      history: widget.history,
+                      library: widget.library,
+                      artUrlFor: widget.artUrlFor,
+                    ),
+                    _Group(
+                      title: 'Look',
+                      children: [
+                        _ThemePicker(
+                          choice: s.themeChoice,
+                          brightness: s.themeBrightness,
+                          onChoice: s.setThemeChoice,
+                        ),
+                        _ChoiceTile(
+                          title: 'Light or dark',
+                          choices: const ['Phone', 'Dark', 'Light'],
+                          selected: s.themeBrightness,
+                          onChanged: s.setThemeBrightness,
+                        ),
+                      ],
                     ),
 
                     _Group(
@@ -358,6 +376,12 @@ class _SettingsPageState extends State<SettingsPage> {
                           value: s.radioAutoplay,
                           onChanged: s.setRadioAutoplay,
                         ),
+                        _ChoiceTile(
+                          title: 'Double-tap a cover',
+                          choices: ['Like', 'Download'],
+                          selected: s.doubleTapDownloads ? 1 : 0,
+                          onChanged: (i) => s.setDoubleTapDownloads(i == 1),
+                        ),
                         _SwitchTile(
                           title: 'Stop when the app closes',
                           detail:
@@ -378,6 +402,27 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
 
                     _Group(
+                      title: 'Storage',
+                      children: [
+                        _ChoiceTile(
+                          title: 'Keep songs you hear',
+                          choices: [
+                            for (final gb in SettingsStore.cacheSizesGb)
+                              '$gb GB',
+                          ],
+                          selected: s.cacheSize,
+                          onChanged: s.setCacheSize,
+                        ),
+                        _ChoiceTile(
+                          title: 'Fetch the next song early',
+                          choices: const ['Off', 'Wi-Fi', 'Always'],
+                          selected: s.prefetchNext,
+                          onChanged: s.setPrefetchNext,
+                        ),
+                      ],
+                    ),
+
+                    _Group(
                       title: 'Lyrics',
                       children: [
                         _SwitchTile(
@@ -391,7 +436,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         _ChoiceTile(
                           title: 'Text size',
-                          choices: const ['Small', 'Medium', 'Large'],
+                          choices: ['Small', 'Medium', 'Large'],
                           selected: s.lyricSize,
                           onChanged: s.setLyricSize,
                         ),
@@ -621,7 +666,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ],
                       ),
 
-                    const SizedBox(height: Space.xl),
+                    SizedBox(height: Space.xl),
                     Center(
                       child: GestureDetector(
                         // Seven taps, the old way in. Nothing here is dangerous
@@ -632,7 +677,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           if (_versionTaps >= 7 && !_developer) {
                             setState(() => _developer = true);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text('Developer section shown'),
                               ),
                             );
@@ -644,7 +689,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               'tunes',
                               style: TypeScale.wordmark.copyWith(fontSize: 30),
                             ),
-                            const SizedBox(height: 2),
+                            SizedBox(height: 2),
                             Text(
                               'A music player for our music.',
                               style: TypeScale.note.copyWith(
@@ -652,15 +697,15 @@ class _SettingsPageState extends State<SettingsPage> {
                                 color: Tones.textMuted,
                               ),
                             ),
-                            const SizedBox(height: Space.sm),
+                            SizedBox(height: Space.sm),
                             Text(
                               '${widget.channel}  ·  '
                               '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit}  ·  '
                               'build ${widget.buildNumber}',
                               style: TypeScale.mono,
                             ),
-                            const SizedBox(height: 2),
-                            const Text(
+                            SizedBox(height: 2),
+                            Text(
                               'Made by Aestra Studios',
                               style: TypeScale.mono,
                             ),
@@ -739,13 +784,13 @@ class _SettingsPageState extends State<SettingsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Choose a photo', style: TypeScale.body),
+                leading: Icon(Icons.photo_library_outlined),
+                title: Text('Choose a photo', style: TypeScale.body),
                 onTap: () => Navigator.of(context).pop('pick'),
               ),
               ListTile(
-                leading: const Icon(Icons.delete_outline_rounded),
-                title: const Text('Remove photo', style: TypeScale.body),
+                leading: Icon(Icons.delete_outline_rounded),
+                title: Text('Remove photo', style: TypeScale.body),
                 onTap: () => Navigator.of(context).pop('remove'),
               ),
             ],
@@ -794,7 +839,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -852,7 +897,7 @@ class _AvatarButton extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(color: Tones.surface, width: 2),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.photo_camera_rounded,
                   size: 12,
                   color: Tones.textMuted,
@@ -885,7 +930,7 @@ class _Profile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(Space.md),
+      padding: EdgeInsets.all(Space.md),
       decoration: BoxDecoration(
         color: Tones.surface,
         borderRadius: BorderRadius.circular(RadiusTokens.card),
@@ -897,7 +942,7 @@ class _Profile extends StatelessWidget {
           Row(
             children: [
               _AvatarButton(name: name, path: path, onTap: onAvatar),
-              const SizedBox(width: Space.md),
+              SizedBox(width: Space.md),
               Expanded(
                 child: TextField(
                   controller: controller,
@@ -919,7 +964,7 @@ class _Profile extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: Space.sm),
+          SizedBox(height: Space.sm),
           Text(
             'Your name follows your account to every device. Your picture stays on this one.',
             style: TypeScale.note.copyWith(
@@ -943,12 +988,12 @@ class _Group extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: Space.xl),
+      padding: EdgeInsets.only(top: Space.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: Space.xs, bottom: Space.sm),
+            padding: EdgeInsets.only(left: Space.xs, bottom: Space.sm),
             child: Text(
               title.toUpperCase(),
               style: TypeScale.mono.copyWith(letterSpacing: 1.3),
@@ -965,11 +1010,7 @@ class _Group extends StatelessWidget {
               children: [
                 for (var i = 0; i < children.length; i++) ...[
                   if (i > 0)
-                    const Divider(
-                      height: 1,
-                      thickness: 0.5,
-                      color: Tones.hairline,
-                    ),
+                    Divider(height: 1, thickness: 0.5, color: Tones.hairline),
                   children[i],
                 ],
               ],
@@ -986,9 +1027,9 @@ const _tilePadding = EdgeInsets.symmetric(
   vertical: Space.md - 2,
 );
 
-TextStyle _tileTitle([Color color = Tones.text]) => TypeScale.title.copyWith(
+TextStyle _tileTitle([Color? color]) => TypeScale.title.copyWith(
   fontSize: 15,
-  color: color,
+  color: color ?? Tones.text,
   fontVariations: const [FontVariation('wght', 500)],
   fontWeight: FontWeight.w500,
 );
@@ -1115,7 +1156,7 @@ class _StepperTile extends StatelessWidget {
             icon: const Icon(Icons.remove_rounded, size: 18),
             color: Tones.text,
             style: IconButton.styleFrom(
-              side: const BorderSide(color: Tones.hairline),
+              side: BorderSide(color: Tones.hairline),
             ),
           ),
           const SizedBox(width: Space.xs),
@@ -1125,7 +1166,7 @@ class _StepperTile extends StatelessWidget {
             icon: const Icon(Icons.add_rounded, size: 18),
             color: Tones.text,
             style: IconButton.styleFrom(
-              side: const BorderSide(color: Tones.hairline),
+              side: BorderSide(color: Tones.hairline),
             ),
           ),
         ],
@@ -1234,7 +1275,7 @@ class _LinkTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: Space.sm),
-              const Icon(
+              Icon(
                 Icons.chevron_right_rounded,
                 size: 20,
                 color: Tones.textMuted,
@@ -1280,23 +1321,23 @@ class _StorageBar extends StatelessWidget {
             child: SizedBox(
               height: 8,
               child: total <= 0
-                  ? const ColoredBox(color: Tones.hairline)
+                  ? ColoredBox(color: Tones.hairline)
                   : Row(
                       children: [
                         if (downloads > 0)
                           Expanded(
                             flex: downloads,
-                            child: const ColoredBox(color: Tones.held),
+                            child: ColoredBox(color: Tones.held),
                           ),
                         if (covers > 0)
                           Expanded(
                             flex: covers,
-                            child: const ColoredBox(color: Tones.primary),
+                            child: ColoredBox(color: Tones.primary),
                           ),
                         if (library > 0)
                           Expanded(
                             flex: library,
-                            child: const ColoredBox(color: Tones.textMuted),
+                            child: ColoredBox(color: Tones.textMuted),
                           ),
                       ],
                     ),
@@ -1306,4 +1347,331 @@ class _StorageBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// This week in one line, and the way into the full listening page.
+class _ListeningCard extends StatefulWidget {
+  const _ListeningCard({
+    required this.history,
+    required this.library,
+    required this.artUrlFor,
+  });
+
+  final PlayHistory history;
+  final Map<String, ManifestTrack> library;
+  final String Function(String sha)? artUrlFor;
+
+  @override
+  State<_ListeningCard> createState() => _ListeningCardState();
+}
+
+class _ListeningCardState extends State<_ListeningCard> {
+  ListeningStats? _week;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final events = await widget.history.listenEvents();
+    if (!mounted) return;
+    setState(
+      () => _week = ListeningStats.compute(
+        events: events,
+        library: widget.library,
+        range: StatsRange.week,
+        now: DateTime.now(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = _week;
+    final String line;
+    if (w == null) {
+      line = ' ';
+    } else if (w.isEmpty) {
+      line = 'Nothing yet this week';
+    } else {
+      final h = w.listened.inHours;
+      final m = w.listened.inMinutes % 60;
+      final time = h == 0 ? '${w.listened.inMinutes} min' : '$h h $m m';
+      line = [
+        '$time this week',
+        if (w.topArtists.isNotEmpty) 'mostly ${w.topArtists.first.name}',
+        if (w.streakDays > 1) '${w.streakDays}-day streak',
+      ].join(' · ');
+    }
+    return Material(
+      color: Tones.surface,
+      borderRadius: BorderRadius.circular(RadiusTokens.card),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(RadiusTokens.card),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ListeningPage(
+                history: widget.history,
+                library: widget.library,
+                artUrlFor: widget.artUrlFor,
+              ),
+            ),
+          );
+          _load();
+        },
+        child: Container(
+          padding: const EdgeInsets.all(Space.md),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(RadiusTokens.card),
+            border: Border.all(color: Tones.hairline),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Your listening', style: _tileTitle(Tones.text)),
+                    const SizedBox(height: 2),
+                    Text(
+                      line,
+                      style: TypeScale.caption.copyWith(height: 1.4),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (w != null && !w.isEmpty) ...[
+                const SizedBox(width: Space.md),
+                _Spark(values: w.buckets),
+              ],
+              const SizedBox(width: Space.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: Tones.textMuted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Seven small bars: the week at a glance.
+class _Spark extends StatelessWidget {
+  const _Spark({required this.values});
+  final List<int> values;
+
+  @override
+  Widget build(BuildContext context) {
+    final max = values.fold<int>(1, (a, b) => a > b ? a : b);
+    return SizedBox(
+      height: 28,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (final v in values)
+            Container(
+              width: 5,
+              height: v <= 0 ? 2 : (v / max * 28).clamp(2.0, 28.0),
+              margin: const EdgeInsets.only(left: 2),
+              decoration: BoxDecoration(
+                color: v <= 0
+                    ? Tones.hairline
+                    : Tones.primary.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One card per theme, each drawn in its own colours and type so the choice
+/// is made by looking, plus Auto.
+class _ThemePicker extends StatelessWidget {
+  const _ThemePicker({
+    required this.choice,
+    required this.brightness,
+    required this.onChoice,
+  });
+
+  final String choice;
+  final int brightness;
+  final ValueChanged<String> onChoice;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = Looks.current.brightness;
+    final cards = <(String, String, String, TunesLook, TunesLook?)>[
+      for (final t in Looks.all) (t.id, t.name, t.blurb, t.of(b), null),
+      (
+        'auto',
+        'Auto',
+        'Crayon by day, Noir after dark.',
+        Looks.crayon.of(b),
+        Looks.noir.of(b),
+      ),
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.md, Space.md, 0),
+      child: GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: Space.sm,
+        crossAxisSpacing: Space.sm,
+        childAspectRatio: 1.45,
+        children: [
+          for (final (id, name, blurb, look, second) in cards)
+            _ThemeCard(
+              name: name,
+              blurb: blurb,
+              look: look,
+              second: second,
+              selected: id == choice,
+              onTap: () => onChoice(id),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeCard extends StatelessWidget {
+  const _ThemeCard({
+    required this.name,
+    required this.blurb,
+    required this.look,
+    required this.second,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String name;
+  final String blurb;
+  final TunesLook look;
+
+  /// Auto's night half, drawn as a diagonal over the day half.
+  final TunesLook? second;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(look.cardRadius.clamp(4, 18));
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$name theme. $blurb',
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            color: look.base,
+            borderRadius: radius,
+            border: Border.all(
+              color: selected ? Tones.primary : Tones.hairline,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: radius,
+            child: Stack(
+              children: [
+                if (second != null)
+                  Positioned.fill(
+                    child: ClipPath(
+                      clipper: _Diagonal(),
+                      child: ColoredBox(color: second!.base),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.all(Space.sm + 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          for (final c in [
+                            look.primary,
+                            look.held,
+                            second?.primary ?? look.warn,
+                          ])
+                            Container(
+                              width: 12,
+                              height: 12,
+                              margin: const EdgeInsets.only(right: 4),
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          const Spacer(),
+                          if (selected)
+                            Icon(
+                              Icons.check_circle_rounded,
+                              size: 16,
+                              color: look.primary,
+                            ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        name,
+                        style: TextStyle(
+                          fontFamily: look.display,
+                          fontSize: 20,
+                          height: 1.1,
+                          color: look.text,
+                          fontVariations: [
+                            ...look.displayAxes,
+                            const FontVariation('wght', 500),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        blurb,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: look.body,
+                          fontSize: 11,
+                          height: 1.25,
+                          color: second == null ? look.textMuted : look.text,
+                          fontVariations: look.bodyAxes,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Diagonal extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) => Path()
+    ..moveTo(size.width, 0)
+    ..lineTo(size.width, size.height)
+    ..lineTo(size.width * 0.35, size.height)
+    ..close();
+
+  @override
+  bool shouldReclip(_Diagonal oldClipper) => false;
 }

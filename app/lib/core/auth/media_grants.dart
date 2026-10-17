@@ -85,5 +85,8 @@ class MediaGrants {
   /// changes, since grants are signed for one device against one origin.
   void clear() => _cache.clear();
 
+  /// Drops one grant the server refused, so the next use mints a fresh one.
+  void forget(String path) => _cache.remove(path);
+
   int get cachedCount => _cache.length;
 }

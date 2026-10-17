@@ -68,7 +68,7 @@ class AddSongsSheet extends StatefulWidget {
       context: context,
       backgroundColor: Tones.base,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -130,7 +130,7 @@ class _AddSongsSheetState extends State<AddSongsSheet> {
                 ),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text('Add songs', style: TypeScale.heading),
                     ),
                     TextButton(
@@ -149,7 +149,7 @@ class _AddSongsSheetState extends State<AddSongsSheet> {
                   onChanged: (v) => setState(() => _query = v),
                   decoration: InputDecoration(
                     hintText: 'Song, artist or album',
-                    prefixIcon: const Icon(
+                    prefixIcon: Icon(
                       Icons.search_rounded,
                       color: Tones.textMuted,
                     ),

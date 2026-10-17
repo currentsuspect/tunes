@@ -11,6 +11,7 @@ import '../../core/ui/source_pill.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/shared_sleeve.dart';
+import '../../core/ui/track_swipe.dart';
 import '../../domain/manifest.dart';
 
 class MiniPlayerBar extends StatefulWidget {
@@ -210,12 +211,9 @@ class _ProgressSeekBar extends StatelessWidget {
   }
 }
 
-/// Mini-player content row: artwork, title/artist, transport.
-/// Wraps the body in a horizontal-drag detector so swipes feel like
-/// "moving the current track aside" — small horizontal translate of
-/// the artwork while dragging, snaps back on release. Threshold gates
-/// accidental triggers from vertical scrolling.
-class _SwipeableBody extends StatefulWidget {
+/// Mini-player content row: artwork, title/artist, transport. Swiping it is
+/// the shared [TrackSwipe] carousel; the play button stays put.
+class _SwipeableBody extends StatelessWidget {
   const _SwipeableBody({
     required this.player,
     required this.onTap,
@@ -231,170 +229,106 @@ class _SwipeableBody extends StatefulWidget {
   final TrackSource source;
 
   @override
-  State<_SwipeableBody> createState() => _SwipeableBodyState();
-}
-
-class _SwipeableBodyState extends State<_SwipeableBody> {
-  double _dragDx = 0;
-  bool _resolved = false;
-  // 80dp threshold past which we commit to "skip"; under that, the
-  // gesture is treated as a tap-and-cancel.
-  static const _commitDp = 80.0;
-
-  /// Fast enough to be a deliberate flick rather than a scroll that drifted
-  /// upward on release.
-  static const _flingUpVelocity = 300.0;
-
-  @override
   Widget build(BuildContext context) {
-    final track = widget.track;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
+    return TrackSwipe(
+      player: player,
+      track: track,
+      onTap: onTap,
       // Swipe up opens the player. The bar is the handle for a screen that
       // lives above it, so the gesture that reveals it should be the one that
       // matches the direction it comes from.
-      onVerticalDragEnd: (details) {
-        if (details.primaryVelocity != null &&
-            details.primaryVelocity! < -_flingUpVelocity) {
-          widget.onTap();
-        }
-      },
-      onHorizontalDragStart: (_) {
-        _dragDx = 0;
-        _resolved = false;
-      },
-      onHorizontalDragUpdate: (details) {
-        _dragDx += details.delta.dx;
-        if (!_resolved && _dragDx.abs() > _commitDp) {
-          _resolved = true;
-          if (_dragDx < 0) {
-            widget.player.next();
-          } else {
-            widget.player.previous();
-          }
-        }
-        // Show translation only while we're still deciding; once we
-        // commit, snap back so the new artwork appears in place.
-        setState(() {});
-      },
-      onHorizontalDragEnd: (_) {
-        _dragDx = 0;
-        _resolved = false;
-        if (mounted) setState(() {});
-      },
-      onHorizontalDragCancel: () {
-        _dragDx = 0;
-        _resolved = false;
-        if (mounted) setState(() {});
-      },
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          Space.sm,
-          Space.sm,
-          Space.sm,
-          Space.sm + 2,
-        ),
-        child: Row(
-          children: [
-            Transform.translate(
-              offset: Offset(
-                _resolved ? 0 : _dragDx.clamp(-24.0, 24.0) * 0.6,
-                0,
-              ),
-              // The same sleeve the player shows, so opening it is one
-              // object growing rather than two screens swapping. Tagged by
-              // the track, so a change mid-flight cannot pair the wrong two.
-              child: SharedSleeve(
-                tag: 'sleeve-${track.sha}',
-                child: Artwork(
-                  shared: true,
-                  url: track.artSha != null && widget.artUrlFor != null
-                      ? widget.artUrlFor!(track.artSha!)
-                      : null,
-                  artSha: track.artSha,
-                  size: 42,
-                  borderRadius: 9,
-                  // The same generated tile the list rows use. A blank
-                  // square in the one bar that is always on screen made
-                  // tracks without a cover look like a failed load.
-                  fallback: GeneratedArtwork.fromTrack(
-                    track,
-                    size: 42,
-                    borderRadius: 9,
-                  ),
+      onFlingUp: onTap,
+      padding: const EdgeInsets.fromLTRB(
+        Space.sm,
+        Space.sm,
+        Space.sm,
+        Space.sm + 2,
+      ),
+      builder: (context, t, current) => _info(context, t, current: current),
+      trailing: _TransportButton(
+        playing: player.playing,
+        onPressed: player.toggle,
+      ),
+    );
+  }
+
+  /// Sleeve and two lines for one song. Only the playing one carries the
+  /// shared sleeve (two heroes with one tag would collide) and the source.
+  Widget _info(
+    BuildContext context,
+    ManifestTrack track, {
+    required bool current,
+  }) {
+    final art = Artwork(
+      shared: current,
+      url: track.artSha != null && artUrlFor != null
+          ? artUrlFor!(track.artSha!)
+          : null,
+      artSha: track.artSha,
+      size: 42,
+      borderRadius: 9,
+      // The same generated tile the list rows use. A blank square in the one
+      // bar that is always on screen made tracks without a cover look like a
+      // failed load.
+      fallback: GeneratedArtwork.fromTrack(track, size: 42, borderRadius: 9),
+    );
+    return Row(
+      children: [
+        // The same sleeve the player shows, so opening it is one object
+        // growing rather than two screens swapping. Tagged by the track, so a
+        // change mid-flight cannot pair the wrong two.
+        current ? SharedSleeve(tag: 'sleeve-${track.sha}', child: art) : art,
+        const SizedBox(width: Space.md),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                track.title,
+                style: TypeScale.title.copyWith(
+                  fontSize: 14,
+                  fontVariations: const [FontVariation('wght', 500)],
+                  fontWeight: FontWeight.w500,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            const SizedBox(width: Space.md),
-            Expanded(
-              // Keyed on the track, so a change cross-fades rather than
-              // snapping. Two hundred milliseconds: long enough to read as a
-              // change, short enough that it never delays the next tap.
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                // The default stacks its children centred, which floated the
-                // title to the middle of the bar instead of beside the sleeve.
-                layoutBuilder: (current, previous) => Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [...previous, ?current],
-                ),
-                child: Column(
-                  key: ValueKey(track.sha),
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(height: 2),
+              // Artist, then where the sound is coming from. The second part
+              // is the only coloured thing in the bar, so a track that will
+              // not play is noticed before it is tapped.
+              Text.rich(
+                TextSpan(
                   children: [
-                    Text(
-                      track.title,
-                      style: TypeScale.title.copyWith(
-                        fontSize: 14,
-                        fontVariations: const [FontVariation('wght', 500)],
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    // Artist, then where the sound is coming from. The second
-                    // part is the only coloured thing in the bar, so a track
-                    // that will not play is noticed before it is tapped.
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: track.artistDisplay),
-                          const TextSpan(text: '  ·  '),
-                          // Another device's music says so, in the accent: the
-                          // sound is not here, and the buttons are a remote.
-                          if (widget.player.remoteDeviceLabel != null)
-                            TextSpan(
-                              text:
-                                  'playing on ${widget.player.remoteDeviceLabel}',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                            )
-                          else
-                            TextSpan(
-                              text: widget.source.label,
-                              style: TextStyle(color: widget.source.color),
-                            ),
-                        ],
-                      ),
-                      style: TypeScale.caption,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    TextSpan(text: track.artistDisplay),
+                    if (current) ...[
+                      const TextSpan(text: '  ·  '),
+                      // Another device's music says so, in the accent: the
+                      // sound is not here, and the buttons are a remote.
+                      if (player.remoteDeviceLabel != null)
+                        TextSpan(
+                          text: 'playing on ${player.remoteDeviceLabel}',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        )
+                      else
+                        TextSpan(
+                          text: source.label,
+                          style: TextStyle(color: source.color),
+                        ),
+                    ],
                   ],
                 ),
+                style: TypeScale.caption,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            _TransportButton(
-              playing: widget.player.playing,
-              onPressed: widget.player.toggle,
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -440,7 +374,7 @@ class _TransportButtonState extends State<_TransportButton> {
             child: Container(
               width: 36,
               height: 36,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: Tones.text,
                 shape: BoxShape.circle,
               ),

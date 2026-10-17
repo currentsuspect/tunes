@@ -158,7 +158,7 @@ class _Held extends StatelessWidget {
         color: Tones.held.withValues(alpha: 0.16),
         border: Border.all(color: Tones.held, width: 1.5),
       ),
-      child: const Icon(Icons.check_rounded, size: 14, color: Tones.held),
+      child: Icon(Icons.check_rounded, size: 14, color: Tones.held),
     );
   }
 }
@@ -168,7 +168,7 @@ class _Failed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Icon(Icons.refresh_rounded, size: 22, color: Tones.warn);
+    return Icon(Icons.refresh_rounded, size: 22, color: Tones.warn);
   }
 }
 
@@ -189,7 +189,7 @@ class _Running extends StatelessWidget {
         alignment: Alignment.center,
         children: [
           if (p == null)
-            const CircularProgressIndicator(
+            CircularProgressIndicator(
               strokeWidth: 2.2,
               color: Tones.primary,
               backgroundColor: Tones.hairline,
@@ -205,7 +205,7 @@ class _Running extends StatelessWidget {
                 backgroundColor: Tones.hairline,
               ),
             ),
-          const Icon(Icons.stop_rounded, size: 11, color: Tones.textMuted),
+          Icon(Icons.stop_rounded, size: 11, color: Tones.textMuted),
         ],
       ),
     );
@@ -241,7 +241,7 @@ class _QueuedState extends State<_Queued> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     if (MediaQuery.disableAnimationsOf(context)) {
-      return const Icon(
+      return Icon(
         Icons.arrow_circle_down_outlined,
         size: 22,
         color: Tones.primary,
@@ -249,7 +249,7 @@ class _QueuedState extends State<_Queued> with SingleTickerProviderStateMixin {
     }
     return FadeTransition(
       opacity: Tween<double>(begin: 0.35, end: 1).animate(_c),
-      child: const Icon(
+      child: Icon(
         Icons.arrow_circle_down_outlined,
         size: 22,
         color: Tones.primary,

@@ -7,6 +7,7 @@ import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/track_swipe.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../domain/manifest.dart';
 import 'karaoke_line.dart';
@@ -54,7 +55,7 @@ class LyricsSheet extends StatefulWidget {
       context: context,
       backgroundColor: Tones.base,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -253,6 +254,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
                       ),
                     ),
                   _Header(
+                    player: widget.player,
                     compact: widget.embedded,
                     track: _track,
                     editing: _editing,
@@ -321,6 +323,7 @@ enum _LyricsKind {
 
 class _Header extends StatelessWidget {
   const _Header({
+    required this.player,
     required this.compact,
     required this.track,
     required this.editing,
@@ -332,6 +335,8 @@ class _Header extends StatelessWidget {
     required this.onCancel,
     required this.onSave,
   });
+
+  final TunePlayer player;
 
   /// Only the menu: in a pane beside the player, the title is already there.
   final bool compact;
@@ -348,6 +353,26 @@ class _Header extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onSave;
 
+  /// One quiet line of identity: the title, and what is under it.
+  Widget _identity(ManifestTrack t, String second) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        t.title,
+        style: TypeScale.display.copyWith(fontSize: 20, height: 1.15),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      const SizedBox(height: 2),
+      Text(
+        second,
+        style: TypeScale.caption,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final settings = SettingsScope.maybeOf(context);
@@ -362,26 +387,14 @@ class _Header extends StatelessWidget {
           Expanded(
             child: compact && !editing
                 ? const SizedBox.shrink()
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        track.title,
-                        style: TypeScale.display.copyWith(
-                          fontSize: 20,
-                          height: 1.15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        editing ? 'Editing lyrics' : track.artistDisplay,
-                        style: TypeScale.caption,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                : editing
+                ? _identity(track, 'Editing lyrics')
+                // The same swipe as the mini bar: the song moves aside and
+                // the next one slides in, and the words below follow it.
+                : TrackSwipe(
+                    player: player,
+                    track: track,
+                    builder: (context, t, _) => _identity(t, t.artistDisplay),
                   ),
           ),
           if (editing) ...[
@@ -403,10 +416,7 @@ class _Header extends StatelessWidget {
           ] else
             PopupMenuButton<String>(
               tooltip: 'Lyrics options',
-              icon: const Icon(
-                Icons.more_horiz_rounded,
-                color: Tones.textMuted,
-              ),
+              icon: Icon(Icons.more_horiz_rounded, color: Tones.textMuted),
               color: Tones.surfaceRaised,
               onSelected: (v) {
                 switch (v) {

@@ -4,13 +4,13 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/likes_store.dart';
 import '../../core/theme/tokens.dart';
-import '../../core/theme/tokens.dart'
-    show Tones, TypeScale, Space, RadiusTokens;
+import '../../core/theme/tokens.dart' show Tones, TypeScale, Space;
 import '../../domain/manifest.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/download_button.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/playing_bars.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/track_actions_sheet.dart';
 
 class TrackRow extends StatelessWidget {
@@ -63,7 +63,7 @@ class TrackRow extends StatelessWidget {
           opacity: dimmed ? 0.45 : 1,
           child: IgnorePointer(
             ignoring: dimmed,
-            child: InkWell(
+            child: PressRow(
               onTap: onTap,
               // Right-click is the long press of a mouse.
               onSecondaryTap: _hasActions
@@ -84,7 +84,6 @@ class TrackRow extends StatelessWidget {
                       onEdit: onEdit!,
                     )
                   : null,
-              borderRadius: BorderRadius.circular(RadiusTokens.control),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   vertical: Space.sm,
@@ -137,7 +136,7 @@ class TrackRow extends StatelessWidget {
                     // Liking happens in the player and the long-press menu.
                     if (LikesScope.maybeOf(context)?.isLiked(track.sha) ??
                         false) ...[
-                      const Icon(
+                      Icon(
                         Icons.favorite_rounded,
                         size: 14,
                         color: Tones.primary,
@@ -218,12 +217,17 @@ class ArtThumb extends StatelessWidget {
             borderRadius: borderRadius,
           )
         : ArtworkPlaceholder(borderRadius: borderRadius);
-    return Artwork(
-      url: sha == null ? null : artUrlFor(sha!),
-      artSha: sha,
-      size: size,
-      borderRadius: borderRadius,
-      fallback: generated,
+    // Inside a pressed row, the thumbnail is what gives -- the row only takes
+    // a faint wash. Outside one this is just the picture.
+    return PressTarget(
+      radius: borderRadius,
+      child: Artwork(
+        url: sha == null ? null : artUrlFor(sha!),
+        artSha: sha,
+        size: size,
+        borderRadius: borderRadius,
+        fallback: generated,
+      ),
     );
   }
 }

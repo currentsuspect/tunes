@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/widgets.dart';
 
 import '../audio/tune_player.dart';
+import '../../domain/listening_stats.dart' show ListenEvent;
 import '../../domain/mixes.dart' show PlayStamp;
 import 'database.dart';
 
@@ -384,5 +385,23 @@ class PlayHistory extends ChangeNotifier {
         if (r.read(_db.playEvents.sha) case final String sha)
           sha: r.read(count) ?? 0,
     };
+  }
+
+  /// Every listen, plays and skips, oldest first, for the listening page.
+  Future<List<ListenEvent>> listenEvents({int limit = 50000}) async {
+    final rows =
+        await (_db.select(_db.playEvents)
+              ..orderBy([(e) => OrderingTerm.desc(e.startedAt)])
+              ..limit(limit))
+            .get();
+    return [
+      for (final r in rows.reversed)
+        ListenEvent(
+          r.sha,
+          DateTime.fromMillisecondsSinceEpoch(r.startedAt),
+          r.listenedMs,
+          completed: r.completed,
+        ),
+    ];
   }
 }

@@ -27,7 +27,7 @@ class OfflineNote extends StatelessWidget {
             Container(
               width: 7,
               height: 7,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: Tones.held,
                 shape: BoxShape.circle,
               ),

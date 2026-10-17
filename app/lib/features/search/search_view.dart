@@ -8,9 +8,11 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/initials.dart';
 import '../../core/theme/tokens.dart';
+import '../../domain/fuzzy.dart';
 import '../../domain/manifest.dart';
 import '../library/library_widgets.dart';
 
@@ -86,23 +88,44 @@ class _SearchViewState extends State<SearchView> {
     });
   }
 
+  /// The phone's own search, forgiving of typos, accents and words run
+  /// together. Fields are folded once per library, not once per keystroke.
   List<ManifestTrack> _localResults(String q) {
-    return widget.tracks
-        .where(
-          (t) =>
-              t.title.toLowerCase().contains(q) ||
-              t.artist.toLowerCase().contains(q) ||
-              t.album.toLowerCase().contains(q),
-        )
-        .toList();
+    if (!identical(_indexed, widget.tracks)) {
+      _indexed = widget.tracks;
+      _fields = {
+        for (final t in widget.tracks)
+          t.sha: [
+            SearchField(t.title, weight: 1.2),
+            SearchField(t.artist),
+            SearchField(t.album, weight: 0.8),
+          ],
+      };
+    }
+    return fuzzyRank(q, widget.tracks, (t) => _fields[t.sha]!);
   }
+
+  List<ManifestTrack>? _indexed;
+  Map<String, List<SearchField>> _fields = const {};
 
   @override
   Widget build(BuildContext context) {
     final q = _query.trim().toLowerCase();
     final fromServer = _server != null;
     final local = q.isEmpty ? const <ManifestTrack>[] : _localResults(q);
-    final results = fromServer ? _server!.tracks : local;
+    // The box answers first when it can, and the phone's fuzzy matches
+    // fill in after it: a typo the box misses still finds the song.
+    final List<ManifestTrack> results;
+    if (fromServer) {
+      final seen = {for (final t in _server!.tracks) t.sha};
+      results = [
+        ..._server!.tracks,
+        for (final t in local)
+          if (!seen.contains(t.sha)) t,
+      ];
+    } else {
+      results = local;
+    }
     // Everything the screen could draw, from either source. The empty state
     // used to be gated on `!fromServer`, so the moment the daemon answered
     // with nothing the guard went false, the list rendered its sections --
@@ -132,7 +155,7 @@ class _SearchViewState extends State<SearchView> {
                 fontSize: 15,
                 color: Tones.textMuted,
               ),
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.search_rounded,
                 color: Tones.textMuted,
                 size: 20,
@@ -149,7 +172,7 @@ class _SearchViewState extends State<SearchView> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(RadiusTokens.control),
-                borderSide: const BorderSide(color: Tones.primary, width: 1.5),
+                borderSide: BorderSide(color: Tones.primary, width: 1.5),
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: Space.md),
             ),
@@ -160,11 +183,7 @@ class _SearchViewState extends State<SearchView> {
             padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
             child: Row(
               children: [
-                const Icon(
-                  Icons.offline_pin_rounded,
-                  size: 14,
-                  color: Tones.held,
-                ),
+                Icon(Icons.offline_pin_rounded, size: 14, color: Tones.held),
                 const SizedBox(width: Space.sm),
                 Text(
                   'Searching what is on ${Device.thisOne}',
@@ -229,7 +248,7 @@ class _SearchViewState extends State<SearchView> {
                       Text('Albums on MusicBrainz', style: _sectionStyle()),
                       const SizedBox(height: Space.sm),
                       for (final r in _server!.externalReleases) ...[
-                        InkWell(
+                        PressRow(
                           onTap: () {
                             if (r.owned && r.releaseId != null) {
                               for (final local in widget.releases) {
@@ -320,7 +339,7 @@ class _SearchViewState extends State<SearchView> {
                       Text('Artists on MusicBrainz', style: _sectionStyle()),
                       const SizedBox(height: Space.sm),
                       for (final a in _server!.externalArtists) ...[
-                        InkWell(
+                        PressRow(
                           onTap: widget.onArtistTap == null
                               ? null
                               : () => widget.onArtistTap!(a.name),
@@ -360,7 +379,7 @@ class _SearchViewState extends State<SearchView> {
                                     ],
                                   ),
                                 ),
-                                const Icon(
+                                Icon(
                                   Icons.open_in_new_rounded,
                                   size: 16,
                                   color: Tones.textMuted,
@@ -378,7 +397,7 @@ class _SearchViewState extends State<SearchView> {
                         Text('Albums', style: _sectionStyle()),
                         const SizedBox(height: Space.sm),
                         for (final r in _server!.releases) ...[
-                          InkWell(
+                          PressRow(
                             onTap: widget.onAlbumTap == null
                                 ? null
                                 : () => widget.onAlbumTap!(r),
@@ -420,7 +439,7 @@ class _SearchViewState extends State<SearchView> {
                                       ],
                                     ),
                                   ),
-                                  const Icon(
+                                  Icon(
                                     Icons.chevron_right_rounded,
                                     color: Tones.textMuted,
                                   ),
@@ -436,7 +455,7 @@ class _SearchViewState extends State<SearchView> {
                         Text('Artists', style: _sectionStyle()),
                         const SizedBox(height: Space.sm),
                         for (final a in _server!.artists) ...[
-                          InkWell(
+                          PressRow(
                             onTap: widget.onArtistTap == null
                                 ? null
                                 : () => widget.onArtistTap!(a.name),
@@ -466,7 +485,7 @@ class _SearchViewState extends State<SearchView> {
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  const Icon(
+                                  Icon(
                                     Icons.chevron_right_rounded,
                                     color: Tones.textMuted,
                                   ),
@@ -530,7 +549,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
     final albums = releases.take(12).toList();
 
     if (artists.isEmpty && albums.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Search your library. Results appear as you type.',
           style: TypeScale.note,
@@ -555,7 +574,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                 final art = artFor[name];
                 return SizedBox(
                   width: 84,
-                  child: InkWell(
+                  child: PressRow(
                     onTap: onArtistTap == null
                         ? null
                         : () => onArtistTap!(name),
@@ -600,7 +619,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                 final art = r.artSha;
                 return SizedBox(
                   width: 124,
-                  child: InkWell(
+                  child: PressRow(
                     onTap: onAlbumTap == null ? null : () => onAlbumTap!(r),
                     borderRadius: BorderRadius.circular(RadiusTokens.control),
                     child: Column(
@@ -611,7 +630,7 @@ class _BrowseWhenEmpty extends StatelessWidget {
                           artSha: art,
                           size: 124,
                           borderRadius: RadiusTokens.control,
-                          fallback: const ArtworkPlaceholder(
+                          fallback: ArtworkPlaceholder(
                             borderRadius: RadiusTokens.control,
                           ),
                         ),

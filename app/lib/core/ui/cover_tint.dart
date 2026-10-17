@@ -176,7 +176,13 @@ class _TintBuilderState extends State<TintBuilder> {
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<Color?>(
-      tween: ColorTween(end: _tint ?? Tones.primary),
+      // A look without a glow keeps its own accent: Noir's one gold, not
+      // whatever colour the cover happens to be.
+      tween: ColorTween(
+        end: Looks.current.glowStrength == 0
+            ? Tones.primary
+            : (_tint ?? Tones.primary),
+      ),
       duration: MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
           : const Duration(milliseconds: 900),
@@ -207,8 +213,10 @@ class AmbientGlow extends StatelessWidget {
             center: const Alignment(0, -1.05),
             radius: 1.15,
             colors: [
-              tint.withValues(alpha: strength),
-              tint.withValues(alpha: strength * 0.35),
+              tint.withValues(alpha: strength * Looks.current.glowStrength),
+              tint.withValues(
+                alpha: strength * 0.35 * Looks.current.glowStrength,
+              ),
               tint.withValues(alpha: 0),
             ],
             stops: const [0, 0.5, 1],

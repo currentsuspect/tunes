@@ -20,6 +20,11 @@ class SettingsStore extends ChangeNotifier {
   static const _avatarPath = 'profile.avatarPath';
   static const _gapless = 'playback.gapless';
   static const _stopOnClose = 'playback.stopOnClose';
+  static const _cacheSize = 'storage.cacheSize';
+  static const _prefetchNext = 'storage.prefetchNext';
+  static const _doubleTapDownloads = 'gesture.doubleTapDownloads';
+  static const _themeChoice = 'theme.choice';
+  static const _themeBrightness = 'theme.brightness';
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
@@ -109,6 +114,49 @@ class SettingsStore extends ChangeNotifier {
   /// with two tracks playing at once.
   bool get stopOnClose => _bool(_stopOnClose, fallback: true);
   Future<void> setStopOnClose(bool v) => _put(_stopOnClose, '$v');
+
+  // --- storage -------------------------------------------------------------
+
+  /// The sizes the songs-you-have-heard cache can be, as shown in Settings.
+  static const cacheSizesGb = [2, 5, 10, 20];
+
+  /// Which of [cacheSizesGb] is chosen. 5 GB by default: a few hundred songs
+  /// in lossless, small against a phone.
+  int get cacheSize {
+    final v = int.tryParse(_cache[_cacheSize] ?? '');
+    return v == null ? 1 : v.clamp(0, cacheSizesGb.length - 1);
+  }
+
+  Future<void> setCacheSize(int i) => _put(_cacheSize, '$i');
+
+  int get cacheBytes => cacheSizesGb[cacheSize] * 1024 * 1024 * 1024;
+
+  /// Whether the next song is fetched whole before it is reached: 0 never,
+  /// 1 on Wi-Fi (the default), 2 always, mobile data included.
+  int get prefetchNext {
+    final v = int.tryParse(_cache[_prefetchNext] ?? '');
+    return v == null ? 1 : v.clamp(0, 2);
+  }
+
+  Future<void> setPrefetchNext(int v) => _put(_prefetchNext, '$v');
+
+  /// What a double tap on a cover does. Off (the default): it likes the
+  /// song, and the button where the heart was downloads instead. On: it
+  /// downloads (the whole album, on an album page), and the heart stays a
+  /// button. Two listeners asked for the two opposite gestures.
+  bool get doubleTapDownloads => _bool(_doubleTapDownloads, fallback: false);
+
+  /// The theme: 'room' (the default, what the app has always looked like),
+  /// 'noir', 'crayon', or 'auto' (Crayon by day, Noir after dark).
+  String get themeChoice => _cache[_themeChoice] ?? 'room';
+  Future<void> setThemeChoice(String v) => _put(_themeChoice, v);
+
+  /// 0 follows the phone, 1 is always dark, 2 always light. Dark by default:
+  /// the app was dark-only until themes, so nobody wakes up to a white app.
+  int get themeBrightness => int.tryParse(_cache[_themeBrightness] ?? '') ?? 1;
+  Future<void> setThemeBrightness(int v) => _put(_themeBrightness, '$v');
+
+  Future<void> setDoubleTapDownloads(bool v) => _put(_doubleTapDownloads, '$v');
 
   /// Whether the music keeps going after the queue runs out.
   ///

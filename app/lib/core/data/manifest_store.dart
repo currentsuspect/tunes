@@ -11,6 +11,65 @@ class ManifestStore {
   final TunesDatabase _db;
 
   Future<ManifestApplyResult> apply(TunesManifest manifest) async {
+    final result = await _apply(manifest);
+    await repoint(manifest.pointers);
+    return result;
+  }
+
+  /// Moves what this phone kept under a copy that is no longer listed onto
+  /// the listed copy of the same recording: likes, playlist entries, plays,
+  /// edits and the queue. Only unlisted shas are moved, and only to listed
+  /// ones, so it is safe to run on every apply. A like or an edit already
+  /// held under the listed copy wins over the old one. Returns rows moved.
+  Future<int> repoint(Map<String, String> pointers) async {
+    if (pointers.isEmpty) return 0;
+    return _db.transaction(() async {
+      var moved = 0;
+      for (final e in pointers.entries) {
+        final from = e.key;
+        final to = e.value;
+        if (from == to) continue;
+        moved += await _db.customUpdate(
+          'UPDATE OR IGNORE liked_tracks SET sha = ? WHERE sha = ?',
+          variables: [Variable(to), Variable(from)],
+          updates: {_db.likedTracks},
+        );
+        await _db.customUpdate(
+          'DELETE FROM liked_tracks WHERE sha = ?',
+          variables: [Variable(from)],
+          updates: {_db.likedTracks},
+        );
+        moved += await _db.customUpdate(
+          'UPDATE playlist_items SET sha = ? WHERE sha = ?',
+          variables: [Variable(to), Variable(from)],
+          updates: {_db.playlistItems},
+        );
+        moved += await _db.customUpdate(
+          'UPDATE play_events SET sha = ? WHERE sha = ?',
+          variables: [Variable(to), Variable(from)],
+          updates: {_db.playEvents},
+        );
+        moved += await _db.customUpdate(
+          'UPDATE OR IGNORE track_edits SET sha = ? WHERE sha = ?',
+          variables: [Variable(to), Variable(from)],
+          updates: {_db.trackEdits},
+        );
+        await _db.customUpdate(
+          'DELETE FROM track_edits WHERE sha = ?',
+          variables: [Variable(from)],
+          updates: {_db.trackEdits},
+        );
+        moved += await _db.customUpdate(
+          'UPDATE queue_entries SET track_sha = ? WHERE track_sha = ?',
+          variables: [Variable(to), Variable(from)],
+          updates: {_db.queueEntries},
+        );
+      }
+      return moved;
+    });
+  }
+
+  Future<ManifestApplyResult> _apply(TunesManifest manifest) async {
     return _db.transaction(() async {
       final existingShas = <String, int?>{};
       final rows = await _db.select(_db.tracks).get();
@@ -152,6 +211,9 @@ class ManifestStore {
                 artSha: Value(a.artSha),
                 searchText: Value(a.name.toLowerCase()),
                 tagsJson: Value(jsonEncode(a.tags)),
+                genresJson: Value(
+                  jsonEncode([for (final g in a.genres) g.toJson()]),
+                ),
               ),
             );
       }
@@ -354,7 +416,19 @@ class ManifestStore {
       name: row.name,
       artSha: row.artSha,
       tags: _tagsFrom(row.tagsJson),
+      genres: _genresFrom(row.genresJson),
     );
+  }
+
+  static List<ArtistGenre> _genresFrom(String json) {
+    try {
+      return [
+        for (final g in jsonDecode(json) as List<dynamic>)
+          ?ArtistGenre.tryParse(g),
+      ];
+    } catch (_) {
+      return const [];
+    }
   }
 
   // --- User edits --------------------------------------------------------

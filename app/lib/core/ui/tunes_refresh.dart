@@ -94,7 +94,7 @@ class TunesRefreshList extends StatelessWidget {
               width: 16,
               height: 16,
               child: done
-                  ? const Icon(Icons.check_rounded, size: 16, color: Tones.held)
+                  ? Icon(Icons.check_rounded, size: 16, color: Tones.held)
                   : CircularProgressIndicator(
                       // Filling while pulled, turning while it works.
                       value: working ? null : progress,

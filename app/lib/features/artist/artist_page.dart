@@ -8,6 +8,7 @@ import '../../core/nav/nav_controller.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/ui/initials.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -187,7 +188,7 @@ class _ArtistPageState extends State<ArtistPage> {
                       child: IconButton(
                         onPressed: () => NavScope.of(context).back(),
                         tooltip: 'Back',
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.arrow_back_rounded,
                           color: Tones.textMuted,
                         ),
@@ -533,7 +534,7 @@ class _Hero extends StatelessWidget {
               label: const Text('Shuffle'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Tones.text,
-                side: const BorderSide(color: Tones.hairline),
+                side: BorderSide(color: Tones.hairline),
                 padding: const EdgeInsets.symmetric(
                   horizontal: Space.lg,
                   vertical: Space.sm + 2,
@@ -612,7 +613,7 @@ class _JumpChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      child: InkWell(
+      child: PressRow(
         onTap: onTap,
         borderRadius: BorderRadius.circular(99),
         child: Container(
@@ -655,7 +656,7 @@ class _CollaboratorChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return PressRow(
       onTap: onTap,
       borderRadius: BorderRadius.circular(RadiusTokens.control),
       child: SizedBox(
@@ -703,7 +704,7 @@ class _ReleaseCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final held = release.trackShas.length;
     final total = release.totalTracks;
-    return InkWell(
+    return PressRow(
       onTap: onTap,
       borderRadius: BorderRadius.circular(RadiusTokens.control),
       child: SizedBox(
@@ -768,7 +769,7 @@ class _GapRow extends StatelessWidget {
     final partial = group.owned;
     final total = group.totalTracks;
     final left = partial && total != null ? total - group.ownedTracks : null;
-    return InkWell(
+    return PressRow(
       onTap: onTap,
       borderRadius: BorderRadius.circular(RadiusTokens.control),
       child: Padding(

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
+import '../../core/data/download_manager.dart';
 import '../../core/data/playlist_store.dart';
+import '../../core/data/reachability.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/collection_download.dart';
+import '../../core/ui/download_button.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
@@ -93,7 +98,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Tones.surfaceRaised,
-        title: const Text('Rename playlist', style: TypeScale.title),
+        title: Text('Rename playlist', style: TypeScale.title),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -132,8 +137,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Tones.surfaceRaised,
-        title: const Text('Delete this playlist?', style: TypeScale.title),
-        content: const Text(
+        title: Text('Delete this playlist?', style: TypeScale.title),
+        content: Text(
           'The list goes, and nothing else does. Every track stays in your '
           'library and every file stays on disk.',
           style: TypeScale.body,
@@ -251,21 +256,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         IconButton(
                           onPressed: () => NavScope.of(context).back(),
                           tooltip: 'Back',
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.arrow_back_rounded,
                             color: Tones.textMuted,
                           ),
                         ),
                         const Spacer(),
                         PopupMenuButton<String>(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.more_horiz_rounded,
                             color: Tones.textMuted,
                           ),
                           color: Tones.surfaceRaised,
                           onSelected: (v) =>
                               v == 'rename' ? _rename() : _delete(),
-                          itemBuilder: (_) => const [
+                          itemBuilder: (_) => [
                             PopupMenuItem(
                               value: 'rename',
                               child: Text('Rename', style: TypeScale.body),
@@ -309,6 +314,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                   : () => widget.player.playQueue(playable, 0),
                               onShuffle: playable.isEmpty ? null : _shuffle,
                               onAdd: _addSongs,
+                              tracks: playable,
                             ),
                             // onReorderItem rather than onReorder: it reports
                             // the destination already adjusted for the row
@@ -327,7 +333,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                     right: Space.lg,
                                   ),
                                   color: Tones.surfaceRaised,
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.remove_circle_outline_rounded,
                                     color: Tones.textMuted,
                                   ),
@@ -370,7 +376,11 @@ class _Header extends StatelessWidget {
     required this.onPlay,
     required this.onShuffle,
     required this.onAdd,
+    required this.tracks,
   });
+
+  /// The songs that can be played, which are the ones that can be downloaded.
+  final List<ManifestTrack> tracks;
 
   final String name;
   final List<String> covers;
@@ -384,6 +394,8 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final downloads = DownloadScope.maybeOf(context);
+    final offline = ReachabilityScope.maybeOf(context)?.offline ?? false;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         Space.lg,
@@ -445,19 +457,41 @@ class _Header extends StatelessWidget {
                 label: const Text('Shuffle'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Tones.text,
-                  side: const BorderSide(color: Tones.hairline),
+                  side: BorderSide(color: Tones.hairline),
                 ),
               ),
-              const SizedBox(width: Space.sm),
-              OutlinedButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Tones.text,
-                  side: const BorderSide(color: Tones.hairline),
+              const Spacer(),
+              // Round, like the download beside it: two buttons with words
+              // and two with marks fit a phone's width; four with words did
+              // not.
+              Tooltip(
+                message: 'Add songs',
+                child: InkResponse(
+                  onTap: onAdd,
+                  radius: 26,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Tones.hairline),
+                    ),
+                    child: Icon(Icons.add_rounded, size: 22, color: Tones.text),
+                  ),
                 ),
               ),
+              if (tracks.isNotEmpty && downloads != null) ...[
+                const SizedBox(width: Space.sm),
+                // The whole playlist in one tap, with the same ring the
+                // album page uses so it says how far it has got.
+                CollectionDownload(
+                  noun: 'playlist',
+                  tracks: tracks,
+                  store: downloads.store,
+                  offline: offline,
+                  onDownload: (t) => downloads.enqueue(t.sha, artSha: t.artSha),
+                ),
+              ],
             ],
           ),
           if (empty) ...[
@@ -568,13 +602,15 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = track;
+    final downloads = DownloadScope.maybeOf(context);
+    final offline = ReachabilityScope.maybeOf(context)?.offline ?? false;
     return ListenableBuilder(
       listenable: player,
       builder: (context, _) {
         final playing = t != null && player.current?.sha == t.sha;
         return Material(
           color: Tones.base,
-          child: InkWell(
+          child: PressRow(
             onTap: onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(
@@ -584,7 +620,7 @@ class _Row extends StatelessWidget {
               child: Row(
                 children: [
                   t == null
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 48,
                           height: 48,
                           child: Icon(
@@ -635,9 +671,18 @@ class _Row extends StatelessWidget {
                       padding: const EdgeInsets.only(left: Space.sm),
                       child: Text(t.durationLabel, style: TypeScale.mono),
                     ),
+                  if (t != null && downloads != null)
+                    DownloadButton(
+                      sha: t.sha,
+                      title: t.title,
+                      store: downloads.store,
+                      offline: offline,
+                      onDownload: () =>
+                          downloads.enqueue(t.sha, artSha: t.artSha),
+                    ),
                   ReorderableDragStartListener(
                     index: index,
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.only(left: Space.sm),
                       child: Icon(
                         Icons.drag_handle_rounded,

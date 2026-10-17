@@ -30,7 +30,7 @@ class AddToPlaylistSheet extends StatefulWidget {
       context: context,
       backgroundColor: Tones.surface,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -80,7 +80,7 @@ class _AddToPlaylistSheetState extends State<AddToPlaylistSheet> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Tones.surfaceRaised,
-        title: const Text('New playlist', style: TypeScale.title),
+        title: Text('New playlist', style: TypeScale.title),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -131,14 +131,14 @@ class _AddToPlaylistSheetState extends State<AddToPlaylistSheet> {
                 style: TypeScale.title,
               ),
             ),
-            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             ListTile(
-              leading: const Icon(Icons.add_rounded, color: Tones.primary),
-              title: const Text('New playlist', style: TypeScale.body),
+              leading: Icon(Icons.add_rounded, color: Tones.primary),
+              title: Text('New playlist', style: TypeScale.body),
               onTap: _createAndAdd,
             ),
             if (_loaded && _lists.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(
                   Space.lg,
                   Space.sm,
@@ -157,7 +157,7 @@ class _AddToPlaylistSheetState extends State<AddToPlaylistSheet> {
                 itemBuilder: (context, i) {
                   final p = _lists[i];
                   return ListTile(
-                    leading: const Icon(
+                    leading: Icon(
                       Icons.queue_music_rounded,
                       color: Tones.textMuted,
                     ),

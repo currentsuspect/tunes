@@ -84,7 +84,7 @@ class _RailSkeleton extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(Space.md, 0, Space.lg, 0),
             itemCount: 4,
             separatorBuilder: (_, _) => const SizedBox(width: Space.md),
-            itemBuilder: (context, i) => const SizedBox(
+            itemBuilder: (context, i) => SizedBox(
               width: 132,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

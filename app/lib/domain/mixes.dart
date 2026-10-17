@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'genre_lanes.dart';
 import 'manifest.dart';
 
 /// Playlists the app makes from how you listen, and albums it thinks you have
@@ -194,6 +195,7 @@ class _Context {
     }
     for (final a in input.artists) {
       tagsByArtist[a.name] = a.tags;
+      if (a.genres.isNotEmpty) genresByArtist[a.name] = a.genres;
     }
     for (final p in input.stamps) {
       plays[p.sha] = (plays[p.sha] ?? 0) + 1;
@@ -209,6 +211,7 @@ class _Context {
   final MixInputs input;
   final Map<String, ManifestTrack> bySha = {};
   final Map<String, List<String>> tagsByArtist = {};
+  final Map<String, List<ArtistGenre>> genresByArtist = {};
   final Map<String, int> plays = {};
   final Map<String, int> artistPlays = {};
 
@@ -414,11 +417,46 @@ String _titleCase(String tag) => tag
     .map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1))
     .join(' ');
 
-/// A mix per kind of music the library is made of, from the artists' tags.
+/// A mix per kind of music the library is made of.
 ///
-/// Up to two, the biggest. Tags that only differ in how they are spelled
-/// ("hip hop", "Hip-Hop") are one tag.
+/// From the box's clean genres when it sends them: three lanes that differ and
+/// rotate weekly (see genre_lanes.dart). Without them, the old way: the two
+/// biggest raw tags.
 List<Mix> _genreLanes(_Context c, int minTracks, int size) {
+  if (c.genresByArtist.isEmpty) return _tagLanes(c, minTracks, size);
+  final lanes = pickGenreLanes(
+    tracks: c.input.tracks,
+    genresByArtist: c.genresByArtist,
+    plays: c.plays,
+    now: c.now,
+    minTracks: max(minTracks, 25),
+    minMix: minTracks,
+  );
+  final out = <Mix>[];
+  for (final l in lanes) {
+    final key = _tagKey(l.name);
+    final m = _laneMix(
+      c,
+      id: 'genre-$key',
+      title: l.name,
+      // A quiet lane leads with what she has not heard; the rest with
+      // favourites.
+      note: l.discovery
+          ? 'Your ${l.name}, the part you rarely play.'
+          : 'Your ${l.name}, favourites first.',
+      pool: l.tracks,
+      favouritesFirst: !l.discovery,
+      minTracks: minTracks,
+      size: size,
+    );
+    if (m != null) out.add(m);
+  }
+  return out;
+}
+
+/// Before the box sent genres: the two biggest tags. Tags that only differ in
+/// how they are spelled ("hip hop", "Hip-Hop") are one tag.
+List<Mix> _tagLanes(_Context c, int minTracks, int size) {
   // Per tag: which tracks, and the spellings seen (the commonest is the name).
   final tracksFor = <String, List<ManifestTrack>>{};
   final spellings = <String, Map<String, int>>{};
@@ -447,31 +485,56 @@ List<Mix> _genreLanes(_Context c, int minTracks, int size) {
               ..sort((a, b) => b.value.compareTo(a.value)))
             .first
             .key;
-    final rng = Random(_seed('genre-${e.key}', c.now, weekly: true));
-    // Scored once per track. A random number drawn inside the comparison would
-    // give a different answer each time two tracks were compared.
-    final scored = [
-      for (final t in e.value)
-        (
-          t: t,
-          score:
-              (c.plays[t.sha] ?? 0) +
-              (c.input.liked.contains(t.sha) ? 4 : 0) +
-              rng.nextDouble() * 2,
-        ),
-    ]..sort((a, b) => b.score.compareTo(a.score));
-    final ranked = [for (final x in scored) x.t];
-    final tracks = _diversify(ranked, size, 3);
-    if (tracks.length < minTracks) continue;
-    out.add(
-      Mix(
-        id: 'genre-${e.key}',
-        title: _titleCase(name),
-        kind: MixKind.genre,
-        note: 'Your ${name.toLowerCase()}, favourites first.',
-        tracks: _shuffled(tracks, rng),
-      ),
+    final m = _laneMix(
+      c,
+      id: 'genre-${e.key}',
+      title: _titleCase(name),
+      note: 'Your ${name.toLowerCase()}, favourites first.',
+      pool: e.value,
+      favouritesFirst: true,
+      minTracks: minTracks,
+      size: size,
     );
+    if (m != null) out.add(m);
   }
   return out;
+}
+
+Mix? _laneMix(
+  _Context c, {
+  required String id,
+  required String title,
+  required String note,
+  required List<ManifestTrack> pool,
+  required bool favouritesFirst,
+  required int minTracks,
+  required int size,
+}) {
+  final rng = Random(_seed(id, c.now, weekly: true));
+  // Scored once per track. A random number drawn inside the comparison would
+  // give a different answer each time two tracks were compared.
+  final scored = [
+    for (final t in pool)
+      (
+        t: t,
+        score: favouritesFirst
+            ? (c.plays[t.sha] ?? 0) +
+                  (c.input.liked.contains(t.sha) ? 4 : 0) +
+                  rng.nextDouble() * 2
+            // Discovery: unplayed first, hearts still count a little.
+            : -(c.plays[t.sha] ?? 0) * 2 +
+                  (c.input.liked.contains(t.sha) ? 1 : 0) +
+                  rng.nextDouble() * 2,
+      ),
+  ]..sort((a, b) => b.score.compareTo(a.score));
+  final ranked = [for (final x in scored) x.t];
+  final tracks = _diversify(ranked, size, 3);
+  if (tracks.length < minTracks) return null;
+  return Mix(
+    id: id,
+    title: title,
+    kind: MixKind.genre,
+    note: note,
+    tracks: _shuffled(tracks, rng),
+  );
 }

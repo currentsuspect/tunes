@@ -12,6 +12,10 @@ import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/data/download_manager.dart';
+import '../../core/data/likes_store.dart';
+import '../../core/ui/double_tap_cover.dart';
+import '../../core/ui/download_button.dart';
 import '../../core/ui/like_button.dart';
 import '../../core/data/reachability.dart';
 import '../../core/ui/cover_tint.dart';
@@ -175,7 +179,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Tones.surface,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -220,7 +224,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                 ),
                 _InfoRow(label: 'Release', value: track.releaseId ?? '—'),
                 const SizedBox(height: Space.sm),
-                const Text(
+                Text(
                   'Quality and identity are derived from the source file '
                   'and enrichment providers. Enrichment never changes audio.',
                   style: TypeScale.caption,
@@ -241,7 +245,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
         builder: (context, _) {
           final current = widget.player.current;
           if (current == null) {
-            return const Center(
+            return Center(
               child: Text('Nothing playing', style: TypeScale.body),
             );
           }
@@ -280,7 +284,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   IconButton(
                                     onPressed: () =>
                                         NavScope.of(context).back(),
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.keyboard_arrow_down_rounded,
                                       color: Tones.textMuted,
                                     ),
@@ -296,7 +300,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     ),
                                   ),
                                   PopupMenuButton<String>(
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.more_horiz_rounded,
                                       color: Tones.textMuted,
                                     ),
@@ -357,28 +361,28 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       }
                                     },
                                     itemBuilder: (context) => [
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'queue',
                                         child: Text(
                                           'Queue',
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'artist',
                                         child: Text(
                                           'Go to artist',
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'album',
                                         child: Text(
                                           'Go to album',
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'playlist',
                                         child: Text(
                                           'Add to playlist',
@@ -394,14 +398,14 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'stop',
                                         child: Text(
                                           'Stop',
                                           style: TypeScale.body,
                                         ),
                                       ),
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'info',
                                         child: Text(
                                           'Track information',
@@ -420,7 +424,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           (current.lyrics ?? '')
                                               .trim()
                                               .isNotEmpty))
-                                        const PopupMenuItem(
+                                        PopupMenuItem(
                                           value: 'lyrics',
                                           child: Text(
                                             'Lyrics',
@@ -450,12 +454,16 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   children: [
                                     Flexible(
                                       child: Center(
-                                        child: SharedSleeve(
-                                          tag: 'sleeve-${current.sha}',
-                                          child: _Artwork(
-                                            track: current,
-                                            artUrlFor: widget.artUrlFor,
-                                            playing: widget.player.playing,
+                                        child: DoubleTapCover(
+                                          onDoubleTap: () =>
+                                              _doubleTap(context, current),
+                                          child: SharedSleeve(
+                                            tag: 'sleeve-${current.sha}',
+                                            child: _Artwork(
+                                              track: current,
+                                              artUrlFor: widget.artUrlFor,
+                                              playing: widget.player.playing,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -502,7 +510,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                             ],
                                           ),
                                         ),
-                                        LikeButton(sha: current.sha, size: 26),
+                                        _CoverActionButton(track: current),
                                       ],
                                     ),
                                   ],
@@ -540,7 +548,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     IconButton(
                                       onPressed: widget.player.previous,
                                       iconSize: 36,
-                                      icon: const Icon(
+                                      icon: Icon(
                                         Icons.skip_previous_rounded,
                                         color: Tones.text,
                                       ),
@@ -550,7 +558,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                     IconButton(
                                       onPressed: widget.player.next,
                                       iconSize: 36,
-                                      icon: const Icon(
+                                      icon: Icon(
                                         Icons.skip_next_rounded,
                                         color: Tones.text,
                                       ),
@@ -623,7 +631,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                       // arrives from below reads as a sheet over the player
                       // rather than more page.
                       ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
+                        borderRadius: BorderRadius.vertical(
                           top: Radius.circular(RadiusTokens.card),
                         ),
                         child: ColoredBox(
@@ -847,10 +855,7 @@ class _PlayButton extends StatelessWidget {
         child: Container(
           width: 68,
           height: 68,
-          decoration: const BoxDecoration(
-            color: Tones.text,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: Tones.text, shape: BoxShape.circle),
           child: Icon(
             player.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
             size: 38,
@@ -1025,6 +1030,69 @@ class _RepeatButton extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// What a double tap on the Now Playing cover does, by the listener's
+/// setting: like the song (and say which way it went), or download it.
+IconData? _doubleTap(BuildContext context, ManifestTrack track) {
+  final settings = SettingsScope.maybeOf(context);
+  if (settings?.doubleTapDownloads ?? false) {
+    final downloads = DownloadScope.maybeOf(context);
+    if (downloads == null) return null;
+    if (downloads.store.pathFor(track.sha) != null) {
+      return Icons.download_done_rounded;
+    }
+    downloads.enqueue(track.sha, artSha: track.artSha);
+    return Icons.arrow_circle_down_rounded;
+  }
+  final likes = LikesScope.maybeOf(context);
+  if (likes == null) return null;
+  final nowLiked = !likes.isLiked(track.sha);
+  likes.toggle(track.sha);
+  return nowLiked ? Icons.favorite_rounded : Icons.heart_broken_rounded;
+}
+
+/// The button beside the title: whichever action the double tap is not.
+/// Liking by double tap puts the download here; downloading by double tap
+/// keeps the heart. A small heart stays by the download so a liked song
+/// still says so.
+class _CoverActionButton extends StatelessWidget {
+  const _CoverActionButton({required this.track});
+
+  final ManifestTrack track;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = SettingsScope.maybeOf(context);
+    final downloads = DownloadScope.maybeOf(context);
+    if ((settings?.doubleTapDownloads ?? false) || downloads == null) {
+      return LikeButton(sha: track.sha, size: 26);
+    }
+    final liked = LikesScope.maybeOf(context)?.isLiked(track.sha) ?? false;
+    final offline = ReachabilityScope.maybeOf(context)?.offline ?? false;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (liked)
+          Padding(
+            padding: EdgeInsets.only(right: 2),
+            child: Icon(
+              Icons.favorite_rounded,
+              size: 16,
+              color: Tones.primary,
+              semanticLabel: 'Liked',
+            ),
+          ),
+        DownloadButton(
+          sha: track.sha,
+          title: track.title,
+          store: downloads.store,
+          offline: offline,
+          onDownload: () => downloads.enqueue(track.sha, artSha: track.artSha),
+        ),
+      ],
     );
   }
 }

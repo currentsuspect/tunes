@@ -23,7 +23,7 @@ class Artwork extends StatelessWidget {
     required this.size,
     required this.fallback,
     this.height,
-    this.borderRadius = RadiusTokens.card,
+    this.borderRadius,
     this.shared = false,
     this.artSha,
   });
@@ -48,7 +48,9 @@ class Artwork extends StatelessWidget {
   /// caller to the same box, so it cannot change the layout when it swaps.
   final Widget fallback;
 
-  final double borderRadius;
+  /// The corner, before the look has its say. Null takes the look's card
+  /// corner.
+  final double? borderRadius;
 
   /// This sleeve flies between screens, so it must not be decoded per size.
   ///
@@ -65,7 +67,7 @@ class Artwork extends StatelessWidget {
   static Widget fill({
     required String? url,
     required Widget fallback,
-    double borderRadius = RadiusTokens.card,
+    double? borderRadius,
     bool shared = false,
     String? artSha,
   }) {
@@ -89,13 +91,24 @@ class Artwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final src = url;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
+    final r = coverRadius(borderRadius);
+    final clipped = ClipRRect(
+      borderRadius: BorderRadius.circular(r),
       child: SizedBox(
         width: size,
         height: height ?? size,
         child: _content(context, src),
       ),
+    );
+    // Crayon draws every cover inside an ink outline, like a sticker.
+    if (Looks.current.covers != CoverStyle.crayon) return clipped;
+    return DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(r),
+        border: Border.all(color: Tones.text, width: size >= 80 ? 2.5 : 1.5),
+      ),
+      child: clipped,
     );
   }
 
@@ -159,7 +172,7 @@ class Artwork extends StatelessWidget {
               opacity: frame == null ? 0 : 1,
               duration: MediaQuery.disableAnimationsOf(context)
                   ? Duration.zero
-                  : const Duration(milliseconds: 220),
+                  : Duration(milliseconds: 220),
               curve: Curves.easeOut,
               child: child,
             ),
@@ -176,17 +189,24 @@ class Artwork extends StatelessWidget {
 /// Deliberately plain: it stands in for artwork that is about to appear, so
 /// anything with character of its own would be the thing that flickers.
 class ArtworkPlaceholder extends StatelessWidget {
-  const ArtworkPlaceholder({super.key, this.borderRadius = RadiusTokens.card});
+  const ArtworkPlaceholder({super.key, this.borderRadius});
 
-  final double borderRadius;
+  final double? borderRadius;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Tones.surfaceRaised,
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: BorderRadius.circular(coverRadius(borderRadius)),
       ),
     );
   }
+}
+
+/// A cover's corner in the current look: the caller's choice (or the card
+/// corner), except that Noir squares every cover off.
+double coverRadius(double? asked) {
+  final r = asked ?? RadiusTokens.card;
+  return Looks.current.covers == CoverStyle.flat ? (r < 3 ? r : 3) : r;
 }

@@ -95,7 +95,7 @@ class PlayPill extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: Faces.body,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,

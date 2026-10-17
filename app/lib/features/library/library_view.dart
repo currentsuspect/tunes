@@ -11,6 +11,7 @@ import '../../core/data/queue_store.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -200,7 +201,7 @@ class _LibraryViewState extends State<LibraryView> {
                 final t = recents[i];
                 return SizedBox(
                   width: 92,
-                  child: InkWell(
+                  child: PressRow(
                     onTap: () => _play(recents, i),
                     borderRadius: BorderRadius.circular(RadiusTokens.control),
                     child: Column(
@@ -339,10 +340,10 @@ class _LibraryViewState extends State<LibraryView> {
       backgroundColor: Tones.surface,
       appBar: AppBar(
         backgroundColor: Tones.surface,
-        title: const Text('Liked songs', style: TypeScale.heading),
+        title: Text('Liked songs', style: TypeScale.heading),
         leading: IconButton(
           onPressed: () => NavScope.of(context).back(),
-          icon: const Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
+          icon: Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
         ),
       ),
       body: ListenableBuilder(
@@ -393,7 +394,7 @@ class _LibraryViewState extends State<LibraryView> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Tones.surfaceRaised,
-        title: const Text('New playlist', style: TypeScale.title),
+        title: Text('New playlist', style: TypeScale.title),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -447,18 +448,15 @@ class _LibraryViewState extends State<LibraryView> {
               if (index == 0) {
                 final n = LikesScope.maybeOf(context)?.count ?? 0;
                 return ListTile(
-                  leading: const Icon(
-                    Icons.favorite_rounded,
-                    color: Tones.primary,
-                  ),
-                  title: const Text('Liked songs', style: TypeScale.title),
+                  leading: Icon(Icons.favorite_rounded, color: Tones.primary),
+                  title: Text('Liked songs', style: TypeScale.title),
                   subtitle: Text(
                     n == 0
                         ? 'Nothing liked yet'
                         : '$n ${n == 1 ? 'track' : 'tracks'}',
                     style: TypeScale.caption,
                   ),
-                  trailing: const Icon(
+                  trailing: Icon(
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
                   ),
@@ -472,14 +470,14 @@ class _LibraryViewState extends State<LibraryView> {
                 // you off to find a track first. Creating an empty list and
                 // filling it later is how most of them actually start.
                 return ListTile(
-                  leading: const Icon(Icons.add_rounded, color: Tones.primary),
-                  title: const Text('New playlist', style: TypeScale.title),
+                  leading: Icon(Icons.add_rounded, color: Tones.primary),
+                  title: Text('New playlist', style: TypeScale.title),
                   onTap: () => _createPlaylist(store),
                 );
               }
               final p = lists[index - 2];
               return ListTile(
-                leading: const Icon(
+                leading: Icon(
                   Icons.queue_music_rounded,
                   color: Tones.textMuted,
                 ),
@@ -489,7 +487,7 @@ class _LibraryViewState extends State<LibraryView> {
                   '${p.trackCount == 1 ? 'track' : 'tracks'}',
                   style: TypeScale.caption,
                 ),
-                trailing: const Icon(
+                trailing: Icon(
                   Icons.chevron_right_rounded,
                   color: Tones.textMuted,
                 ),
@@ -567,7 +565,7 @@ class _LibraryViewState extends State<LibraryView> {
                 .where((sha) => widget.store.pathFor(sha) != null)
                 .length;
             final all = r.trackShas.isNotEmpty && held == r.trackShas.length;
-            return InkWell(
+            return PressRow(
               onTap: () => widget.onAlbumTap(r),
               borderRadius: BorderRadius.circular(RadiusTokens.card),
               child: Column(
@@ -611,7 +609,7 @@ class _LibraryViewState extends State<LibraryView> {
                                 border: Border.all(color: Tones.held),
                               ),
                               child: all
-                                  ? const Icon(
+                                  ? Icon(
                                       Icons.check_rounded,
                                       size: 12,
                                       color: Tones.held,
@@ -694,7 +692,7 @@ class _LibraryViewState extends State<LibraryView> {
         for (final a in widget.artists) {
           if (a.name == name) photo = a.artSha;
         }
-        return InkWell(
+        return PressRow(
           onTap: () => widget.onArtistTap(name),
           borderRadius: BorderRadius.circular(RadiusTokens.control),
           child: LayoutBuilder(
@@ -762,7 +760,7 @@ class _FilterChip extends StatelessWidget {
       child: Material(
         color: selected ? Tones.surfaceRaised : Colors.transparent,
         borderRadius: BorderRadius.circular(99),
-        child: InkWell(
+        child: PressRow(
           onTap: onTap,
           borderRadius: BorderRadius.circular(99),
           child: Container(
@@ -832,7 +830,7 @@ class _LibraryTabs extends StatelessWidget {
             child: Semantics(
               button: true,
               selected: i == selected,
-              child: InkWell(
+              child: PressRow(
                 onTap: () => onSelect(i),
                 borderRadius: BorderRadius.circular(6),
                 child: Padding(

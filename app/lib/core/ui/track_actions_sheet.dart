@@ -45,7 +45,7 @@ class TrackActionsSheet extends StatelessWidget {
       context: context,
       backgroundColor: Tones.surface,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -68,7 +68,7 @@ class TrackActionsSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _Header(track: track),
-            const Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             // First, because it is the one action here that says something
             // about the track rather than about the queue.
             if (LikesScope.maybeOf(context) case final likes?)
@@ -238,7 +238,7 @@ class _ActionRow extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: Tones.textMuted),
+            Icon(Icons.chevron_right_rounded, color: Tones.textMuted),
           ],
         ),
       ),
@@ -276,7 +276,7 @@ class EditInfoSheet extends StatefulWidget {
       context: context,
       backgroundColor: Tones.surface,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
@@ -415,11 +415,11 @@ class _Field extends StatelessWidget {
         fillColor: Tones.surfaceRaised,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(RadiusTokens.control),
-          borderSide: const BorderSide(color: Tones.hairline),
+          borderSide: BorderSide(color: Tones.hairline),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(RadiusTokens.control),
-          borderSide: const BorderSide(color: Tones.hairline),
+          borderSide: BorderSide(color: Tones.hairline),
         ),
       ),
     );

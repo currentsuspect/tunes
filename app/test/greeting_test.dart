@@ -24,4 +24,34 @@ void main() {
     expect(greetingFor(at(19), '  Dylan '), 'Good evening, Dylan');
     expect(greetingFor(at(19), '   '), 'Good evening');
   });
+
+  test('with a seed it speaks in more than one voice, all on time', () {
+    final evening = {
+      for (var s = 0; s < 60; s++) greetingFor(at(19), 'Dylan', seed: s),
+    };
+    expect(evening.length, greaterThan(4));
+    expect(evening, contains('Good evening, Dylan'));
+    expect(evening.any((l) => l.contains('morning')), isFalse);
+    final late = {for (var s = 0; s < 60; s++) greetingFor(at(1), '', seed: s)};
+    expect(late.any((l) => l.contains('morning')), isFalse);
+    expect(late.any((l) => l.contains('{n}') || l.contains(', ')), isFalse);
+  });
+
+  test('the same seed says the same thing, so it does not flicker', () {
+    expect(
+      greetingFor(at(9), 'Dylan', seed: 41),
+      greetingFor(at(9), 'Dylan', seed: 41),
+    );
+  });
+
+  test('every line stays short enough for one line on a phone', () {
+    for (final h in [1, 9, 14, 19]) {
+      for (var d = 5; d < 12; d++) {
+        for (var s = 0; s < 80; s++) {
+          final line = greetingFor(DateTime(2026, 10, d, h), '', seed: s);
+          expect(line.length, lessThanOrEqualTo(20), reason: line);
+        }
+      }
+    }
+  });
 }

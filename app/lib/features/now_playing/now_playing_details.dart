@@ -277,7 +277,7 @@ class _AlbumCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(
+              Icon(
                 Icons.chevron_right_rounded,
                 color: Tones.textMuted,
                 size: 22,
@@ -419,7 +419,7 @@ class _FileSheet extends StatelessWidget {
                     children: [
                       for (var i = 0; i < stats.length; i++) ...[
                         if (i > 0)
-                          const VerticalDivider(
+                          VerticalDivider(
                             width: Space.lg,
                             thickness: 1,
                             color: Tones.hairline,

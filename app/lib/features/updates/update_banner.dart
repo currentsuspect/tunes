@@ -49,7 +49,7 @@ class UpdateBanner extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(
+            Icon(
               Icons.system_update_alt_rounded,
               size: 20,
               color: Tones.primary,

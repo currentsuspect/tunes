@@ -15,12 +15,14 @@ class PlayingBars extends StatefulWidget {
   const PlayingBars({
     super.key,
     required this.playing,
-    this.color = Tones.primary,
+    this.color,
     this.size = 18,
   });
 
   final bool playing;
-  final Color color;
+
+  /// Null takes the look's accent.
+  final Color? color;
 
   /// Height of the whole mark; the width follows.
   final double size;
@@ -105,7 +107,7 @@ class _PlayingBarsState extends State<PlayingBars>
                     width: barW,
                     height: h * (still ? _rest[i] : _height(i, _c.value)),
                     decoration: BoxDecoration(
-                      color: widget.color,
+                      color: widget.color ?? Tones.primary,
                       borderRadius: BorderRadius.circular(barW / 2),
                     ),
                   ),

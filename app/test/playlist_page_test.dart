@@ -228,7 +228,7 @@ void main() {
     await store.addAll(id, ['sha0']);
     await pump(tester);
 
-    await tester.tap(find.text('Add'));
+    await tester.tap(find.byTooltip('Add songs'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'swapa nugget');
     await tester.pumpAndSettle();

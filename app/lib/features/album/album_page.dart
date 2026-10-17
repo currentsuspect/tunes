@@ -1,5 +1,3 @@
-import '../../core/platform/device.dart';
-
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
@@ -9,8 +7,12 @@ import '../../core/data/queue_store.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
-import '../../core/data/download_manager.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
+import '../../core/data/download_manager.dart';
+import '../../core/data/settings_store.dart';
+import '../../core/ui/collection_download.dart';
+import '../../core/ui/double_tap_cover.dart';
 import '../../core/ui/download_button.dart';
 import '../../core/ui/playing_bars.dart';
 import '../../core/ui/shared_sleeve.dart';
@@ -76,186 +78,359 @@ class AlbumPage extends StatelessWidget {
     return Scaffold(
       body: TintBuilder(
         artSha: release.artSha,
-        builder: (context, tint) => Stack(
-          fit: StackFit.expand,
-          children: [
-            AmbientGlow(tint: tint, strength: 0.34),
-            SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.xs,
-                      Space.sm,
-                      Space.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => NavScope.of(context).back(),
-                          icon: const Icon(
-                            Icons.arrow_back_rounded,
-                            color: Tones.textMuted,
+        builder: (context, tint) => _CollapseOnScroll(
+          // About where the title leaves the screen under the bar: the cover,
+          // the gap and the first line of the name.
+          threshold: 290,
+          builder: (context, controller, collapsed) => Stack(
+            fit: StackFit.expand,
+            children: [
+              AmbientGlow(tint: tint, strength: 0.34),
+              SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Once the cover and name have scrolled away, the bar says
+                    // which record this is: a small sleeve, the title and the
+                    // artist, and a play button, so a long tracklist never
+                    // leaves you on a page with no name.
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      decoration: BoxDecoration(
+                        color: collapsed
+                            ? Color.alphaBlend(
+                                tint.withValues(alpha: 0.10),
+                                Tones.base,
+                              ).withValues(alpha: 0.96)
+                            : Colors.transparent,
+                        border: Border(
+                          bottom: BorderSide(
+                            color: collapsed
+                                ? Tones.hairline
+                                : Colors.transparent,
                           ),
                         ),
-                        const Spacer(),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(
-                        Space.lg,
-                        Space.sm,
-                        Space.lg,
-                        Space.lg,
                       ),
-                      children: [
-                        Center(
-                          child: SharedSleeve(
-                            tag: 'album-${release.id}',
-                            // Lit by its own colour, like the player's sleeve.
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: tint.withValues(alpha: 0.5),
-                                    blurRadius: 44,
-                                    spreadRadius: -8,
-                                    offset: const Offset(0, 18),
-                                  ),
-                                ],
+                      padding: const EdgeInsets.fromLTRB(
+                        Space.xs,
+                        Space.sm,
+                        Space.sm,
+                        Space.xs,
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            onPressed: () => NavScope.of(context).back(),
+                            icon: Icon(
+                              Icons.arrow_back_rounded,
+                              color: Tones.textMuted,
+                            ),
+                          ),
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              // Built only once it is showing, so the hidden copy of the name
+                              // is never a second thing to find or tap.
+                              layoutBuilder: (current, previous) => Stack(
+                                alignment: Alignment.centerLeft,
+                                children: [...previous, ?current],
                               ),
-                              child: Artwork(
-                                url: release.artSha == null
-                                    ? null
-                                    : artUrlFor(release.artSha!),
-                                artSha: release.artSha,
-                                size: 220,
-                                borderRadius: 16,
-                                shared: true,
-                                fallback: GeneratedArtwork(
-                                  title: release.title,
-                                  artist: release.artist,
-                                  size: 220,
-                                  borderRadius: 16,
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: SlideTransition(
+                                      position: Tween(
+                                        begin: const Offset(0, 0.25),
+                                        end: Offset.zero,
+                                      ).animate(animation),
+                                      child: child,
+                                    ),
+                                  ),
+                              child: !collapsed
+                                  ? const SizedBox.shrink()
+                                  : GestureDetector(
+                                      // Tapping the name goes back to the top,
+                                      // like tapping a phone's status bar.
+                                      onTap: () => controller.animateTo(
+                                        0,
+                                        duration: const Duration(
+                                          milliseconds: 380,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Artwork(
+                                            url: release.artSha == null
+                                                ? null
+                                                : artUrlFor(release.artSha!),
+                                            artSha: release.artSha,
+                                            size: 32,
+                                            borderRadius: 6,
+                                            fallback: GeneratedArtwork(
+                                              title: release.title,
+                                              artist: release.artist,
+                                              size: 32,
+                                              borderRadius: 6,
+                                            ),
+                                          ),
+                                          const SizedBox(width: Space.sm),
+                                          Expanded(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  release.title,
+                                                  style: TypeScale.title
+                                                      .copyWith(fontSize: 14),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                                Text(
+                                                  release.artist,
+                                                  style: TypeScale.caption,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: collapsed
+                                ? IconButton(
+                                    tooltip: 'Play',
+                                    onPressed: () =>
+                                        player.playQueue(releaseTracks, 0),
+                                    icon: Icon(
+                                      Icons.play_circle_fill_rounded,
+                                      color: Tones.text,
+                                      size: 30,
+                                    ),
+                                  )
+                                : const SizedBox(width: 48, height: 48),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        controller: controller,
+                        padding: const EdgeInsets.fromLTRB(
+                          Space.lg,
+                          Space.sm,
+                          Space.lg,
+                          Space.lg,
+                        ),
+                        children: [
+                          Center(
+                            child: DoubleTapCover(
+                              // Double tap to download the album, for whoever
+                              // chose that in Settings; otherwise it does
+                              // nothing here.
+                              onDoubleTap: () => _downloadAlbumByTap(
+                                context,
+                                releaseTracks,
+                                onDownload,
+                              ),
+                              child: SharedSleeve(
+                                tag: 'album-${release.id}',
+                                // Lit by its own colour, like the player's sleeve.
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: tint.withValues(alpha: 0.5),
+                                        blurRadius: 44,
+                                        spreadRadius: -8,
+                                        offset: const Offset(0, 18),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Artwork(
+                                    url: release.artSha == null
+                                        ? null
+                                        : artUrlFor(release.artSha!),
+                                    artSha: release.artSha,
+                                    size: 220,
+                                    borderRadius: 16,
+                                    shared: true,
+                                    fallback: GeneratedArtwork(
+                                      title: release.title,
+                                      artist: release.artist,
+                                      size: 220,
+                                      borderRadius: 16,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: Space.lg),
-                        Text(
-                          release.title,
-                          textAlign: TextAlign.center,
-                          style: TypeScale.display.copyWith(fontSize: 32),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: Space.xs),
-                        GestureDetector(
-                          // One panel at a time: an album reached from an artist (or
-                          // vice versa) replaces it, and the same artist twice is a
-                          // no-op rather than a twin route.
-                          onTap: () => NavScope.of(context).openPanel(
-                            TunesPanels.artist(release.artist),
-                            () => ArtistPage(
-                              artist: release.artist,
-                              manifest: manifest,
-                              player: player,
-                              store: store,
-                              downloading: downloading,
-                              onDownload: onDownload,
-                              offline: offline,
-                              artUrlFor: artUrlFor,
-                              manifestStore: manifestStore,
-                              queueStore: queueStore,
-                            ),
-                          ),
-                          child: Text(
-                            release.artist,
+                          const SizedBox(height: Space.lg),
+                          Text(
+                            release.title,
                             textAlign: TextAlign.center,
-                            style: TypeScale.title.copyWith(color: tint),
-                            maxLines: 1,
+                            style: TypeScale.display.copyWith(fontSize: 32),
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        const SizedBox(height: Space.xs),
-                        _AlbumFacts(
-                          release: release,
-                          minutes: _totalMinutes(releaseTracks),
-                        ),
-                        const SizedBox(height: Space.lg),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            FilledButton.icon(
-                              onPressed: () =>
-                                  player.playQueue(releaseTracks, 0),
-                              icon: const Icon(
-                                Icons.play_arrow_rounded,
-                                size: 20,
-                              ),
-                              label: const Text('Play'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Tones.text,
-                                foregroundColor: Tones.base,
+                          const SizedBox(height: Space.xs),
+                          GestureDetector(
+                            // One panel at a time: an album reached from an artist (or
+                            // vice versa) replaces it, and the same artist twice is a
+                            // no-op rather than a twin route.
+                            onTap: () => NavScope.of(context).openPanel(
+                              TunesPanels.artist(release.artist),
+                              () => ArtistPage(
+                                artist: release.artist,
+                                manifest: manifest,
+                                player: player,
+                                store: store,
+                                downloading: downloading,
+                                onDownload: onDownload,
+                                offline: offline,
+                                artUrlFor: artUrlFor,
+                                manifestStore: manifestStore,
+                                queueStore: queueStore,
                               ),
                             ),
-                            const SizedBox(width: Space.sm),
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  player.shufflePlay(releaseTracks),
-                              icon: const Icon(Icons.shuffle_rounded, size: 18),
-                              label: const Text('Shuffle'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Tones.text,
-                                side: const BorderSide(color: Tones.hairline),
-                              ),
+                            child: Text(
+                              release.artist,
+                              textAlign: TextAlign.center,
+                              style: TypeScale.title.copyWith(color: tint),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(width: Space.sm),
-                            _AlbumDownload(
-                              tracks: releaseTracks,
-                              store: store,
-                              offline: offline,
-                              onDownload: onDownload,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: Space.md),
-                        const SizedBox(height: Space.lg),
-                        for (var i = 0; i < rows.length; i++) ...[
-                          _AlbumTrackRow(
-                            track: rows[i].track,
-                            position:
-                                rows[i].number ??
-                                releaseTracks[i].trackNumber ??
-                                i + 1,
-                            player: player,
-                            onPlay: () => player.playQueue(releaseTracks, i),
-                            store: store,
-                            downloading: downloading.contains(
-                              releaseTracks[i].sha,
-                            ),
-                            onDownload: () => onDownload(releaseTracks[i]),
-                            offline: offline,
                           ),
-                          if (i < releaseTracks.length - 1) const Divider(),
+                          const SizedBox(height: Space.xs),
+                          _AlbumFacts(
+                            release: release,
+                            minutes: _totalMinutes(releaseTracks),
+                          ),
+                          const SizedBox(height: Space.lg),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: () =>
+                                    player.playQueue(releaseTracks, 0),
+                                icon: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  size: 20,
+                                ),
+                                label: const Text('Play'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Tones.text,
+                                  foregroundColor: Tones.base,
+                                ),
+                              ),
+                              const SizedBox(width: Space.sm),
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    player.shufflePlay(releaseTracks),
+                                icon: const Icon(
+                                  Icons.shuffle_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Shuffle'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Tones.text,
+                                  side: BorderSide(color: Tones.hairline),
+                                ),
+                              ),
+                              const SizedBox(width: Space.sm),
+                              CollectionDownload(
+                                noun: 'album',
+                                tracks: releaseTracks,
+                                store: store,
+                                offline: offline,
+                                onDownload: onDownload,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: Space.md),
+                          const SizedBox(height: Space.lg),
+                          for (var i = 0; i < rows.length; i++) ...[
+                            _AlbumTrackRow(
+                              track: rows[i].track,
+                              position:
+                                  rows[i].number ??
+                                  releaseTracks[i].trackNumber ??
+                                  i + 1,
+                              player: player,
+                              onPlay: () => player.playQueue(releaseTracks, i),
+                              store: store,
+                              downloading: downloading.contains(
+                                releaseTracks[i].sha,
+                              ),
+                              onDownload: () => onDownload(releaseTracks[i]),
+                              offline: offline,
+                            ),
+                            if (i < releaseTracks.length - 1) const Divider(),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// Owns the album page's scroll position and says whether it has gone past
+/// [threshold], rebuilding only when that flips -- not every scrolled pixel.
+class _CollapseOnScroll extends StatefulWidget {
+  const _CollapseOnScroll({required this.threshold, required this.builder});
+
+  final double threshold;
+  final Widget Function(
+    BuildContext context,
+    ScrollController controller,
+    bool collapsed,
+  )
+  builder;
+
+  @override
+  State<_CollapseOnScroll> createState() => _CollapseOnScrollState();
+}
+
+class _CollapseOnScrollState extends State<_CollapseOnScroll> {
+  final _controller = ScrollController();
+  bool _collapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() {
+      final collapsed = _controller.offset > widget.threshold;
+      if (collapsed != _collapsed) setState(() => _collapsed = collapsed);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      widget.builder(context, _controller, _collapsed);
 }
 
 /// The facts about a record, said quietly: what and when on one line, how much
@@ -308,11 +483,7 @@ class _AlbumFacts extends StatelessWidget {
               style: TypeScale.mono.copyWith(color: Tones.text, fontSize: 13),
             ),
             if (complete)
-              const Icon(
-                Icons.check_circle_rounded,
-                size: 15,
-                color: Tones.held,
-              )
+              Icon(Icons.check_circle_rounded, size: 15, color: Tones.held)
             else if (missing > 0)
               Text(
                 '$missing missing',
@@ -328,157 +499,6 @@ class _AlbumFacts extends StatelessWidget {
 int _totalMinutes(List<ManifestTrack> tracks) {
   final ms = tracks.fold<int>(0, (sum, t) => sum + (t.durationMs ?? 0));
   return (ms / 60000).round();
-}
-
-/// Download the whole album, and say how it is going.
-///
-/// This was an outlined button that queued every track and then did nothing: the
-/// rows underneath had their own state, but nothing on the button said anything
-/// had started. It now shows the album as one: an arrow when none of it is on
-/// the phone, a ring filling with the count while it comes down, and a green
-/// tick when all of it is.
-class _AlbumDownload extends StatelessWidget {
-  const _AlbumDownload({
-    required this.tracks,
-    required this.store,
-    required this.offline,
-    required this.onDownload,
-  });
-
-  final List<ManifestTrack> tracks;
-  final DownloadStore store;
-  final bool offline;
-  final void Function(ManifestTrack) onDownload;
-
-  @override
-  Widget build(BuildContext context) {
-    final manager = DownloadScope.maybeOf(context);
-    return ListenableBuilder(
-      listenable: store,
-      builder: (context, _) {
-        final held = tracks.where((t) => store.pathFor(t.sha) != null).length;
-        final total = tracks.length;
-        final inFlight = manager == null
-            ? 0
-            : tracks.where((t) => manager.isActive(t.sha)).length;
-        var partial = 0.0;
-        if (manager != null) {
-          for (final t in tracks) {
-            final j = manager.jobFor(t.sha);
-            if (j != null && j.phase == DownloadPhase.running) {
-              partial += j.progress ?? 0;
-            }
-          }
-        }
-        final all = total > 0 && held == total;
-        final working = inFlight > 0;
-        final value = total == 0
-            ? 0.0
-            : ((held + partial) / total).clamp(0.0, 1.0);
-
-        final Widget face;
-        final String label;
-        if (all) {
-          face = const Icon(
-            Icons.check_circle_rounded,
-            key: ValueKey('all'),
-            size: 22,
-            color: Tones.held,
-          );
-          label = 'All $total songs are on ${Device.thisOne}';
-        } else if (working) {
-          face = Stack(
-            key: const ValueKey('working'),
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 24,
-                height: 24,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0, end: value),
-                  duration: const Duration(milliseconds: 220),
-                  builder: (context, v, _) => CircularProgressIndicator(
-                    value: v,
-                    strokeWidth: 2.4,
-                    color: Tones.primary,
-                    backgroundColor: Tones.hairline,
-                  ),
-                ),
-              ),
-              Text('$held', style: TypeScale.mono.copyWith(fontSize: 9)),
-            ],
-          );
-          label = 'Downloading, $held of $total done';
-        } else {
-          face = Icon(
-            Icons.arrow_circle_down_outlined,
-            key: const ValueKey('idle'),
-            size: 22,
-            color: offline ? Tones.hairline : Tones.text,
-          );
-          label = held == 0
-              ? 'Download the album'
-              : 'Download the other ${total - held} songs';
-        }
-
-        return Semantics(
-          button: true,
-          label: label,
-          excludeSemantics: true,
-          child: Tooltip(
-            message: label,
-            child: InkResponse(
-              radius: 26,
-              onTap: offline && !all
-                  ? null
-                  : () {
-                      if (all) {
-                        ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'All $total songs are on ${Device.thisOne}. Remove '
-                                'them one at a time from the tick beside each.',
-                              ),
-                            ),
-                          );
-                        return;
-                      }
-                      for (final t in tracks) {
-                        if (store.pathFor(t.sha) == null &&
-                            !(manager?.isActive(t.sha) ?? false)) {
-                          onDownload(t);
-                        }
-                      }
-                    },
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: all ? Tones.held : Tones.hairline),
-                ),
-                child: Center(
-                  child: AnimatedSwitcher(
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 220),
-                    switchInCurve: Curves.easeOutBack,
-                    transitionBuilder: (child, a) => FadeTransition(
-                      opacity: a,
-                      child: ScaleTransition(scale: a, child: child),
-                    ),
-                    child: face,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
 }
 
 class _AlbumTrackRow extends StatelessWidget {
@@ -508,7 +528,7 @@ class _AlbumTrackRow extends StatelessWidget {
       listenable: player,
       builder: (context, _) {
         final active = player.current?.sha == track.sha;
-        return InkWell(
+        return PressRow(
           onTap: onPlay,
           borderRadius: BorderRadius.circular(RadiusTokens.control),
           child: Padding(
@@ -562,4 +582,26 @@ class _AlbumTrackRow extends StatelessWidget {
       },
     );
   }
+}
+
+IconData? _downloadAlbumByTap(
+  BuildContext context,
+  List<ManifestTrack> tracks,
+  void Function(ManifestTrack) onDownload,
+) {
+  if (!(SettingsScope.maybeOf(context)?.doubleTapDownloads ?? false)) {
+    return null;
+  }
+  final downloads = DownloadScope.maybeOf(context);
+  final missing = [
+    for (final t in tracks)
+      if (downloads?.store.pathFor(t.sha) == null &&
+          !(downloads?.isActive(t.sha) ?? false))
+        t,
+  ];
+  if (missing.isEmpty) return Icons.download_done_rounded;
+  for (final t in missing) {
+    onDownload(t);
+  }
+  return Icons.arrow_circle_down_rounded;
 }

@@ -217,7 +217,7 @@ class _FakeClient implements TunesClient {
   Future<bool> putLyrics(String sha, String text) async => true;
 
   @override
-  Future<void> warm(String sha) async {}
+  Future<void> warm(String sha, {String? signedPath}) async {}
 
   @override
   Future<void> downloadTrack(
@@ -1448,11 +1448,21 @@ void main() {
     expect(find.text('Settings'), findsOneWidget);
     // Every control has to do something, so each one is asserted present
     // rather than the screen merely opening.
+    // The name field says what it is for, in the hint, until a name is typed.
+    expect(find.text('What should it call you?'), findsOneWidget);
+    expect(find.text('Light or dark'), findsOneWidget);
+    // Listening sits below the theme picker, so scroll to it.
+    for (
+      var i = 0;
+      i < 10 && find.text('Stop when the app closes').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.dragFrom(const Offset(400, 400), const Offset(0, -160));
+      await tester.pumpAndSettle();
+    }
     expect(find.text('Gapless playback'), findsOneWidget);
     expect(find.text('Stop when the app closes'), findsOneWidget);
     expect(find.text('Keep playing with radio'), findsOneWidget);
-    // The name field says what it is for, in the hint, until a name is typed.
-    expect(find.text('What should it call you?'), findsOneWidget);
 
     // The developer section is hidden until asked for.
     expect(find.text('Developer'), findsNothing);
