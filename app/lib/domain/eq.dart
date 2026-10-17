@@ -218,16 +218,21 @@ EqProfile? parseEqText(
 /// Profiles that come with the app.
 abstract final class BuiltInEq {
   /// Tuned 17 Oct from Reference Audio Analyzer's IEC 711 measurement of the
-  /// Red Lion edition: Harman IE 2019 with 4 dB less bass and 1.5 dB less
-  /// ear gain, treble above 10 kHz left alone for air.
+  /// Red Lion edition, then by ear with the owner: Harman IE 2019 bass (the
+  /// first cut, 4 dB under it, was "too lean"), the Wan'er's 700-800 Hz
+  /// hollow filled and a little 1.5-2 kHz edge taken off ("female vocals
+  /// sound hollow"), presence lifted, the 8 kHz peak calmed, treble above
+  /// 10 kHz left for air. Owner: "It's perfect now."
   static const wanerRedLionNeutral = EqProfile(
     id: 'waner-sg2-red-lion-neutral',
     name: "Wan'er S.G 2 Red Lion: Neutral",
-    note: 'Takes the V out: tighter bass, clearer vocals, calmer 8 kHz.',
+    note: 'Takes the V out: full bass, clear vocals, calmer 8 kHz.',
     preamp: -4.8,
     filters: [
-      EqFilter(EqFilterType.lowShelf, 97, -6.0, 0.71),
-      EqFilter(EqFilterType.peak, 173, -2.6, 1.05),
+      EqFilter(EqFilterType.lowShelf, 97, -3.5, 0.71),
+      EqFilter(EqFilterType.peak, 173, -1.5, 1.05),
+      EqFilter(EqFilterType.peak, 750, 1.6, 1.4),
+      EqFilter(EqFilterType.peak, 1900, -1.0, 1.4),
       EqFilter(EqFilterType.peak, 4500, 2.5, 1.52),
       EqFilter(EqFilterType.peak, 6188, 3.5, 2.0),
       EqFilter(EqFilterType.peak, 8645, -2.6, 2.5),

@@ -6,8 +6,10 @@ void main() {
     expect(
       BuiltInEq.wanerRedLionNeutral.toMpvAf(),
       'lavfi=[volume=-4.80dB,'
-      'lowshelf=f=97:t=q:w=0.71:g=-6,'
-      'equalizer=f=173:t=q:w=1.05:g=-2.60,'
+      'lowshelf=f=97:t=q:w=0.71:g=-3.50,'
+      'equalizer=f=173:t=q:w=1.05:g=-1.50,'
+      'equalizer=f=750:t=q:w=1.40:g=1.60,'
+      'equalizer=f=1900:t=q:w=1.40:g=-1,'
       'equalizer=f=4500:t=q:w=1.52:g=2.50,'
       'equalizer=f=6188:t=q:w=2:g=3.50,'
       'equalizer=f=8645:t=q:w=2.50:g=-2.60]',
@@ -70,10 +72,10 @@ Filter 5: ON PK Fc 8645 Hz Gain -2.6 dB
         .toSet();
     expect(filters, {'equalizer'});
     // The preamp comes back for mpv's volume, the shelf's flat part folded in.
-    expect(c.preampDb, closeTo(-4.73, 0.01));
+    expect(c.preampDb, closeTo(-4.76, 0.01));
     // The low shelf became two broad peaks low down.
-    expect(c.af, contains('equalizer=f=12.03:t=q:w=0.25:g=-6.01'));
-    expect(c.af, contains('equalizer=f=57.52:t=q:w=0.84:g=-2.90'));
+    expect(c.af, contains('equalizer=f=12.03:t=q:w=0.25:g=-3.51'));
+    expect(c.af, contains('equalizer=f=57.52:t=q:w=0.84:g=-1.69'));
   });
 
   test('desktop keeps the exact chain, preamp in it', () {
