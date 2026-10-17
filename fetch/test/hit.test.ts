@@ -29,6 +29,12 @@ describe("parseRange", () => {
     expect(parseRange("bytes=10-19", 100)).toEqual({ start: 10, end: 19 });
     expect(parseRange("bytes=0-", 100)).toEqual({ start: 0, end: 99 });
     expect(parseRange("bytes=50-5000", 100)).toEqual({ start: 50, end: 99 });
+    // A seek: ffmpeg asks from the new spot to the end, open-ended. The fetch
+    // worker's cold path once read this as "no range" and sent byte 0.
+    expect(parseRange("bytes=7340032-", 9437184)).toEqual({
+      start: 7340032,
+      end: 9437183,
+    });
   });
   it("flags a start past the end, and ignores shapes it does not serve", () => {
     expect(parseRange("bytes=100-", 100)).toBe("unsatisfiable");

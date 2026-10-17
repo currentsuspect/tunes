@@ -5,7 +5,7 @@ import { Logger } from "teleproto/extensions/Logger.js";
 import { verifyMediaUrl } from "./grant.js";
 import { pickVictims, sniffMime } from "./policy.js";
 import { Flight, Gate, runDownload } from "./flight.js";
-import { serveHit, type R2Like } from "./hit.js";
+import { parseRange, serveHit, type R2Like } from "./hit.js";
 
 interface Env {
   TG_API_ID: string;
@@ -65,23 +65,6 @@ class FrontedWebSocket extends WebSocket {
 }
 
 (PromisedWebSockets as any).webSocketImpl = FrontedWebSocket;
-
-/** Parses a single `bytes=start-end` range. Suffix and open ranges are
- * answered from the whole object: mpv always sends the closed form, and
- * anything else is rare enough that a full 200 beats a wrong 206. */
-function parseRange(
-  header: string | null
-): { start: number; end: number } | null {
-  if (!header) return null;
-  const m = /^bytes=(\d+)-(\d+)$/.exec(header.trim());
-  if (!m) return null;
-  const start = Number(m[1]);
-  const end = Number(m[2]);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end) {
-    return null;
-  }
-  return { start, end };
-}
 
 function fullHeaders(
   total: number,
@@ -429,13 +412,18 @@ export class Fetcher {
         if (warm && (await this.env.CACHE.head(sha))) {
           return new Response(null, { status: 204 });
         }
-        const range = parseRange(req.headers.get("range"));
+        // mpv (ffmpeg) seeks with the open form, `bytes=N-`. The parser here
+        // used to take only `bytes=N-M`, so every seek in a streamed song was
+        // answered with the whole file from byte 0: the playhead moved on
+        // over silence. Both paths now share hit.ts's parser.
+        const rangeHeader = req.headers.get("range");
         const known = await this.knownSize(sha);
-        if (range && known !== null) {
-          if (range.start >= known) {
-            return rangeEmpty(known);
-          }
-          const end = Math.min(range.end, known - 1);
+        const range = known !== null ? parseRange(rangeHeader, known) : null;
+        if (range === "unsatisfiable" && known !== null) {
+          return rangeEmpty(known);
+        }
+        if (range && range !== "unsatisfiable" && known !== null) {
+          const end = range.end;
           const hit = await this.env.CACHE.get(sha, {
             range: { offset: range.start, length: end - range.start + 1 },
           });
@@ -492,12 +480,13 @@ export class Fetcher {
         await flight.ready(Math.min(16, flight.total));
         const total = flight.total;
         const type = sniffMime(flight.head(16));
-        if (range) {
-          if (range.start >= total) return rangeEmpty(total);
-          const end = Math.min(range.end, total - 1);
-          return new Response(flight.stream(range.start, end), {
+        const live = parseRange(rangeHeader, total);
+        if (live === "unsatisfiable") return rangeEmpty(total);
+        if (live) {
+          const end = live.end;
+          return new Response(flight.stream(live.start, end), {
             status: 206,
-            headers: rangeHeaders(range.start, end, total, "telegram", type),
+            headers: rangeHeaders(live.start, end, total, "telegram", type),
           });
         }
         return new Response(flight.stream(0, total - 1), {
