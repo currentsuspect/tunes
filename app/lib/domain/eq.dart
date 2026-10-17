@@ -84,30 +84,87 @@ final class EqProfile {
   /// The mpv `af` value for this profile. Filters with no gain are left out;
   /// a filter outside 20 Hz-20 kHz or with an absurd Q is never sent (mpv
   /// would refuse the whole chain and play nothing through it).
-  String toMpvAf() {
+  ///
+  /// [shelves] false gives the Android chain (see [mpvChain]). Its libmpv
+  /// (media_kit_libs_android_audio, mpv 0.35) is built with every ffmpeg
+  /// filter off except `equalizer`, so a `lowshelf` or `volume` made mpv
+  /// refuse the chain and skip every song (17 Oct). There each shelf becomes
+  /// peaking bands fitted to the same curve (see [shelfAsPeaks]).
+  String toMpvAf({bool shelves = true}) => mpvChain(full: shelves).af;
+
+  /// The chain for a given libmpv. [full] is desktop mpv, with every ffmpeg
+  /// filter: the preamp is a `volume` filter in the chain. Otherwise (the
+  /// Android build: `equalizer` only, no `volume`, no shelves) shelves become
+  /// peaks and the preamp comes back as [preampDb] for the player to apply
+  /// through mpv's own volume.
+  ({String af, double preampDb}) mpvChain({required bool full}) {
+    final shelves = full;
+    var pre = preamp;
+    final bands = <EqFilter>[];
+    for (final f in filters) {
+      final usable =
+          f.gain != 0 &&
+          f.freq >= 10 &&
+          f.freq <= 22000 &&
+          f.q > 0 &&
+          f.q <= 20;
+      if (!usable) continue;
+      if (shelves || f.type == EqFilterType.peak) {
+        bands.add(f);
+      } else {
+        final (peaks, flat) = shelfAsPeaks(f);
+        bands.addAll(peaks);
+        pre += flat;
+      }
+    }
     final parts = <String>[
-      if (preamp != 0) 'volume=${_n(preamp)}dB',
-      for (final f in filters)
-        if (f.gain != 0 &&
-            f.freq >= 10 &&
-            f.freq <= 22000 &&
-            f.q > 0 &&
-            f.q <= 20)
-          switch (f.type) {
-            EqFilterType.peak =>
-              'equalizer=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
-            EqFilterType.lowShelf =>
-              'lowshelf=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
-            EqFilterType.highShelf =>
-              'highshelf=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
-          },
+      if (full && pre.abs() >= 0.005) 'volume=${_n(pre)}dB',
+      for (final f in bands)
+        switch (f.type) {
+          EqFilterType.peak =>
+            'equalizer=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
+          EqFilterType.lowShelf =>
+            'lowshelf=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
+          EqFilterType.highShelf =>
+            'highshelf=f=${_n(f.freq)}:t=q:w=${_n(f.q)}:g=${_n(f.gain)}',
+        },
     ];
-    if (parts.isEmpty) return '';
-    return 'lavfi=[${parts.join(',')}]';
+    return (
+      af: parts.isEmpty ? '' : 'lavfi=[${parts.join(',')}]',
+      preampDb: full ? 0.0 : pre,
+    );
   }
 
   static String _n(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
+}
+
+/// A shelf as peaking bands plus a flat gain, for players with no shelf
+/// filter. Fitted 17 Oct by least squares against RBJ shelves (Q 0.71) of
+/// -9..+9 dB: a low shelf is two peaks, within 0.5 dB everywhere; a high
+/// shelf is three peaks kept under 19 kHz, within about 1.4 dB below 16 kHz
+/// for +/-6 dB.
+(List<EqFilter>, double) shelfAsPeaks(EqFilter s) {
+  final g = s.gain;
+  EqFilter pk(double f, double gain, double q) =>
+      EqFilter(EqFilterType.peak, f.clamp(10, 19000).toDouble(), gain, q);
+  if (s.type == EqFilterType.lowShelf) {
+    return (
+      [
+        pk(s.freq * 0.124, g * 1.002, 0.253),
+        pk(s.freq * 0.593, g * 0.484, 0.84),
+      ],
+      g * -0.012,
+    );
+  }
+  return (
+    [
+      pk(s.freq * 1.382, g * 0.243, 1.575),
+      pk(s.freq * 2.375, g * 0.458, 0.46),
+      pk(s.freq * 6.906, g * 0.749, 0.251),
+    ],
+    g * -0.01,
+  );
 }
 
 /// Reads EQ text the way AutoEQ, squig.link and Equalizer APO write it:

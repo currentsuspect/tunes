@@ -378,14 +378,25 @@ Future<void> main() async {
 
   // The headphone EQ (Settings > Sound): applied now, and again whenever the
   // chosen profile or its filters change.
-  var appliedAf = settings.eqProfile?.toMpvAf() ?? '';
-  unawaited(player.setAudioFilter(appliedAf));
+  // Android's libmpv has only ffmpeg's `equalizer` filter: shelves become
+  // peaks and the preamp goes through mpv's volume (domain/eq.dart).
+  ({String af, double preampDb}) eqChain() =>
+      settings.eqProfile?.mpvChain(full: !Platform.isAndroid) ??
+      (af: '', preampDb: 0.0);
+  var applied = eqChain();
+  unawaited(player.setAudioFilter(applied.af, preampDb: applied.preampDb));
   settings.addListener(() {
-    final af = settings.eqProfile?.toMpvAf() ?? '';
-    if (af == appliedAf) return;
-    appliedAf = af;
-    unawaited(player.setAudioFilter(af));
+    final next = eqChain();
+    if (next == applied) return;
+    applied = next;
+    unawaited(player.setAudioFilter(next.af, preampDb: next.preampDb));
   });
+  // A chain mpv refuses is dropped by the player so music keeps playing;
+  // the setting follows, so Settings shows what is actually on.
+  player.onAudioFilterFailed = () {
+    applied = (af: '', preampDb: 0.0);
+    unawaited(settings.setEqActive(null));
+  };
 
   // Watches the player from here on, so a listen is recorded whether it was
   // started from the library, a notification, or a headset button.

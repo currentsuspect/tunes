@@ -106,7 +106,11 @@ abstract class TunePlayer extends ChangeNotifier {
 
   /// An mpv audio filter chain (`af`), for the headphone EQ; empty is none.
   /// A no-op on players that cannot filter.
-  Future<void> setAudioFilter(String af) async {}
+  Future<void> setAudioFilter(String af, {double preampDb = 0}) async {}
+
+  /// Called when mpv refused the EQ chain and the player dropped it to keep
+  /// playing; the app turns the EQ setting off.
+  void Function()? onAudioFilterFailed;
 
   /// Loads a queue without playing it, so a relaunch can put the listener back
   /// where they were.
@@ -278,6 +282,7 @@ class MediaKitTunePlayer extends TunePlayer {
     _player = created;
     unawaited(_applyGapless(created));
     unawaited(_applyFilter(created));
+    if (_preampFactor != 1) setVolume(_volumeLevel);
     _attachStreams(created);
     return created;
   }
@@ -634,9 +639,10 @@ class MediaKitTunePlayer extends TunePlayer {
 
   @override
   void setVolume(double level) {
-    // mpv takes 0 to 100.
+    _volumeLevel = level.clamp(0.0, 1.0);
+    // mpv takes 0 to 100; the EQ's preamp rides on top (see _preampFactor).
     unawaited(
-      _player?.setVolume(level.clamp(0.0, 1.0) * 100) ?? Future.value(),
+      _player?.setVolume(_volumeLevel * _preampFactor * 100) ?? Future.value(),
     );
   }
 
@@ -865,17 +871,25 @@ class MediaKitTunePlayer extends TunePlayer {
   /// while the current one plays is what actually removes the silence; the
   /// join flag alone only removes the decoder gap.
   ///
-  /// Reached dynamically because `NativePlayer`, which owns `setProperty`, is
-  /// not exported from media_kit's public entry point -- and importing its
-  /// `src/` path would tie us to a file that is free to move. The call is
-  /// guarded, so a backend without the method simply does not get gapless.
   String _af = '';
 
+  /// The EQ's preamp where the chain cannot carry it (Android), as a factor on
+  /// mpv's volume. mpv applies volume on a cubic curve, so -4.8 dB is
+  /// (10^(-4.8/20))^(1/3) = 0.83 of the slider.
+  double _preampFactor = 1;
+
+  /// The last level asked for (focus fades and the desktop slider), so a new
+  /// preamp can be applied on top of it.
+  double _volumeLevel = 1;
+
   @override
-  Future<void> setAudioFilter(String af) async {
+  Future<void> setAudioFilter(String af, {double preampDb = 0}) async {
     _af = af;
+    _preampFactor = pow(10, preampDb / 60).toDouble();
     final player = _player;
-    if (player != null) await _applyFilter(player);
+    if (player == null) return;
+    await _applyFilter(player);
+    setVolume(_volumeLevel);
   }
 
   /// The headphone EQ (domain/eq.dart), set the same guarded way as
@@ -886,12 +900,35 @@ class MediaKitTunePlayer extends TunePlayer {
       final platform = player.platform as dynamic;
       await platform.setProperty('af', _af);
     } catch (_) {
-      try {
-        await (player.platform as dynamic).setProperty('af', '');
-      } catch (_) {}
+      _dropFilter(player);
     }
   }
 
+  /// mpv refused the chain (on 17 Oct, Android's cut-down ffmpeg had no
+  /// `lowshelf`, and every song failed to open and was skipped). Play on
+  /// without it, from where we were, and say so.
+  void _dropFilter(Player player) {
+    if (_af.isEmpty) return;
+    DiagLog.log('player: EQ chain refused, playing without it');
+    _af = '';
+    _preampFactor = 1;
+    try {
+      unawaited((player.platform as dynamic).setProperty('af', '') as Future);
+    } catch (_) {}
+    setVolume(_volumeLevel);
+    onAudioFilterFailed?.call();
+  }
+
+  /// mpv's words when an audio filter chain cannot be built.
+  static bool _isFilterError(String message) => RegExp(
+    r'filter|lavfi|audio chain',
+    caseSensitive: false,
+  ).hasMatch(message);
+
+  /// Reached dynamically because `NativePlayer`, which owns `setProperty`, is
+  /// not exported from media_kit's public entry point -- and importing its
+  /// `src/` path would tie us to a file that is free to move. The call is
+  /// guarded, so a backend without the method simply does not get gapless.
   Future<void> _applyGapless(Player player) async {
     try {
       final platform = player.platform as dynamic;
@@ -1082,7 +1119,20 @@ class MediaKitTunePlayer extends TunePlayer {
     // A stream that fails to open is retried, twice and a little later each
     // time, before the track is given up on and the next one played. A cold
     // track can fail its first open while the server is still fetching it.
-    _peerSubs.add(player.stream.error.listen((_) => _retryOpen(player)));
+    _peerSubs.add(
+      player.stream.error.listen((message) {
+        // A refused EQ chain fails every song the same way; retrying or
+        // skipping cannot help. Drop the EQ and play the song again.
+        if (_af.isNotEmpty && _isFilterError(message)) {
+          _dropFilter(player);
+          if (_index >= 0 && _index < _queue.length) {
+            unawaited(_resumeAt(player, _index, _position));
+          }
+          return;
+        }
+        _retryOpen(player);
+      }),
+    );
     // The decoder finished the media by itself. With repeat off at the last
     // index the queue has run out; radio may continue it, otherwise it stops.
     _peerSubs.add(

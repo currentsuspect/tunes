@@ -59,4 +59,35 @@ Filter 5: ON PK Fc 8645 Hz Gain -2.6 dB
     expect(back.toMpvAf(), p.toMpvAf());
     expect(back.name, p.name);
   });
+
+  test('Android gets only the filters its libmpv has', () {
+    // media_kit_libs_android_audio: ffmpeg with every filter off except
+    // `equalizer` (17 Oct: a lowshelf made every song skip).
+    final c = BuiltInEq.wanerRedLionNeutral.mpvChain(full: false);
+    final filters = RegExp(r'(?<=\[|,)([a-z]+)=')
+        .allMatches(c.af)
+        .map((m) => m.group(1))
+        .toSet();
+    expect(filters, {'equalizer'});
+    // The preamp comes back for mpv's volume, the shelf's flat part folded in.
+    expect(c.preampDb, closeTo(-4.73, 0.01));
+    // The low shelf became two broad peaks low down.
+    expect(c.af, contains('equalizer=f=12.03:t=q:w=0.25:g=-6.01'));
+    expect(c.af, contains('equalizer=f=57.52:t=q:w=0.84:g=-2.90'));
+  });
+
+  test('desktop keeps the exact chain, preamp in it', () {
+    final c = BuiltInEq.wanerRedLionNeutral.mpvChain(full: true);
+    expect(c.preampDb, 0);
+    expect(c.af, startsWith('lavfi=[volume=-4.80dB,lowshelf='));
+  });
+
+  test('a high shelf becomes three peaks under 19 kHz', () {
+    final (peaks, flat) = shelfAsPeaks(
+      const EqFilter(EqFilterType.highShelf, 10000, 6, 0.71),
+    );
+    expect(peaks, hasLength(3));
+    expect(peaks.every((p) => p.freq <= 19000), isTrue);
+    expect(flat.abs(), lessThan(0.2));
+  });
 }
