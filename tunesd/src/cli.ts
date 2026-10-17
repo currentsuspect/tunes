@@ -1207,16 +1207,19 @@ async function main(): Promise<void> {
       // (all 42 gone-source copies it claimed were missing, 16 Oct).
       const liveShas = new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));
       const allProbes = [...probeCache.values()];
-      const { kept: playableProbes, dropped } = playableOnly(
+      const { kept: playableUnfiltered, dropped } = playableOnly(
         allProbes,
         (sha) => store.has(sha),
         liveShas
       );
+      const playableProbes = playableUnfiltered.filter((p) => replacements.redundant[p.sha] == null);
       const keptShas = new Set(playableProbes.map((p) => p.sha));
       const goneProbes = allProbes.filter((p) => !keptShas.has(p.sha));
       lastGoneProbes = goneProbes;
       const replacements = await loadReplacements(replacementsFile);
       const replacedBy = new Map(Object.entries(replacements.bySha).map(([lost, r]) => [lost, r.sha]));
+      // Redundant re-sourced files stand behind the copy already listed.
+      for (const [file, target] of Object.entries(replacements.redundant)) replacedBy.set(file, target);
       if (dropped !== lastDropped) {
         lastDropped = dropped;
         log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
@@ -1307,6 +1310,24 @@ async function main(): Promise<void> {
         const recentlyGone = new Set(
           state.sightingsFor(channelIds).filter((r) => state.isGone(String(r.chat), r.msg)).map((r) => r.sha)
         );
+        const norm = (x: string | null | undefined) => (x ?? "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
+        const listed = m.tracks.map((t) => ({
+          sha: t.sha,
+          artist: norm(t.primaryArtist || t.artist),
+          title: norm(t.title),
+          durationMs: t.durationMs ?? null,
+        }));
+        const inLibrary = (w: { artist: string; title: string; durationMs?: number | null }) => {
+          const a = norm(w.artist.split(/[,;/&]| feat/i)[0]);
+          const ti = norm(w.title);
+          const hit = listed.find(
+            (t) =>
+              t.title === ti &&
+              (t.artist.includes(a) || a.includes(t.artist)) &&
+              (w.durationMs == null || t.durationMs == null || Math.abs(t.durationMs - w.durationMs) <= 3000)
+          );
+          return hit?.sha ?? null;
+        };
         const lost = lastGoneProbes
           .filter((p) => !pointed.has(p.sha))
           .sort((a, b) => Number(recentlyGone.has(b.sha)) - Number(recentlyGone.has(a.sha)));
@@ -1323,6 +1344,7 @@ async function main(): Promise<void> {
           },
           ledgerPath: replacementsFile,
           log,
+          inLibrary,
         });
         log.info({ event: "SOULSEEK_PASS_DONE", ...r });
         if (r.found > 0) {

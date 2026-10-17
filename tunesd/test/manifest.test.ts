@@ -932,6 +932,18 @@ describe("exact-audio dedupe", () => {
     expect(m.tracks).toHaveLength(1);
   });
 
+  it("a track with no cover wears its album's", () => {
+    const m = buildManifest(
+      [
+        probe({ sha: sha("a"), audioSha: "a1", tags: { title: "SUMMER", artist: "The Carters", album: "EVERYTHING IS LOVE", trackNumber: 1 } }),
+        probe({ sha: sha("b"), audioSha: "b1", tags: { title: "APESHIT", artist: "The Carters", album: "EVERYTHING IS LOVE", trackNumber: 2 } }),
+      ],
+      new Map(), new Map(), [], [], new Map(), new Map(),
+      new Map([[sha("b"), "c".repeat(64)]])
+    );
+    expect(m.tracks.map((t) => t.artSha)).toEqual(["c".repeat(64), "c".repeat(64)]);
+  });
+
   it("keeps the lowest sha256 as canonical, per SPEC §5's tiebreak", () => {
     const m = buildManifest([
       probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "T" } }),

@@ -14,7 +14,11 @@ import { sleep } from "./telegram/ports.js";
  * identity rule: two shas are never treated as the same file, and nothing
  * is ever matched automatically from metadata alone outside this ledger. */
 export interface Replacements {
-  bySha: Record<string, { sha: string; at: string; via: "soulseek" }>;
+  bySha: Record<string, { sha: string; at: string; via: "soulseek" | "library" }>;
+  /** Files kept on disk but not listed, because the library already holds
+   * the same song: file sha -> the listed copy it stands behind. Never
+   * deleted (dedupe is never destructive); the phone follows the pointer. */
+  redundant: Record<string, string>;
   /** Songs searched for and not found, so they are not searched every pass. */
   misses: Record<string, string>;
   /** Downloads per day, for the daily cap. */
@@ -24,9 +28,14 @@ export interface Replacements {
 export async function loadReplacements(path: string): Promise<Replacements> {
   try {
     const raw = JSON.parse(await readFile(path, "utf8")) as Partial<Replacements>;
-    return { bySha: raw.bySha ?? {}, misses: raw.misses ?? {}, daily: raw.daily ?? {} };
+    return {
+      bySha: raw.bySha ?? {},
+      redundant: raw.redundant ?? {},
+      misses: raw.misses ?? {},
+      daily: raw.daily ?? {},
+    };
   } catch {
-    return { bySha: {}, misses: {}, daily: {} };
+    return { bySha: {}, redundant: {}, misses: {}, daily: {} };
   }
 }
 
@@ -172,6 +181,10 @@ export interface ResourceDeps {
   commit: (path: string, size: number) => Promise<string>;
   ledgerPath: string;
   log: Log;
+  /** A listed track that is this song already (same artist and title,
+   * length within 3 s), if any. Found, the lost copy points at it and
+   * nothing is downloaded. */
+  inLibrary?: (w: Wanted) => string | null;
   dailyCap?: number;
   acquireOptions?: AcquireOptions;
 }
@@ -205,6 +218,18 @@ export async function resourceLost(
     const w = wantedFrom(p);
     if (!w) {
       skipped += 1;
+      continue;
+    }
+    // The song may still be here in another file (another release, another
+    // rip). Then there is nothing to fetch: point at it. Without this check
+    // a second "180" was downloaded next to the one already playing.
+    const have = deps.inLibrary?.(w);
+    if (have) {
+      ledger.bySha[p.sha] = { sha: have, at: now().toISOString(), via: "library" };
+      delete ledger.misses[p.sha];
+      await saveReplacements(deps.ledgerPath, ledger);
+      deps.log.info({ event: "SOULSEEK_ALREADY_HERE" });
+      found += 1;
       continue;
     }
     const day = now().toISOString().slice(0, 10);

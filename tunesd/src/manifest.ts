@@ -629,6 +629,17 @@ export function buildManifest(
       }
     }
   }
+  // A track with no cover of its own wears its release's. Files of one
+  // album often carry art on only some tracks (The Carters' EVERYTHING IS
+  // LOVE: 1 of 9), and the phone drew blank squares for the rest.
+  const trackBySha = new Map(tracks.map((t) => [t.sha, t]));
+  for (const r of merged.values()) {
+    if (r.artSha == null) continue;
+    for (const sha of r.trackShas) {
+      const t = trackBySha.get(sha);
+      if (t && t.artSha == null) t.artSha = r.artSha;
+    }
+  }
   const releases = [...merged.values()]
     .sort((a, b) =>
       a.artist !== b.artist ? a.artist.localeCompare(b.artist) : a.title.localeCompare(b.title)

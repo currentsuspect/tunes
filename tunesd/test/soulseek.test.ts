@@ -116,6 +116,20 @@ describe("resourceLost", () => {
     expect(ledger.bySha["a".repeat(64)]?.sha).toBe("b".repeat(64));
   });
 
+  it("points at a copy already in the library instead of downloading", async () => {
+    const { api, started } = fakeApi();
+    const commits: string[] = [];
+    const r = await resourceLost([probe()], {
+      ...deps(api, 247000, commits),
+      inLibrary: () => "d".repeat(64),
+    });
+    expect(r.found).toBe(1);
+    expect(started).toEqual([]);
+    expect(commits).toEqual([]);
+    const ledger = await loadReplacements(join(dir, "replacements.json"));
+    expect(ledger.bySha["a".repeat(64)]).toMatchObject({ sha: "d".repeat(64), via: "library" });
+  });
+
   it("deletes a download whose length is wrong and remembers the miss", async () => {
     const { api } = fakeApi();
     const commits: string[] = [];
