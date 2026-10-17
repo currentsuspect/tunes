@@ -1,3 +1,4 @@
+import type { Genre } from "./genres.js";
 import { createHash } from "node:crypto";
 
 import { normalizeArtistName, parseCredits, releaseArtistOf, stripFeatured } from "./credits.js";
@@ -63,6 +64,9 @@ export interface ManifestArtist {
   tags?: string[];
   /** Provider listener count, as a rough popularity signal. */
   listeners?: number | null;
+  /** Clean genres from [tags] (genres.ts), strongest first. What genre
+   * mixes and discovery should read; [tags] stay for older apps. */
+  genres?: Genre[];
 }
 
 export interface ManifestV4 {

@@ -1,3 +1,4 @@
+import { genresFromTags } from "./genres.js";
 import { loadReplacements, resourceLost } from "./resource.js";
 import { SlskdApi, slskdConfig } from "./soulseek.js";
 import { auditDue, auditSources } from "./audit.js";
@@ -1182,6 +1183,7 @@ async function main(): Promise<void> {
           artSha: artists.get(name) ?? null,
           ...(meta && meta.tags.length > 0 ? { tags: meta.tags } : {}),
           ...(meta && meta.listeners != null ? { listeners: meta.listeners } : {}),
+          ...(meta && meta.tags.length > 0 ? { genres: genresFromTags(meta.tags) } : {}),
         };
       });
       const enrichForManifest = new Map<string, TrackEnrichment>();
