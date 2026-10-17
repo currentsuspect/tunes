@@ -1,5 +1,6 @@
 import { genresFromTags } from "./genres.js";
 import { archiveAll, evictable, liveShas, needsArchive } from "./archive.js";
+import { completeAlbums, partialAlbums } from "./complete.js";
 import { loadReplacements, resourceLost } from "./resource.js";
 import { SlskdApi, slskdConfig } from "./soulseek.js";
 import { auditDue, auditSources } from "./audit.js";
@@ -1336,7 +1337,13 @@ async function main(): Promise<void> {
         const lost = lastGoneProbes
           .filter((p) => !pointed.has(p.sha))
           .sort((a, b) => Number(recentlyGone.has(b.sha)) - Number(recentlyGone.has(a.sha)));
-        if (lost.length === 0) return;
+        const commit = async (path: string, size: number) => {
+          const staging = await store.beginStaging();
+          await rename(path, staging.path);
+          return (await staging.done(size)).sha;
+        };
+        let foundAny = false;
+        if (lost.length > 0) {
         log.info({ event: "SOULSEEK_PASS", lost: lost.length });
         const r = await resourceLost(lost, {
           api: new SlskdApi(slsk.url, slsk.apiKey),
@@ -1352,9 +1359,30 @@ async function main(): Promise<void> {
           inLibrary,
         });
         log.info({ event: "SOULSEEK_PASS_DONE", ...r });
-        if (r.found > 0) {
+        if (r.found > 0) foundAny = true;
+        }
+        // Then albums held in part: their missing songs (complete.ts).
+        const albums = partialAlbums(m.releases);
+        if (albums.length > 0) {
+          const c = await completeAlbums(albums, {
+            deezer,
+            api: new SlskdApi(slsk.url, slsk.apiKey),
+            downloadsDir: join(env.dataDir, "soulseek", "downloads"),
+            probe: (path, size) => probeFile("pending", size, path),
+            commit,
+            inLibrary: (w) =>
+              inLibrary({ artist: w.artist, title: w.title, durationMs: w.durationMs ?? null }),
+            ledgerPath: replacementsFile,
+            log,
+          });
+          log.info({ event: "COMPLETE_PASS_DONE", ...c });
+          if (c.found > 0) foundAny = true;
+        }
+        if (foundAny) {
           await runEnrichPass();
           publishSoon.request();
+          // New songs are only here until the archive pass sends them up.
+          void archiveAndPrune();
         }
       } catch (e) {
         log.error({ event: "SOULSEEK_PASS_FAILED", err: String(e) });

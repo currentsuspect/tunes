@@ -23,6 +23,8 @@ export interface Replacements {
   misses: Record<string, string>;
   /** Downloads per day, for the daily cap. */
   daily: Record<string, number>;
+  /** Albums looked at by the completion pass (complete.ts), id -> when. */
+  albums: Record<string, string>;
 }
 
 export async function loadReplacements(path: string): Promise<Replacements> {
@@ -33,9 +35,10 @@ export async function loadReplacements(path: string): Promise<Replacements> {
       redundant: raw.redundant ?? {},
       misses: raw.misses ?? {},
       daily: raw.daily ?? {},
+      albums: raw.albums ?? {},
     };
   } catch {
-    return { bySha: {}, redundant: {}, misses: {}, daily: {} };
+    return { bySha: {}, redundant: {}, misses: {}, daily: {}, albums: {} };
   }
 }
 
