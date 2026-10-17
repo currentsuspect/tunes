@@ -1,3 +1,4 @@
+import type { Genre } from "./genres.js";
 import { createHash } from "node:crypto";
 
 import { normalizeArtistName, parseCredits, releaseArtistOf, stripFeatured } from "./credits.js";
@@ -63,6 +64,9 @@ export interface ManifestArtist {
   tags?: string[];
   /** Provider listener count, as a rough popularity signal. */
   listeners?: number | null;
+  /** Clean genres from [tags] (genres.ts), strongest first. What genre
+   * mixes and discovery should read; [tags] stay for older apps. */
+  genres?: Genre[];
 }
 
 export interface ManifestV4 {
@@ -242,7 +246,9 @@ export function buildManifest(
   addedAtBySha: Map<string, string> = new Map(),
   embeddedArtBySha: Map<string, string> = new Map(),
   releaseArtByKey: Map<string, string> = new Map(),
-  lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map()
+  lyricsBySha: Map<string, { lyrics: string; source: string }> = new Map(),
+  goneProbes: ProbeResult[] = [],
+  replacedBy: Map<string, string> = new Map()
 ): ManifestV4 {
   const probeFor = new Map(probes.map((p) => [p.sha, p]));
   for (const obj of objects) {
@@ -399,6 +405,37 @@ export function buildManifest(
   }
   const canonicalTracks =
     supersededBy.size === 0 ? tracks : tracks.filter((t) => !supersededBy.has(t.sha));
+
+  // Copies that can no longer play (their source message is gone, and they
+  // are not held anywhere) are not listed, but they are not forgotten either:
+  // each points at the listed copy of the same recording through its
+  // dupeShas, so a like, a playlist entry or a play count kept under the dead
+  // sha follows the song to a copy that plays. Identity is untouched: a dead
+  // sha is never handed another file's bytes, it is only resolved to the
+  // recording's live copy.
+  if (goneProbes.length > 0) {
+    const listed = new Map<string, ManifestTrack>();
+    for (const [audio, copies] of byAudio) {
+      const c = copies.find((t) => !supersededBy.has(t.sha));
+      if (c) listed.set(audio, c);
+    }
+    const bySha = new Map(canonicalTracks.map((t) => [t.sha, t]));
+    for (const g of goneProbes) {
+      const audio = g.audioSha;
+      // A live copy of the same audio first; else a recorded re-sourcing
+      // (resource.ts) whose new file is listed.
+      let c = audio ? listed.get(audio) : undefined;
+      if (!c) {
+        const r = replacedBy.get(g.sha);
+        c = r ? bySha.get(r) : undefined;
+      }
+      if (!c || c.sha === g.sha || c.dupeShas.includes(g.sha)) continue;
+      c.dupeShas.push(g.sha);
+    }
+    for (const c of listed.values()) {
+      if (c.dupeShas.length > 1) c.dupeShas.sort();
+    }
+  }
 
   // Tracks whose album came from the file itself, not from a provider.
   const fileStatedAlbum = new Set(
@@ -594,6 +631,17 @@ export function buildManifest(
           break;
         }
       }
+    }
+  }
+  // A track with no cover of its own wears its release's. Files of one
+  // album often carry art on only some tracks (The Carters' EVERYTHING IS
+  // LOVE: 1 of 9), and the phone drew blank squares for the rest.
+  const trackBySha = new Map(tracks.map((t) => [t.sha, t]));
+  for (const r of merged.values()) {
+    if (r.artSha == null) continue;
+    for (const sha of r.trackShas) {
+      const t = trackBySha.get(sha);
+      if (t && t.artSha == null) t.artSha = r.artSha;
     }
   }
   const releases = [...merged.values()]

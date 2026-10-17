@@ -28,6 +28,11 @@ interface StateFile {
   seen: Record<string, string | SeenEntry>;
   dailyFetched: number;
   dailyDate: string;
+  /** Source messages Telegram says are gone, "channel:message" -> when found.
+   * Their songs are only playable from another copy (see manifest dupeShas). */
+  gone?: Record<string, string>;
+  /** When the last full check of every source finished (see audit.ts). */
+  auditedAt?: string | null;
 }
 
 function todayKey(): string {
@@ -58,6 +63,8 @@ export class State {
         seen: parsed.seen ?? {},
         dailyFetched: parsed.dailyFetched ?? 0,
         dailyDate: parsed.dailyDate ?? todayKey(),
+        gone: parsed.gone ?? {},
+        auditedAt: parsed.auditedAt ?? null,
       };
     } catch {
       this.data = {
@@ -76,6 +83,24 @@ export class State {
     const tmp = join(dirname(this.path), `.state-${process.pid}.tmp`);
     await writeFile(tmp, JSON.stringify(this.data, null, 1));
     await rename(tmp, this.path);
+  }
+
+  /** Records a source message as gone for good. */
+  markGone(channelId: string, messageId: number): void {
+    (this.data.gone ??= {})[this.seenKey(channelId, messageId)] = new Date().toISOString();
+  }
+
+  isGone(channelId: string, messageId: number): boolean {
+    return this.data.gone?.[this.seenKey(channelId, messageId)] !== undefined;
+  }
+
+  goneCount(): number {
+    return Object.keys(this.data.gone ?? {}).length;
+  }
+
+  /** [sightingsFor], without sources known to be gone. */
+  liveSightingsFor(channelIds: string[]): { sha: string; chat: number; msg: number; addedAt: string | null }[] {
+    return this.sightingsFor(channelIds).filter((r) => !this.isGone(String(r.chat), r.msg));
   }
 
   seenKey(channelId: string, messageId: number): string {
