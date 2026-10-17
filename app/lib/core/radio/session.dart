@@ -37,6 +37,26 @@ class RadioSession {
 
   static const double defaultReach = 0.2;
 
+  /// Every [stretchEvery]th pick is a stretch: something next door to the
+  /// kind of music playing, not more of it. The reserved slot is what keeps
+  /// the radio out of the echo chamber however sticky the lane gets. Zero
+  /// means never.
+  int stretchEvery = 0;
+
+  int _picks = 0;
+
+  /// Whether the pick about to be made is a stretch.
+  bool get stretchTurn => stretchEvery > 0 && (_picks + 1) % stretchEvery == 0;
+
+  /// The radio made a pick (called by the engine).
+  void picked() => _picks++;
+
+  /// Sets reach and stretch from one of the listener's quick modes.
+  void useMode(RadioMode mode) {
+    reach = mode.reach;
+    stretchEvery = mode.stretchEvery;
+  }
+
   double get exploration =>
       (_exploration + (reach - defaultReach)).clamp(0.0, 1.0);
   List<String> get recentShas => List.unmodifiable(_recentShas);
@@ -85,5 +105,28 @@ class RadioSession {
     _recentArtists.clear();
     _skipped.clear();
     _exploration = 0.2;
+    _picks = 0;
   }
+}
+
+/// The three ways the listener can ask the radio to go (owner, 5 Oct): a
+/// tap each, in the queue, instead of a dial buried on Discover.
+enum RadioMode {
+  /// More of what is playing; a stretch now and then.
+  stayClose('Stay close', 0.10, 8),
+
+  /// Wanders from what is playing, comes back.
+  drift('Drift', 0.30, 5),
+
+  /// Further out, often: new to you, next door, sometimes a family away.
+  surprise('Surprise me', 0.85, 3);
+
+  const RadioMode(this.label, this.reach, this.stretchEvery);
+
+  final String label;
+  final double reach;
+  final int stretchEvery;
+
+  static RadioMode? byName(String? n) =>
+      values.where((m) => m.name == n).firstOrNull;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/radio_modes.dart';
 import '../../core/ui/generated_artwork.dart';
 
 /// Bottom sheet that shows the persistent play queue, lets the user
@@ -143,6 +144,16 @@ class _QueueSheetState extends State<QueueSheet> {
                               );
                             },
                           ),
+                  ),
+                  Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+                  // What happens when the queue runs out.
+                  const RadioModes(
+                    padding: EdgeInsets.fromLTRB(
+                      Space.lg,
+                      Space.md,
+                      Space.lg,
+                      Space.md,
+                    ),
                   ),
                 ],
               );

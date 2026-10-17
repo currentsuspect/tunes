@@ -13,6 +13,12 @@ enum CoverStyle {
   crayon,
 }
 
+/// Which room a look belongs to, for the few things that are more than
+/// colour: the progress line, section headings, the greeting's voice, the
+/// ground texture, stickers and bounce (the mood board's "what changes"
+/// table). Screens ask `Looks.current.kind`; a new theme picks one.
+enum LookKind { room, noir, crayon }
+
 /// Everything one theme decides, for one brightness.
 ///
 /// A theme is a pair of these (light and dark). Adding a theme is adding a
@@ -77,6 +83,30 @@ class TunesLook {
   final double glowStrength;
 
   bool get isDark => brightness == Brightness.dark;
+
+  LookKind get kind => switch (themeId) {
+    'noir' => LookKind.noir,
+    'crayon' => LookKind.crayon,
+    _ => LookKind.room,
+  };
+
+  /// Crayon's five crayons, for things coloured in turn (track numbers,
+  /// squiggles). Brighter on the chalkboard.
+  List<Color> get crayons => isDark
+      ? const [
+          Color(0xFFFF7A6E),
+          Color(0xFFFFC93C),
+          Color(0xFF6CC0FF),
+          Color(0xFF5BD68A),
+          Color(0xFFB896FF),
+        ]
+      : const [
+          Color(0xFFFF5A4E),
+          Color(0xFFFFC93C),
+          Color(0xFF3FA7FF),
+          Color(0xFF3DBE6B),
+          Color(0xFF9B6BFF),
+        ];
 }
 
 /// A named theme: its light and dark looks.

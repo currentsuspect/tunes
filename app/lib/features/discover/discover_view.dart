@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/empty_state.dart';
@@ -8,6 +7,7 @@ import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/missing_cover.dart';
 import '../../core/ui/initials.dart';
 import '../../core/ui/pressable.dart';
+import '../../core/ui/radio_modes.dart';
 import '../../core/ui/shelf_widgets.dart';
 import '../../domain/collection_gaps.dart';
 import '../../domain/manifest.dart';
@@ -426,24 +426,13 @@ class _ArtistSection extends StatelessWidget {
   }
 }
 
-/// How far out the radio goes, as one dial: familiar at one end, further out at
-/// the other. It is the same setting the radio reads when the queue runs out,
-/// so moving it here changes what plays next, not just what this page says.
+/// The radio's modes, the same ones the queue shows: what plays when the
+/// queue runs out. Replaced the old familiar-to-further-out dial (17 Oct).
 class _ReachDial extends StatelessWidget {
   const _ReachDial();
 
-  static String _line(double v) {
-    if (v < 0.25) return 'Staying close to what you play';
-    if (v < 0.6) return 'A little off the path';
-    if (v < 0.85) return 'Drifting further out';
-    return 'Surprise me';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final settings = SettingsScope.maybeOf(context);
-    if (settings == null) return const SizedBox.shrink();
-    final v = settings.radioReach;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         Space.lg,
@@ -452,55 +441,13 @@ class _ReachDial extends StatelessWidget {
         Space.md,
       ),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          Space.md,
-          Space.md,
-          Space.md,
-          Space.sm,
-        ),
+        padding: const EdgeInsets.all(Space.md),
         decoration: BoxDecoration(
           color: Tones.surface,
           borderRadius: BorderRadius.circular(RadiusTokens.card),
           border: Border.all(color: Tones.hairline),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Radio', style: TypeScale.mono),
-            const SizedBox(height: Space.xs),
-            AnimatedSwitcher(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 180),
-              child: Text(
-                _line(v),
-                key: ValueKey(_line(v)),
-                style: TypeScale.note.copyWith(fontSize: 17, color: Tones.text),
-              ),
-            ),
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                activeTrackColor: Tones.primary,
-                inactiveTrackColor: Tones.hairline,
-                thumbColor: Tones.text,
-                overlayColor: Tones.primary.withValues(alpha: 0.15),
-              ),
-              child: Slider(
-                value: v,
-                onChanged: (x) => settings.setRadioReach(x),
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('familiar', style: TypeScale.caption),
-                Text('further out', style: TypeScale.caption),
-              ],
-            ),
-            const SizedBox(height: Space.xs),
-          ],
-        ),
+        child: const RadioModes(),
       ),
     );
   }

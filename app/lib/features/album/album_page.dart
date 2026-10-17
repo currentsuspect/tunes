@@ -5,6 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/nav/nav_controller.dart';
+import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/pressable.dart';
@@ -544,6 +545,34 @@ class _AlbumTrackRow extends StatelessWidget {
                       ? Align(
                           alignment: Alignment.centerLeft,
                           child: PlayingBars(playing: player.playing),
+                        )
+                      : Looks.current.kind == LookKind.crayon
+                      // Crayon: each number in a coloured dot, in turn.
+                      ? Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color:
+                                  Looks.current.crayons[(position - 1) %
+                                      Looks.current.crayons.length],
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Looks.current.text,
+                                width: 2,
+                              ),
+                            ),
+                            child: Text(
+                              '$position',
+                              style: TypeScale.caption.copyWith(
+                                color: const Color(0xFF22201C),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
                         )
                       : Text(
                           track.discNumber != null && track.discNumber! > 1

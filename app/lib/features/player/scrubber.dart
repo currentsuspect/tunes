@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/theme/looks.dart';
 import '../../core/ui/cover_tint.dart';
+import '../../core/ui/look_extras.dart';
 
 /// Where you are in a track, and how you move it.
 ///
@@ -71,7 +73,13 @@ class _ScrubberState extends State<Scrubber>
           children: [
             SliderTheme(
               data: SliderThemeData(
-                trackHeight: dragging ? 5 : 3,
+                // Crayon's stroke is thick; Noir's line is a hairline with a
+                // bead (both drawn by LookTrackShape).
+                trackHeight: switch (Looks.current.kind) {
+                  LookKind.crayon => 9,
+                  LookKind.noir => 8,
+                  LookKind.room => dragging ? 5 : 3,
+                },
                 activeTrackColor: accent,
                 // A bare Slider inherits a rail colour invisible on this
                 // background, so the rail is set outright.
@@ -87,7 +95,7 @@ class _ScrubberState extends State<Scrubber>
                   pressedElevation: 0,
                 ),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-                trackShape: const RoundedRectSliderTrackShape(),
+                trackShape: const LookTrackShape(),
               ),
               child: Slider(
                 // Position can briefly exceed duration on a stream; Slider

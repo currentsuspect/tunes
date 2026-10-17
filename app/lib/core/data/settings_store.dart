@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../radio/session.dart' show RadioMode;
+
 import 'database.dart';
 
 /// App settings, and who you are.
@@ -24,6 +26,8 @@ class SettingsStore extends ChangeNotifier {
   static const _prefetchNext = 'storage.prefetchNext';
   static const _doubleTapDownloads = 'gesture.doubleTapDownloads';
   static const _themeChoice = 'theme.choice';
+  static const _autoNight = 'theme.autoNight';
+  static const _autoDay = 'theme.autoDay';
   static const _themeBrightness = 'theme.brightness';
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
@@ -31,6 +35,7 @@ class SettingsStore extends ChangeNotifier {
   static const _lyricSize = 'lyrics.size';
   static const _showLyrics = 'lyrics.show';
   static const _radioReach = 'radio.reach';
+  static const _radioMode = 'radio.mode';
   static const _whatsNewSeen = 'app.whatsNewSeen';
   static const _serverUrl = 'server.url';
   static const _syncHistory = 'sync.history';
@@ -151,6 +156,16 @@ class SettingsStore extends ChangeNotifier {
   String get themeChoice => _cache[_themeChoice] ?? 'room';
   Future<void> setThemeChoice(String v) => _put(_themeChoice, v);
 
+  /// Auto's switch to Noir, in minutes after midnight. 18:45 by default:
+  /// near sunset all year in Nairobi, where the sun barely moves.
+  int get autoNightMinutes =>
+      int.tryParse(_cache[_autoNight] ?? '') ?? 18 * 60 + 45;
+  Future<void> setAutoNightMinutes(int v) => _put(_autoNight, '${v % 1440}');
+
+  /// Auto's switch back to Crayon. 06:30 by default (sunrise, Nairobi).
+  int get autoDayMinutes => int.tryParse(_cache[_autoDay] ?? '') ?? 6 * 60 + 30;
+  Future<void> setAutoDayMinutes(int v) => _put(_autoDay, '${v % 1440}');
+
   /// 0 follows the phone, 1 is always dark, 2 always light. Dark by default:
   /// the app was dark-only until themes, so nobody wakes up to a white app.
   int get themeBrightness => int.tryParse(_cache[_themeBrightness] ?? '') ?? 1;
@@ -209,6 +224,21 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setRadioReach(double v) =>
       _put(_radioReach, v.clamp(0.0, 1.0).toStringAsFixed(2));
+
+  /// The radio's mode: Stay close, Drift or Surprise me. Surprise me until
+  /// the listener picks (agreed 5 Oct: the default for new listeners), and
+  /// for anyone who had moved the old dial, the mode nearest to it.
+  RadioMode get radioMode {
+    final picked = RadioMode.byName(_cache[_radioMode]);
+    if (picked != null) return picked;
+    final dial = double.tryParse(_cache[_radioReach] ?? '');
+    if (dial == null) return RadioMode.surprise;
+    if (dial < 0.25) return RadioMode.stayClose;
+    if (dial < 0.6) return RadioMode.drift;
+    return RadioMode.surprise;
+  }
+
+  Future<void> setRadioMode(RadioMode m) => _put(_radioMode, m.name);
 
   /// The track that was playing when the app was last closed.
   ///

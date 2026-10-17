@@ -52,6 +52,8 @@ import 'core/data/reachability.dart';
 import 'core/nav/nav_controller.dart';
 import 'core/nav/root_route_guard.dart';
 import 'core/radio/radio_engine.dart';
+import 'core/theme/looks.dart';
+import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
@@ -688,6 +690,9 @@ class _TunesAppState extends State<TunesApp> {
                 debugShowCheckedModeBanner: false,
                 theme: buildTunesTheme(mq),
                 navigatorObservers: [_rootGuard],
+                // Crayon's paper, Noir's grain: over every route.
+                builder: (context, child) =>
+                    LookGround(child: child ?? const SizedBox.shrink()),
                 home: _shell(),
               ),
             ),
@@ -1112,10 +1117,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted) return;
     final skips = await widget.history.skipCounts();
     if (!mounted) return;
-    final week = await widget.history.playStamps(
-      within: const Duration(days: 7),
+    // A year of plays, faded by age, for what the radio thinks is loved now;
+    // the last week of it for what is worn out.
+    final year = await widget.history.playStamps(
+      within: const Duration(days: 365),
     );
     if (!mounted) return;
+    final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+    final week = [
+      for (final p in year)
+        if (p.at.isAfter(weekAgo)) p,
+    ];
     final manifest = _manifest;
     if (manifest == null) return;
     final plays = playsByArtist(counts, manifest.tracks);
@@ -1129,13 +1141,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     setState(() {
       _playsByArtist = plays;
-      _taste = TasteSnapshot(
+      _taste = TasteSnapshot.build(
         playCounts: counts,
         skipCounts: skips,
-        // What the radio knows of genre: the crowd tags the daemon holds for
-        // each act, so it can stay in the kind of music being played.
+        // What the radio knows of genre: the box's clean genres where it
+        // sent them, the crowd tags otherwise, so it can stay in the kind of
+        // music being played and knows what is next door.
         artistTags: tags,
-        tagWeights: TasteSnapshot.weighTags(tags),
+        artistGenres: {
+          for (final a in manifest.artists)
+            if (a.genres.isNotEmpty) a.name.toLowerCase(): a.genres,
+        },
+        affinity: TasteSnapshot.fadedAffinity([
+          for (final p in year) (sha: p.sha, at: p.at),
+        ], now: DateTime.now()),
         recentPlays: recentPlays,
       );
       _threads = followThreads(library: manifest.tracks, plays: counts);
@@ -1221,7 +1240,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               .toList()
         : manifest.tracks;
     if (library.isEmpty) return null;
-    _radioSession.reach = widget.settings.radioReach;
+    _radioSession.useMode(widget.settings.radioMode);
     return _radioEngine.next(
       library: library,
       session: _radioSession,
@@ -2229,6 +2248,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     DateTime.now(),
                                     widget.settings.displayName,
                                     seed: _greetingSeed,
+                                    voice: switch (Looks.current.kind) {
+                                      LookKind.crayon => GreetingVoice.crayon,
+                                      LookKind.noir => GreetingVoice.noir,
+                                      LookKind.room => GreetingVoice.room,
+                                    },
                                   ),
                                   style: TypeScale.wordmark.copyWith(
                                     fontSize: 28,

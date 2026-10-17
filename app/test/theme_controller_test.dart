@@ -60,4 +60,38 @@ void main() {
       }
     }
   });
+
+  test('auto switches at the times the listener picked', () {
+    TunesLook atMin(int h, int m, {int day = 6 * 60, int night = 22 * 60}) =>
+        ThemeController.resolve(
+          choice: 'auto',
+          brightnessMode: 1,
+          platform: Brightness.dark,
+          now: DateTime(2026, 10, 9, h, m),
+          dayFrom: day,
+          nightFrom: night,
+        );
+    expect(atMin(21, 59).themeId, 'crayon');
+    expect(atMin(22, 0).themeId, 'noir');
+    expect(atMin(5, 59).themeId, 'noir');
+    expect(atMin(6, 0).themeId, 'crayon');
+    // By default: Noir from 18:45, as near sunset in Nairobi.
+    expect(at('auto', 1, 18).themeId, 'crayon');
+    expect(
+      ThemeController.resolve(
+        choice: 'auto',
+        brightnessMode: 1,
+        platform: Brightness.dark,
+        now: DateTime(2026, 10, 9, 18, 45),
+      ).themeId,
+      'noir',
+    );
+  });
+
+  test('each room knows what kind it is', () {
+    expect(Looks.room.dark.kind, LookKind.room);
+    expect(Looks.noir.light.kind, LookKind.noir);
+    expect(Looks.crayon.dark.kind, LookKind.crayon);
+    expect(Looks.crayon.light.crayons, hasLength(5));
+  });
 }

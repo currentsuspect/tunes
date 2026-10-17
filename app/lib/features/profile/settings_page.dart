@@ -344,6 +344,26 @@ class _SettingsPageState extends State<SettingsPage> {
                           brightness: s.themeBrightness,
                           onChoice: s.setThemeChoice,
                         ),
+                        if (s.themeChoice == 'auto') ...[
+                          _LinkTile(
+                            title: 'Noir from ${_clock(s.autoNightMinutes)}',
+                            detail: 'When Auto turns to Noir for the night.',
+                            onTap: () => _pickTime(
+                              context,
+                              s.autoNightMinutes,
+                              s.setAutoNightMinutes,
+                            ),
+                          ),
+                          _LinkTile(
+                            title: 'Crayon from ${_clock(s.autoDayMinutes)}',
+                            detail: 'When it comes back for the day.',
+                            onTap: () => _pickTime(
+                              context,
+                              s.autoDayMinutes,
+                              s.setAutoDayMinutes,
+                            ),
+                          ),
+                        ],
                         _ChoiceTile(
                           title: 'Light or dark',
                           choices: const ['Phone', 'Dark', 'Light'],
@@ -1674,4 +1694,22 @@ class _Diagonal extends CustomClipper<Path> {
 
   @override
   bool shouldReclip(_Diagonal oldClipper) => false;
+}
+
+String _clock(int minutes) {
+  final h = minutes ~/ 60, m = minutes % 60;
+  final h12 = h % 12 == 0 ? 12 : h % 12;
+  return '$h12:${m.toString().padLeft(2, '0')} ${h < 12 ? 'am' : 'pm'}';
+}
+
+Future<void> _pickTime(
+  BuildContext context,
+  int minutes,
+  Future<void> Function(int) save,
+) async {
+  final t = await showTimePicker(
+    context: context,
+    initialTime: TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60),
+  );
+  if (t != null) await save(t.hour * 60 + t.minute);
 }

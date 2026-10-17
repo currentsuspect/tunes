@@ -10,7 +10,7 @@ import 'looks.dart';
 ///
 /// The listener picks a theme (Room, Noir, Crayon, or Auto) and a brightness
 /// (follow the phone, always dark, always light). Auto is Crayon by day and
-/// Noir after dark. Whatever comes out is written to [Looks.current], and the
+/// Noir after dark, switching at times the listener can move. Whatever comes out is written to [Looks.current], and the
 /// whole tree is marked to rebuild in place: nothing is torn down, so the
 /// page, the scroll position and the playing song all stay where they were.
 class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
@@ -25,9 +25,9 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
   final SettingsStore settings;
   Timer? _clock;
 
-  /// Auto's day: from 7 in the morning until 7 at night.
-  static const dayStarts = 7;
-  static const nightStarts = 19;
+  /// Auto's day, by default: 06:30 until 18:45 (settings can move both).
+  static const dayStarts = 6 * 60 + 30;
+  static const nightStarts = 18 * 60 + 45;
 
   static const auto = 'auto';
 
@@ -39,8 +39,14 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
     required int brightnessMode,
     required Brightness platform,
     required DateTime now,
+    int dayFrom = dayStarts,
+    int nightFrom = nightStarts,
   }) {
-    final night = now.hour < dayStarts || now.hour >= nightStarts;
+    final m = now.hour * 60 + now.minute;
+    // A night that wraps midnight (the usual case) or one that does not.
+    final night = nightFrom > dayFrom
+        ? m < dayFrom || m >= nightFrom
+        : m >= nightFrom && m < dayFrom;
     final spec = choice == auto
         ? (night ? Looks.noir : Looks.crayon)
         : Looks.byId(choice);
@@ -58,6 +64,8 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
       brightnessMode: settings.themeBrightness,
       platform: WidgetsBinding.instance.platformDispatcher.platformBrightness,
       now: DateTime.now(),
+      dayFrom: settings.autoDayMinutes,
+      nightFrom: settings.autoNightMinutes,
     );
     _setSystemBars(next);
     if (identical(next, Looks.current)) return;

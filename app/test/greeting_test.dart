@@ -54,4 +54,23 @@ void main() {
       }
     }
   });
+
+  test('each room has its own voice', () {
+    final evening = DateTime(2026, 10, 17, 19);
+    expect(
+      greetingFor(evening, 'Dylan', voice: GreetingVoice.noir),
+      'Good evening.',
+    );
+    final loud = greetingFor(
+      evening,
+      'Dylan',
+      seed: 1,
+      voice: GreetingVoice.crayon,
+    );
+    expect(loud, anyOf(endsWith('!'), endsWith('?')));
+    expect(
+      greetingFor(evening, '', voice: GreetingVoice.crayon),
+      isNot(contains(', ')),
+    );
+  });
 }

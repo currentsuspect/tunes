@@ -10,6 +10,9 @@ import '../../core/data/queue_store.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/theme/looks.dart';
+import '../../core/ui/crayon_cover.dart';
+import '../../core/ui/look_extras.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../core/data/download_manager.dart';
@@ -460,6 +463,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           child: SharedSleeve(
                                             tag: 'sleeve-${current.sha}',
                                             child: _Artwork(
+                                              player: widget.player,
                                               track: current,
                                               artUrlFor: widget.artUrlFor,
                                               playing: widget.player.playing,
@@ -506,6 +510,25 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,
+                                                ),
+                                              // Noir: the music's details as
+                                              // fine print.
+                                              if (Looks.current.kind ==
+                                                  LookKind.noir)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: Space.xs,
+                                                      ),
+                                                  child: Text(
+                                                    audioSpec(current),
+                                                    style: TypeScale.mono
+                                                        .copyWith(
+                                                          color: Tones.primary,
+                                                          letterSpacing: 1.4,
+                                                          fontSize: 10,
+                                                        ),
+                                                  ),
                                                 ),
                                             ],
                                           ),
@@ -896,11 +919,13 @@ class _InfoRow extends StatelessWidget {
 
 class _Artwork extends StatelessWidget {
   const _Artwork({
+    required this.player,
     required this.track,
     required this.artUrlFor,
     required this.playing,
   });
 
+  final TunePlayer player;
   final ManifestTrack track;
   final String Function(String sha) artUrlFor;
   final bool playing;
@@ -939,6 +964,21 @@ class _Artwork extends StatelessWidget {
             borderRadius: 16,
           ),
         );
+        // Crayon: line art that colours in as the song plays, with a sticker
+        // on a liked song. Elsewhere this is the cover as it was.
+        final drawn = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            CrayonCover(
+              player: player,
+              duration: Duration(milliseconds: track.durationMs ?? 0),
+              child: art,
+            ),
+            if (Looks.current.kind == LookKind.crayon &&
+                (LikesScope.maybeOf(context)?.isLiked(track.sha) ?? false))
+              const Positioned(right: -8, top: -10, child: _Sticker('a fave!')),
+          ],
+        );
         // Lit by its own colour: the glow under the sleeve is the same tint
         // as the wash behind it, so the cover looks like the lamp.
         final lit = DecoratedBox(
@@ -953,7 +993,7 @@ class _Artwork extends StatelessWidget {
               ),
             ],
           ),
-          child: art,
+          child: drawn,
         );
         // Off unless asked for, and off whenever the system asks for less
         // motion. A square sleeve turning for thirty seconds at a time is a
@@ -1050,6 +1090,7 @@ IconData? _doubleTap(BuildContext context, ManifestTrack track) {
   final likes = LikesScope.maybeOf(context);
   if (likes == null) return null;
   final nowLiked = !likes.isLiked(track.sha);
+  if (nowLiked) ConfettiBurst.show(context);
   likes.toggle(track.sha);
   return nowLiked ? Icons.favorite_rounded : Icons.heart_broken_rounded;
 }
@@ -1095,4 +1136,49 @@ class _CoverActionButton extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A crayon sticker, tilted, with an ink edge and a hard shadow.
+class _Sticker extends StatelessWidget {
+  const _Sticker(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    return Transform.rotate(
+      angle: 0.14,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: look.crayons[3],
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: look.text, width: 2),
+          boxShadow: [BoxShadow(color: look.text, offset: const Offset(2, 2))],
+        ),
+        child: Text(
+          text,
+          style: TypeScale.caption.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "FLAC · 44.1 kHz · LOSSLESS": what Noir prints under the title.
+String audioSpec(ManifestTrack t) {
+  final codec = (t.codec ?? 'audio').toUpperCase();
+  final lossless = const {'FLAC', 'ALAC', 'WAV', 'AIFF'}.contains(codec);
+  final parts = [
+    codec,
+    if (t.sampleRate != null)
+      '${(t.sampleRate! / 1000).toStringAsFixed(t.sampleRate! % 1000 == 0 ? 0 : 1)} kHz',
+    if (!lossless && t.bitrate != null) '${(t.bitrate! / 1000).round()} kbps',
+    if (lossless) 'LOSSLESS',
+  ];
+  return parts.join('  ·  ');
 }

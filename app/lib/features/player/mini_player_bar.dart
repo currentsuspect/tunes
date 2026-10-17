@@ -5,6 +5,7 @@ import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_manager.dart';
 import '../../core/data/reachability.dart';
+import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/ui/source_pill.dart';
@@ -75,21 +76,9 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
               Space.xs,
             ),
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Tones.surfaceRaised,
-                borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
-                border: Border.all(color: Tones.hairline),
-                boxShadow: [
-                  BoxShadow(
-                    color: tint.withValues(alpha: 0.28),
-                    blurRadius: 26,
-                    spreadRadius: -6,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
+              decoration: _barDecoration(tint),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+                borderRadius: BorderRadius.circular(_barRadius),
                 child: Stack(
                   children: [
                     _SwipeableBody(
@@ -374,9 +363,16 @@ class _TransportButtonState extends State<_TransportButton> {
             child: Container(
               width: 36,
               height: 36,
+              // Room: a solid button. Noir: a gold ring. Crayon: ink, with
+              // the sun inside.
               decoration: BoxDecoration(
-                color: Tones.text,
+                color: Looks.current.kind == LookKind.noir
+                    ? Colors.transparent
+                    : Tones.text,
                 shape: BoxShape.circle,
+                border: Looks.current.kind == LookKind.noir
+                    ? Border.all(color: Tones.primary)
+                    : null,
               ),
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 140),
@@ -388,7 +384,11 @@ class _TransportButtonState extends State<_TransportButton> {
                       : Icons.play_arrow_rounded,
                   key: ValueKey(widget.playing),
                   size: 22,
-                  color: Tones.base,
+                  color: switch (Looks.current.kind) {
+                    LookKind.noir => Tones.primary,
+                    LookKind.crayon => Looks.current.crayons[1],
+                    LookKind.room => Tones.base,
+                  },
                 ),
               ),
             ),
@@ -396,5 +396,48 @@ class _TransportButtonState extends State<_TransportButton> {
         ),
       ),
     );
+  }
+}
+
+/// The bar's shape per room (mood board, 9 Oct). Room: a raised card lit by
+/// the cover. Crayon: a sticker on the page, sun yellow on paper, ink edge
+/// and a hard offset shadow. Noir: no card at all, a hairline above.
+double get _barRadius => switch (Looks.current.kind) {
+  LookKind.noir => 0,
+  LookKind.crayon => 18,
+  LookKind.room => RadiusTokens.card - 2,
+};
+
+BoxDecoration _barDecoration(Color tint) {
+  final look = Looks.current;
+  switch (look.kind) {
+    case LookKind.crayon:
+      return BoxDecoration(
+        // Sun yellow on paper; on the chalkboard the yellow would drown the
+        // chalk-coloured words, so the bar stays dark there.
+        color: look.isDark ? look.surfaceRaised : look.crayons[1],
+        borderRadius: BorderRadius.circular(_barRadius),
+        border: Border.all(color: look.text, width: 2.5),
+        boxShadow: [BoxShadow(color: look.text, offset: const Offset(3, 4))],
+      );
+    case LookKind.noir:
+      return BoxDecoration(
+        color: look.base,
+        border: Border(top: BorderSide(color: look.hairline)),
+      );
+    case LookKind.room:
+      return BoxDecoration(
+        color: Tones.surfaceRaised,
+        borderRadius: BorderRadius.circular(_barRadius),
+        border: Border.all(color: Tones.hairline),
+        boxShadow: [
+          BoxShadow(
+            color: tint.withValues(alpha: 0.28),
+            blurRadius: 26,
+            spreadRadius: -6,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      );
   }
 }

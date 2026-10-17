@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../theme/looks.dart';
 import '../theme/tokens.dart';
+import 'look_extras.dart';
 
 /// A section's name in the serif, with a line under it in the personal voice
 /// saying why it is there, and an optional action at the end.
@@ -18,6 +20,43 @@ class SectionHeader extends StatelessWidget {
   final String? note;
   final Widget? trailing;
 
+  /// Room: the serif. Crayon: the bouncy hand, underlined with a squiggle in
+  /// a crayon picked by the title. Noir: fine print, gold small capitals
+  /// under a hairline.
+  List<Widget> _title() {
+    final look = Looks.current;
+    switch (look.kind) {
+      case LookKind.room:
+        return [Text(title, style: TypeScale.heading)];
+      case LookKind.crayon:
+        final c = look.crayons[title.hashCode.abs() % look.crayons.length];
+        return [
+          IntrinsicWidth(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(title, style: TypeScale.heading),
+                CrayonSquiggle(color: c),
+              ],
+            ),
+          ),
+        ];
+      case LookKind.noir:
+        return [
+          Container(height: 1, color: Tones.hairline),
+          const SizedBox(height: Space.sm),
+          Text(
+            title.toUpperCase(),
+            style: TypeScale.mono.copyWith(
+              color: Tones.primary,
+              letterSpacing: 2.2,
+              fontSize: 11,
+            ),
+          ),
+        ];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -34,8 +73,8 @@ class SectionHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TypeScale.heading),
-                if (note != null)
+                ..._title(),
+                if (note != null && Looks.current.kind != LookKind.noir)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../data/likes_store.dart';
 import '../theme/tokens.dart';
+import 'look_extras.dart';
 
 /// The heart, wherever a track appears.
 ///
@@ -35,6 +36,8 @@ class LikeButton extends StatelessWidget {
         // A like is a decision, and the heart is small: the tap is confirmed
         // in the hand rather than only on screen.
         HapticFeedback.lightImpact();
+        // Crayon throws confetti for a new like (no-op in other rooms).
+        if (!liked) ConfettiBurst.show(context);
         likes.toggle(sha);
       },
       padding: padding,

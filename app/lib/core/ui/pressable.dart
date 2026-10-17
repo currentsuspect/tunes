@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/looks.dart';
 import '../theme/tokens.dart';
 
 /// A card that answers the finger -- through its picture, not all of it.
@@ -114,38 +115,47 @@ class PressTarget extends StatelessWidget {
     final state = PressState.maybeOf(context);
     if (state == null) return child;
     final still = MediaQuery.disableAnimationsOf(context);
+    final kind = Looks.current.kind;
     final scale = state.down
         ? state.scale
         : state.hover
         ? 1.03
         : 1.0;
-    return AnimatedScale(
-      // Someone who has asked the system for less motion has asked for this
-      // too. The press still registers through the shade -- it just does not
-      // move.
-      scale: still ? 1 : scale,
-      duration: still ? Duration.zero : const Duration(milliseconds: 110),
-      curve: Curves.easeOut,
-      child: Stack(
-        children: [
-          child,
-          Positioned.fill(
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: state.down ? 1 : (state.hover ? 0.5 : 0),
-                duration: const Duration(milliseconds: 110),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Tones.text.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(
-                      radius ?? RadiusTokens.card,
+    // Per room (mood board): Crayon wobbles, a little tilt that springs
+    // back; Noir does not move at all, only the shade fades.
+    final tilt = kind == LookKind.crayon && state.down ? -0.012 : 0.0;
+    return AnimatedRotation(
+      turns: still ? 0 : tilt,
+      duration: still ? Duration.zero : const Duration(milliseconds: 160),
+      curve: Curves.easeOutBack,
+      child: AnimatedScale(
+        // Someone who has asked the system for less motion has asked for this
+        // too. The press still registers through the shade -- it just does not
+        // move.
+        scale: still || kind == LookKind.noir ? 1 : scale,
+        duration: still ? Duration.zero : const Duration(milliseconds: 110),
+        curve: kind == LookKind.crayon ? Curves.easeOutBack : Curves.easeOut,
+        child: Stack(
+          children: [
+            child,
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: state.down ? 1 : (state.hover ? 0.5 : 0),
+                  duration: const Duration(milliseconds: 110),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Tones.text.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(
+                        radius ?? RadiusTokens.card,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

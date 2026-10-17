@@ -11,7 +11,18 @@
 /// The day matters too: Monday mornings, Friday evenings and weekends get
 /// lines of their own. Every line is short, because it is set large and on
 /// one line beside the avatar.
-String greetingFor(DateTime now, String name, {int? seed}) {
+///
+/// The theme has a voice too (mood board, 9 Oct): Crayon is loud and
+/// exclaims ("Hiya, Dylan!"), Noir is formal and never uses a name ("Good
+/// evening."). Room is the mix above.
+String greetingFor(
+  DateTime now,
+  String name, {
+  int? seed,
+  GreetingVoice voice = GreetingVoice.room,
+}) {
+  if (voice == GreetingVoice.noir) return _noir(now);
+  if (voice == GreetingVoice.crayon) return _crayon(now, name, seed);
   final hour = now.hour;
   final who = name.trim();
   final slot = switch (hour) {
@@ -36,6 +47,34 @@ String greetingFor(DateTime now, String name, {int? seed}) {
 }
 
 enum _Slot { morning, afternoon, evening, late }
+
+enum GreetingVoice { room, crayon, noir }
+
+_Slot _slotOf(int hour) => switch (hour) {
+  >= 5 && < 12 => _Slot.morning,
+  >= 12 && < 17 => _Slot.afternoon,
+  >= 17 && < 22 => _Slot.evening,
+  _ => _Slot.late,
+};
+
+/// Noir: the formal line, with a full stop, and no name.
+String _noir(DateTime now) => switch (_slotOf(now.hour)) {
+  _Slot.morning => 'Good morning.',
+  _Slot.afternoon => 'Good afternoon.',
+  _Slot.evening => 'Good evening.',
+  _Slot.late => 'Good night.',
+};
+
+/// Crayon: always a little too excited.
+String _crayon(DateTime now, String name, int? seed) {
+  final pool = switch (_slotOf(now.hour)) {
+    _Slot.morning => ['Hiya{n}!', 'Rise and shine{n}!', 'Morning, sunshine!'],
+    _Slot.afternoon => ['Hiya{n}!', 'Crank it up{n}!', 'Snack and a song?'],
+    _Slot.evening => ['Hey hey{n}!', 'Crank it up{n}!', 'Dance break{n}?'],
+    _Slot.late => ['Psst{n}!', 'Night owl{n}!', 'One more song?'],
+  };
+  return _fill(pool[(seed ?? 0).abs() % pool.length], name.trim());
+}
 
 /// `{n}` is where ", Name" goes, and vanishes when there is no name, so every
 /// line reads right either way.

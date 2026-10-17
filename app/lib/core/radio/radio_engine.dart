@@ -15,7 +15,111 @@ class TasteSnapshot {
     this.artistTags = const {},
     this.recentPlays = const {},
     this.tagWeights = const {},
+    this.artistGenres = const {},
+    this.affinity = const {},
+    this.neighbours = const {},
   });
+
+  /// Builds a snapshot with everything derived in one place: tag weights over
+  /// the same tokens the radio compares (clean genres where the box sent
+  /// them, raw tags otherwise), and which genre families sit next to each
+  /// other in this library.
+  factory TasteSnapshot.build({
+    Map<String, int> playCounts = const {},
+    Map<String, int> skipCounts = const {},
+    Map<String, List<String>> artistTags = const {},
+    Map<String, int> recentPlays = const {},
+    Map<String, List<ArtistGenre>> artistGenres = const {},
+    Map<String, double> affinity = const {},
+  }) {
+    final draft = TasteSnapshot(
+      artistTags: artistTags,
+      artistGenres: artistGenres,
+    );
+    final seen = <String, int>{};
+    for (final act in {...artistTags.keys, ...artistGenres.keys}) {
+      for (final k in draft.tagsOf(act)) {
+        seen[k] = (seen[k] ?? 0) + 1;
+      }
+    }
+    return TasteSnapshot(
+      playCounts: playCounts,
+      skipCounts: skipCounts,
+      artistTags: artistTags,
+      recentPlays: recentPlays,
+      artistGenres: artistGenres,
+      affinity: affinity,
+      tagWeights: {
+        for (final e in seen.entries) e.key: 1 / (1 + log(1 + e.value / 5)),
+      },
+      neighbours: neighbourFamilies(artistGenres),
+    );
+  }
+
+  /// Lower-cased act name -> its clean genres from the box (tunesd
+  /// genres.ts), strongest first. Preferred over [artistTags] when present.
+  final Map<String, List<ArtistGenre>> artistGenres;
+
+  /// sha -> how much this track is loved *now*: completed plays, each
+  /// counting less the older it is (see [fadedAffinity]). Empty means "use
+  /// the all-time [playCounts]", which is what older callers pass.
+  final Map<String, double> affinity;
+
+  /// Family -> families this library pairs with it: acts tagged in both.
+  /// Where "next door" goes when it leaves a family.
+  final Map<String, Set<String>> neighbours;
+
+  /// Genre families that sit together in this library: two or more acts
+  /// carry both.
+  static Map<String, Set<String>> neighbourFamilies(
+    Map<String, List<ArtistGenre>> artistGenres,
+  ) {
+    final pairs = <(String, String), int>{};
+    for (final gs in artistGenres.values) {
+      final fams = {for (final g in gs) g.family}.toList()..sort();
+      for (var i = 0; i < fams.length; i++) {
+        for (var j = i + 1; j < fams.length; j++) {
+          final k = (fams[i], fams[j]);
+          pairs[k] = (pairs[k] ?? 0) + 1;
+        }
+      }
+    }
+    final out = <String, Set<String>>{};
+    for (final MapEntry(key: (a, b), value: n) in pairs.entries) {
+      if (n < 2) continue;
+      out.putIfAbsent(a, () => {}).add(b);
+      out.putIfAbsent(b, () => {}).add(a);
+    }
+    return out;
+  }
+
+  /// Plays faded by age: each counts 0.5 ^ (days ago / [halfLifeDays]). A song
+  /// played twenty times a year ago and never since weighs less than one
+  /// played five times this month, so old favourites stop locking in.
+  static Map<String, double> fadedAffinity(
+    Iterable<({String sha, DateTime at})> stamps, {
+    required DateTime now,
+    double halfLifeDays = 45,
+  }) {
+    final out = <String, double>{};
+    for (final p in stamps) {
+      final days = now.difference(p.at).inHours / 24;
+      final w = pow(0.5, max(0, days) / halfLifeDays).toDouble();
+      out[p.sha] = (out[p.sha] ?? 0) + w;
+    }
+    return out;
+  }
+
+  /// How loved [sha] is now: faded when [affinity] is known, else all-time.
+  double affinityOf(String sha) =>
+      affinity.isEmpty ? playsOf(sha).toDouble() : (affinity[sha] ?? 0);
+
+  /// The genre families of an act, strongest first; empty without genres.
+  List<String> familiesOf(String act) {
+    final gs = artistGenres[act.toLowerCase()];
+    if (gs == null) return const [];
+    return {for (final g in gs.take(2)) g.family}.toList();
+  }
 
   /// How much each tag says, 0..1: a tag on a third of the library ("rap")
   /// tells you little about which song to play next, one on a handful
@@ -67,6 +171,14 @@ class TasteSnapshot {
   /// The tags for an act, normalised and without the ones too general to say
   /// anything ("seen live", "american").
   Set<String> tagsOf(String act) {
+    // Clean genres when the box sent them: the genre, and its family as a
+    // weaker shared token, so Rage and Plugg are neighbours, not strangers.
+    final gs = artistGenres[act.toLowerCase()];
+    if (gs != null && gs.isNotEmpty) {
+      return {
+        for (final g in gs.take(2)) ...['g:${g.name}', 'f:${g.family}'],
+      };
+    }
     final raw = artistTags[act.toLowerCase()];
     if (raw == null) return const {};
     return {
@@ -126,13 +238,17 @@ class RadioEngine {
     required TasteSnapshot taste,
     ManifestTrack? current,
   }) {
-    final ranked = rank(
+    final stretch = session.stretchTurn;
+    var ranked = rank(
       library: library,
       session: session,
       taste: taste,
       current: current,
+      stretch: stretch,
     );
     if (ranked.isEmpty) return null;
+    session.picked();
+    lastStretch = stretch;
 
     // Sample from the top few, weighted by rank. The width grows with the
     // exploration level, so a listener who keeps skipping gets tighter, more
@@ -153,12 +269,17 @@ class RadioEngine {
     return pool.last.track;
   }
 
-  /// Every eligible candidate, best first.
+  /// Whether the last pick from [next] was a stretch: the queue can say so.
+  bool lastStretch = false;
+
+  /// Every eligible candidate, best first. [stretch] ranks for the reserved
+  /// slot: next door to what is playing, not more of it.
   List<ScoredTrack> rank({
     required List<ManifestTrack> library,
     required RadioSession session,
     required TasteSnapshot taste,
     ManifestTrack? current,
+    bool stretch = false,
   }) {
     final vibe = _vibe(session, taste, current);
     final out = <ScoredTrack>[];
@@ -168,7 +289,7 @@ class RadioEngine {
       if (current != null && t.sha == current.sha) continue;
       if (session.wasSkipped(t.sha)) continue;
 
-      final reasons = _score(t, session, taste, current, vibe);
+      final reasons = _score(t, session, taste, current, vibe, stretch);
       final total = reasons.values.fold(0.0, (a, b) => a + b);
       out.add(ScoredTrack(t, total, reasons));
     }
@@ -210,6 +331,7 @@ class RadioEngine {
     TasteSnapshot taste,
     ManifestTrack? current,
     Map<String, double> vibe,
+    bool stretch,
   ) {
     final reasons = <String, double>{};
 
@@ -223,23 +345,34 @@ class RadioEngine {
       final norm = top.take(3).fold(0.0, (a, b) => a + b);
       final shared = tags.fold(0.0, (a, t) => a + (vibe[t] ?? 0));
       lane = norm == 0 ? 0.0 : (shared / norm).clamp(0.0, 1.0);
-      // The pull of the lane eases as the listener asks to go further out.
-      reasons['lane'] = 0.45 * (1 - 0.5 * session.exploration) * lane;
-      // Nothing in common with what is playing. Softer the more adventurous
-      // the listener has said they are, so the dial still lets it wander.
-      if (shared == 0) reasons['off-lane'] = -0.25 * (1 - session.exploration);
+      if (stretch) {
+        _stretch(reasons, lane, candidate, taste, vibe, session);
+      } else {
+        // The pull of the lane eases as the listener asks to go further out.
+        reasons['lane'] = 0.45 * (1 - 0.5 * session.exploration) * lane;
+        // Nothing in common with what is playing. Softer the more adventurous
+        // the listener has said they are, so the dial still lets it wander.
+        if (shared == 0) {
+          reasons['off-lane'] = -0.25 * (1 - session.exploration);
+        }
+      }
     }
 
     // Taste: how much this track has earned, damped so a single favourite
     // cannot dominate a 600-track library forever. Scaled by the fit: a
     // favourite from some other kind of music used to win anyway, which is why
     // the radio kept snapping back to the same songs.
+    // Loved now, not loved once: plays fade with age (TasteSnapshot
+    // .fadedAffinity), so last year's favourites stop locking the radio in.
     final plays = taste.playsOf(candidate.sha);
-    if (plays > 0) {
+    final loved = taste.affinityOf(candidate.sha);
+    if (loved > 0) {
       reasons['taste'] =
           0.30 *
-          (1 - 1 / (1 + plays)) *
-          (lane == null ? 1.0 : 0.35 + 0.65 * lane);
+          (1 - 1 / (1 + loved)) *
+          (lane == null ? 1.0 : 0.35 + 0.65 * lane) *
+          // A stretch is for what she does not already know by heart.
+          (stretch ? 0.4 : 1.0);
     }
 
     // Worn out: played already this week, however well it fits.
@@ -309,7 +442,7 @@ class RadioEngine {
     // never played is worth more when the listener has been letting things
     // run, and worth less right after a skip.
     if (plays == 0) {
-      reasons['novelty'] = 0.20 * session.exploration;
+      reasons['novelty'] = 0.20 * session.exploration + (stretch ? 0.10 : 0);
     }
 
     // A small amount of noise so equal scores do not always resolve the same
@@ -317,5 +450,40 @@ class RadioEngine {
     reasons['jitter'] = _random.nextDouble() * 0.02;
 
     return reasons;
+  }
+
+  /// The reserved slot (session.stretchEvery). Too close is pushed away;
+  /// next door (sharing the family, or a little of the vibe) is pulled in;
+  /// a family this library pairs with the current one counts as next door
+  /// too. Further than that only when the listener asked for surprises.
+  void _stretch(
+    Map<String, double> reasons,
+    double lane,
+    ManifestTrack candidate,
+    TasteSnapshot taste,
+    Map<String, double> vibe,
+    RadioSession session,
+  ) {
+    if (lane > 0.6) {
+      reasons['too-close'] = -0.40;
+    } else if (lane > 0) {
+      // Peaks a little way out, not at the edge.
+      reasons['next-door'] = 0.40 * (1 - (lane - 0.25).abs() / 0.75);
+    } else {
+      final here = <String>{
+        for (final k in vibe.keys)
+          if (k.startsWith('f:')) k.substring(2),
+      };
+      final there = taste.familiesOf(candidate.artistKey);
+      final adjacent = there.any(
+        (f) => here.any((h) => taste.neighbours[h]?.contains(f) ?? false),
+      );
+      // A family away: held back, unless the listener asked for surprises,
+      // where it is part of the point.
+      reasons[adjacent ? 'next-family' : 'far'] = adjacent
+          ? 0.30
+          : -0.30 * (1 - session.exploration) +
+                0.25 * max(0.0, session.exploration - 0.7) / 0.3;
+    }
   }
 }
