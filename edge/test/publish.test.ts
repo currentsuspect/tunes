@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handlePublish } from "../src/publish.js";
+import { handleArtGet, handleArtPut, handleAudioPut, handlePublish, handleTrackGet } from "../src/publish.js";
 
 const KEY = "k".repeat(64);
 const HOST = "https://tunes.aestra.studio";
@@ -109,5 +109,230 @@ describe("publish endpoint", () => {
     expect(res.status).toBe(200);
     expect(batches).toHaveLength(0);
     expect(puts).toHaveLength(1);
+  });
+});
+
+describe("art put endpoint", () => {
+  const SHA = "b".repeat(64);
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x11]);
+
+  function put(bytes: Uint8Array, key = KEY, path = `/internal/art/${SHA}`): Request {
+    return new Request(`${HOST}${path}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${key}` },
+      body: bytes as BodyInit,
+    });
+  }
+
+  function artEnv(files: Record<string, { body: Uint8Array; type: string }> = {}) {
+    const { env } = fakeEnv();
+    const puts: { key: string; value: unknown }[] = [];
+    const store = new Map<string, { body: Uint8Array; type: string }>(Object.entries(files));
+    (env.CACHE as any).get = vi.fn(async (k: string) => {
+      const f = store.get(k);
+      return f ? { body: f.body, httpMetadata: { contentType: f.type } } : null;
+    });
+    (env.CACHE as any).put = vi.fn(async (k: string, v: Uint8Array, opts: any) => {
+      puts.push({ key: k, value: v });
+      store.set(k, { body: v, type: opts?.httpMetadata?.contentType });
+    });
+    return { env, puts, store };
+  }
+
+  it("stores a real image under its sha key", async () => {
+    const { env, puts, store } = artEnv();
+    const res = await handleArtPut(put(JPEG), `/internal/art/${SHA}`, env);
+    expect(res.status).toBe(200);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]!.key).toBe(`art/${SHA}`);
+    expect(store.get(`art/${SHA}`)?.type).toBe("image/jpeg");
+  });
+
+  it("names bytes by magic, not by the uploader's label", async () => {
+    const { env, store } = artEnv();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const res = await handleArtPut(put(png), `/internal/art/${SHA}`, env);
+    expect(res.status).toBe(200);
+    expect(store.get(`art/${SHA}`)?.type).toBe("image/png");
+  });
+
+  it("refuses non-images, empties, oversize, bad keys, and bad shas", async () => {
+    const { env } = artEnv();
+    expect((await handleArtPut(put(new Uint8Array([1, 2, 3])), `/internal/art/${SHA}`, env)).status).toBe(415);
+    expect((await handleArtPut(put(new Uint8Array([])), `/internal/art/${SHA}`, env)).status).toBe(413);
+    expect((await handleArtPut(put(JPEG, "wrong"), `/internal/art/${SHA}`, env)).status).toBe(401);
+    expect((await handleArtPut(put(JPEG), "/internal/art/nope", env)).status).toBe(404);
+    const big = new Uint8Array(2 * 1024 * 1024 + 1);
+    big[0] = 0xff; big[1] = 0xd8; big[2] = 0xff;
+    expect((await handleArtPut(put(big), `/internal/art/${SHA}`, env)).status).toBe(413);
+  });
+
+  it("fails closed without the R2 binding", async () => {
+    const { env } = fakeEnv({ CACHE: undefined });
+    expect((await handleArtPut(put(JPEG), `/internal/art/${SHA}`, env)).status).toBe(500);
+  });
+});
+
+describe("art get from R2", () => {
+  const SHA = "c".repeat(64);
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff]);
+
+  function artEnv(files: Record<string, { body: Uint8Array; type: string }> = {}) {
+    const { env } = fakeEnv();
+    const store = new Map(Object.entries(files));
+    (env.CACHE as any).get = vi.fn(async (k: string) => {
+      const f = store.get(k);
+      return f ? { body: (f as any).body, httpMetadata: { contentType: (f as any).type } } : null;
+    });
+    return env;
+  }
+
+  it("serves a cached cover immutable", async () => {
+    const env = artEnv({ [`art/${SHA}`]: { body: JPEG, type: "image/jpeg" } });
+    const res = (await handleArtGet(`/art/${SHA}`, env))!;
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPEG);
+  });
+
+  it("returns null on miss, malformed shape, or missing binding", async () => {
+    const env = artEnv();
+    expect(await handleArtGet(`/art/${SHA}`, env)).toBeNull();
+    expect(await handleArtGet("/art/nope", env)).toBeNull();
+    expect(await handleArtGet("/track/" + SHA, env)).toBeNull();
+    const noCache = fakeEnv({ CACHE: undefined }).env;
+    expect(await handleArtGet(`/art/${SHA}`, noCache)).toBeNull();
+  });
+});
+
+describe("audio put endpoint", () => {
+  // "fLaC" + padding: sniffed as audio/flac, hashed to prove the path check.
+  const BYTES = new Uint8Array([0x66, 0x4c, 0x61, 0x43, 1, 2, 3, 4]);
+
+  async function shaOf(bytes: Uint8Array): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as any);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function put(bytes: Uint8Array, sha: string, key = KEY): Request {
+    return new Request(`${HOST}/internal/audio/${sha}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${key}` },
+      body: bytes as BodyInit,
+    });
+  }
+
+  function audioEnv() {
+    const { env } = fakeEnv();
+    const puts: { key: string; value: unknown }[] = [];
+    const store = new Map<string, { body: unknown; type: unknown }>();
+    (env.CACHE as any).put = vi.fn(async (k: string, v: unknown, opts: any) => {
+      puts.push({ key: k, value: v });
+      store.set(k, { body: v, type: opts?.httpMetadata?.contentType });
+    });
+    return { env, puts, store };
+  }
+
+  it("stores verified bytes under the bare sha with a sniffed type", async () => {
+    const { env, puts, store } = audioEnv();
+    const sha = await shaOf(BYTES);
+    const res = await handleAudioPut(put(BYTES, sha), `/internal/audio/${sha}`, env);
+    expect(res.status).toBe(200);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]!.key).toBe(sha);
+    expect(store.get(sha)?.type).toBe("audio/flac");
+    expect(JSON.parse(await res.text())).toMatchObject({ ok: true, sha });
+  });
+
+  it("refuses mismatched hashes, empties, bad keys, and bad shas", async () => {
+    const { env } = audioEnv();
+    const sha = await shaOf(BYTES);
+    const wrong = "0".repeat(64);
+    expect((await handleAudioPut(put(BYTES, wrong), `/internal/audio/${wrong}`, env)).status).toBe(422);
+    expect((await handleAudioPut(put(new Uint8Array([]), sha), `/internal/audio/${sha}`, env)).status).toBe(413);
+    expect((await handleAudioPut(put(BYTES, sha, "wrong"), `/internal/audio/${sha}`, env)).status).toBe(401);
+    expect((await handleAudioPut(put(BYTES, sha), "/internal/audio/nope", env)).status).toBe(404);
+  });
+
+  it("fails closed without the R2 binding", async () => {
+    const { env } = fakeEnv({ CACHE: undefined });
+    const sha = await shaOf(BYTES);
+    expect((await handleAudioPut(put(BYTES, sha), `/internal/audio/${sha}`, env)).status).toBe(500);
+  });
+});
+
+describe("track get from R2", () => {
+  const SHA = "d".repeat(64);
+  const BYTES = new Uint8Array([10, 20, 30, 40, 50, 60, 70, 80]);
+
+  function trackEnv(files: Record<string, Uint8Array> = { [`${SHA}`]: BYTES }) {
+    const { env } = fakeEnv();
+    const store = new Map(Object.entries(files));
+    (env.CACHE as any).head = vi.fn(async (k: string) => {
+      const b = store.get(k);
+      return b ? { size: b.length, httpMetadata: { contentType: "audio/flac" } } : null;
+    });
+    (env.CACHE as any).get = vi.fn(async (k: string, opts?: any) => {
+      const b = store.get(k);
+      if (!b) return null;
+      if (opts?.range) {
+        const { offset, length } = opts.range;
+        return { body: b.slice(offset, offset + length), httpMetadata: { contentType: "audio/flac" } };
+      }
+      return { body: b, httpMetadata: { contentType: "audio/flac" } };
+    });
+    return env;
+  }
+
+  const get = (path: string, range?: string) =>
+    new Request(`${HOST}${path}`, {
+      method: "GET",
+      headers: range ? { range } : {},
+    });
+  const head = (path: string, range?: string) =>
+    new Request(`${HOST}${path}`, {
+      method: "HEAD",
+      headers: range ? { range } : {},
+    });
+
+  it("serves a full hit with origin-like headers", async () => {
+    const res = (await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`), trackEnv()))!;
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/flac");
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("etag")).toBe(`"${SHA}"`);
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(BYTES);
+  });
+
+  it("serves ranges and answers HEAD without bytes", async () => {
+    const env = trackEnv();
+    const part = (await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`, "bytes=2-5"), env))!;
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe("bytes 2-5/8");
+    expect(new Uint8Array(await part.arrayBuffer())).toEqual(new Uint8Array([30, 40, 50, 60]));
+    const open = (await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`, "bytes=6-"), env))!;
+    expect(open.status).toBe(206);
+    expect(open.headers.get("content-range")).toBe("bytes 6-7/8");
+    const headers = (await handleTrackGet(`/track/${SHA}`, head(`/track/${SHA}`), env))!;
+    expect(headers.status).toBe(200);
+    expect(headers.headers.get("content-length")).toBe("8");
+    const hpart = (await handleTrackGet(`/track/${SHA}`, head(`/track/${SHA}`, "bytes=0-3"), env))!;
+    expect(hpart.status).toBe(206);
+    expect(hpart.headers.get("content-range")).toBe("bytes 0-3/8");
+  });
+
+  it("416s unsatisfiable ranges and nulls the rest", async () => {
+    const env = trackEnv();
+    const bad = (await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`, "bytes=99-"), env))!;
+    expect(bad.status).toBe(416);
+    expect(bad.headers.get("content-range")).toBe("bytes */8");
+    const empty = trackEnv({});
+    expect(await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`), empty)).toBeNull();
+    expect(await handleTrackGet("/art/" + SHA, get(`/art/${SHA}`), env)).toBeNull();
+    expect(await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`), fakeEnv({ CACHE: undefined }).env)).toBeNull();
+    const post = new Request(`${HOST}/track/${SHA}`, { method: "POST" });
+    expect(await handleTrackGet(`/track/${SHA}`, post, env)).toBeNull();
   });
 });

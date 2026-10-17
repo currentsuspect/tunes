@@ -24,8 +24,8 @@ import {
 } from "./crypto.js";
 import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
-import { handlePublish } from "./publish.js";
 import { handleSync } from "./sync.js";
+import { handleArtGet, handleArtPut, handleAudioPut, handlePublish, handleTrackGet } from "./publish.js";
 import {
   accountById,
   deviceById,
@@ -239,6 +239,20 @@ export default {
       return handlePublish(req, env);
     }
 
+    // ---- PUT /internal/art/:sha ------------------------------------------
+    // Box -> edge cover upload, same service key as the manifest publish.
+    if (url.pathname.startsWith("/internal/art/")) {
+      return handleArtPut(req, url.pathname, env);
+    }
+
+    // ---- PUT /internal/audio/:sha ----------------------------------------
+    // Box -> edge audio backfill, same service key. Hashed against the path
+    // before storing: the key is the only identity these bytes are served
+    // under, so a mismatch is refused rather than cached.
+    if (url.pathname.startsWith("/internal/audio/")) {
+      return handleAudioPut(req, url.pathname, env);
+    }
+
     // ---- GET /manifest -----------------------------------------------------
     // Served from R2 once the box publishes it; until then (or when the
     // binding is absent, as in tests) the request falls through to origin
@@ -259,6 +273,28 @@ export default {
           },
         });
       }
+    }
+
+    // ---- GET /art/:sha -----------------------------------------------------
+    // Served from R2 once the box publishes it; until then the request falls
+    // through to origin exactly as before. After the media gate,
+    // deliberately: a cached cover must not drop the device credential, and
+    // an art sha is content-addressed, so the bytes never change -- a client
+    // or proxy may cache them for a year.
+    if (req.method === "GET" && env.CACHE) {
+      const cached = await handleArtGet(url.pathname, env);
+      if (cached) return cached;
+    }
+
+    // ---- GET|HEAD /track/:sha --------------------------------------------
+    // Served from R2 once the box backfills it; until then the request falls
+    // through to origin exactly as before. After the media gate,
+    // deliberately: cached bytes must not drop the device credential.
+    // Range-aware like the origin: players seek, and a miss here is a miss
+    // of the whole object, never a partial answer.
+    if ((req.method === "GET" || req.method === "HEAD") && env.CACHE) {
+      const audio = await handleTrackGet(url.pathname, req, env);
+      if (audio) return audio;
     }
 
     // Stateless from here down. No env.DB below this line, deliberately: the
