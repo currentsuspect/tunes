@@ -63,6 +63,9 @@ export function needsArchive(
   objects: ArchiveCandidate[],
   live: Set<string>,
   audioShaOf: (sha: string) => string | undefined,
+  /** Files the library already stands behind another copy of (the
+   * replacement ledger's `redundant`): never uploaded as a second copy. */
+  skip: Set<string> = new Set(),
 ): ArchiveCandidate[] {
   const liveAudio = new Set<string>();
   for (const s of live) {
@@ -70,7 +73,7 @@ export function needsArchive(
     if (a) liveAudio.add(a);
   }
   return objects.filter((o) => {
-    if (live.has(o.sha)) return false;
+    if (live.has(o.sha) || skip.has(o.sha)) return false;
     const a = audioShaOf(o.sha);
     return !(a && liveAudio.has(a));
   });

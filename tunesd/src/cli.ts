@@ -1379,7 +1379,13 @@ async function main(): Promise<void> {
       try {
         if (Number.isFinite(archiveChat) && channelIds.includes(String(archiveChat))) {
           const live = liveShas(state, channelIds);
-          const todo = needsArchive(await store.listObjects(), live, (sha) => probeCache.get(sha)?.audioSha ?? undefined);
+          const redundant = new Set(Object.keys((await loadReplacements(replacementsFile)).redundant));
+          const todo = needsArchive(
+            await store.listObjects(),
+            live,
+            (sha) => probeCache.get(sha)?.audioSha ?? undefined,
+            redundant,
+          );
           if (todo.length > 0) {
             log.info({ event: "ARCHIVE_PASS", todo: todo.length });
             const r = await archiveAll(

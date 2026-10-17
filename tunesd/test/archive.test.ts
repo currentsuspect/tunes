@@ -90,6 +90,8 @@ describe("archive: songs only here go up to Telegram", () => {
       (s) => ({ live: "A", dupe: "A", only: "B" })[s],
     );
     expect(todo.map((t) => t.sha)).toEqual(["only"]);
+    // A file the ledger marks redundant is never uploaded.
+    expect(needsArchive([{ sha: "only", size: 1 }], new Set(), () => undefined, new Set(["only"]))).toEqual([]);
   });
 
   it("records each upload as seen, only when the size matches", async () => {
