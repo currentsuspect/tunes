@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { accessSync, createReadStream, statSync } from "node:fs";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, rename, rm, stat, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { RetryableError } from "./telegram/ports.js";
 
@@ -26,6 +26,70 @@ export class ObjectStore {
 
   pathOf(sha: string): string {
     return this.objectPath(sha);
+  }
+
+  /** Reference counts, not a set: one listener stopping must not unpin a
+   * second streaming the same song. */
+  private readonly activeReads = new Map<string, number>();
+
+  /** Marks a song as just played, for the cache's least-recent order. */
+  async touch(sha: string): Promise<void> {
+    const now = new Date();
+    try {
+      await utimes(this.objectPath(sha), now, now);
+    } catch {
+      // Evicted meanwhile: the same as a miss for the caller.
+    }
+  }
+
+  /** Pins a song while it streams; call the returned function when done. */
+  beginRead(sha: string): () => void {
+    this.activeReads.set(sha, (this.activeReads.get(sha) ?? 0) + 1);
+    void this.touch(sha);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = this.activeReads.get(sha) ?? 0;
+      if (n <= 1) this.activeReads.delete(sha);
+      else this.activeReads.set(sha, n - 1);
+    };
+  }
+
+  /**
+   * Holds the store to [maxBytes], least recently played first, evicting only
+   * what [evictable] allows (archive.ts: a live, recently audited Telegram
+   * source). Songs that are only here stay, even over budget. Streaming
+   * songs and [protect] stay too.
+   */
+  async prune(
+    maxBytes: number,
+    evictable: (sha: string) => boolean,
+    protect: Iterable<string> = [],
+  ): Promise<{ bytes: number; removed: number; freed: number; kept: number }> {
+    const keep = new Set([...protect, ...this.activeReads.keys()]);
+    const entries: Array<{ sha: string; size: number; at: number }> = [];
+    for (const o of await this.listObjects()) {
+      try {
+        const info = await stat(this.objectPath(o.sha));
+        entries.push({ sha: o.sha, size: info.size, at: info.mtimeMs });
+      } catch {
+        // Gone meanwhile.
+      }
+    }
+    let bytes = entries.reduce((sum, e) => sum + e.size, 0);
+    let removed = 0;
+    let freed = 0;
+    entries.sort((a, b) => a.at - b.at || a.sha.localeCompare(b.sha));
+    for (const e of entries) {
+      if (bytes <= maxBytes) break;
+      if (keep.has(e.sha) || !evictable(e.sha)) continue;
+      await rm(this.objectPath(e.sha), { force: true });
+      bytes -= e.size;
+      freed += e.size;
+      removed += 1;
+    }
+    return { bytes, removed, freed, kept: entries.length - removed };
   }
 
   sizeOf(sha: string): number {

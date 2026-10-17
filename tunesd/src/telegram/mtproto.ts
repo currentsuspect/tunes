@@ -276,6 +276,40 @@ export class MtprotoClient {
     }
   }
 
+  /**
+   * Uploads a file as an audio document (never re-encoded: Telegram keeps a
+   * document's bytes as sent, so the copy hashes the same). Returns the new
+   * message's id and the document's size as Telegram recorded it.
+   */
+  async uploadAudio(
+    chatId: number,
+    filePath: string,
+    meta: { fileName: string; title?: string; performer?: string; durationSec?: number; caption?: string },
+  ): Promise<{ messageId: number; size: number }> {
+    try {
+      const client = await this.connect();
+      const peer = await this.peer(chatId);
+      const msg = (await client.sendFile(peer, {
+        file: filePath,
+        caption: meta.caption ?? "",
+        forceDocument: false,
+        attributes: [
+          new Api.DocumentAttributeAudio({
+            duration: Math.max(0, Math.round(meta.durationSec ?? 0)),
+            title: meta.title,
+            performer: meta.performer,
+          }),
+          new Api.DocumentAttributeFilename({ fileName: meta.fileName }),
+        ],
+      })) as Api.Message;
+      const doc = MtprotoClient.audioDocOf(msg);
+      if (!doc) throw new Error("upload did not come back as an audio document");
+      return { messageId: msg.id, size: Number(doc.size) };
+    } catch (e) {
+      throw this.onInvokeError(e);
+    }
+  }
+
   async chatAlive(markedChatId: number): Promise<boolean> {
     const client = await this.connect();
     try {

@@ -239,6 +239,10 @@ export class ManifestServer {
               return;
             }
           }
+          // Pinned while it streams, so the cache never evicts a song from
+          // under a listener; touched, so it counts as recently played.
+          const release = this.store.beginRead(sha);
+          res.on("close", release);
           await this.serveRange(res, req, this.store.pathOf(sha), null);
           return;
         }

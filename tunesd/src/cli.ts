@@ -1,4 +1,5 @@
 import { genresFromTags } from "./genres.js";
+import { archiveAll, evictable, liveShas, needsArchive } from "./archive.js";
 import { loadReplacements, resourceLost } from "./resource.js";
 import { SlskdApi, slskdConfig } from "./soulseek.js";
 import { auditDue, auditSources } from "./audit.js";
@@ -1365,6 +1366,56 @@ async function main(): Promise<void> {
     setInterval(() => void resourceIfConfigured(), 6 * 60 * 60_000).unref?.();
     setTimeout(() => void auditIfDue(), 3 * 60_000).unref?.();
     setInterval(() => void auditIfDue(), 6 * 60 * 60_000).unref?.();
+
+    // Telegram is the library's home and the box a cache (archive.ts). Songs
+    // only held here go up to the archive channel; then the store is held to
+    // TUNESD_CACHE_MAX_BYTES, evicting only what Telegram still holds.
+    const archiveChat = Number(process.env["TUNESD_ARCHIVE_CHAT"] ?? channels[0]?.id ?? NaN);
+    const cacheMax = Number(process.env["TUNESD_CACHE_MAX_BYTES"] ?? NaN);
+    let archiveRunning = false;
+    const archiveAndPrune = async (): Promise<void> => {
+      if (archiveRunning) return;
+      archiveRunning = true;
+      try {
+        if (Number.isFinite(archiveChat) && channelIds.includes(String(archiveChat))) {
+          const live = liveShas(state, channelIds);
+          const todo = needsArchive(await store.listObjects(), live, (sha) => probeCache.get(sha)?.audioSha ?? undefined);
+          if (todo.length > 0) {
+            log.info({ event: "ARCHIVE_PASS", todo: todo.length });
+            const r = await archiveAll(
+              {
+                store,
+                state,
+                tg: client,
+                archiveChat,
+                meta: (sha) => {
+                  const p = probeCache.get(sha);
+                  return p
+                    ? { title: p.tags?.title, artist: p.tags?.artist, album: p.tags?.album, durationMs: p.durationMs ?? undefined, codec: p.codec ?? undefined }
+                    : undefined;
+                },
+                log,
+                sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+              },
+              todo,
+              { max: 40, pauseMs: 20_000 },
+            );
+            log.info({ event: "ARCHIVE_PASS_DONE", ...r });
+            if (r.uploaded > 0) publishSoon.request();
+          }
+        }
+        if (Number.isFinite(cacheMax) && cacheMax > 0) {
+          const r = await store.prune(cacheMax, evictable(state, channelIds));
+          if (r.removed > 0) log.info({ event: "CACHE_PRUNED", ...r });
+        }
+      } catch (e) {
+        log.error({ event: "ARCHIVE_PASS_FAILED", err: String(e) });
+      } finally {
+        archiveRunning = false;
+      }
+    };
+    setTimeout(() => void archiveAndPrune(), 12 * 60_000).unref?.();
+    setInterval(() => void archiveAndPrune(), 60 * 60_000).unref?.();
 
     // New audio goes up to R2 from the local copy straight away, so a friend's
     // first play of it is a cache hit rather than a cold Telegram fetch.
