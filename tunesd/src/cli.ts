@@ -1,3 +1,9 @@
+import { genresFromTags } from "./genres.js";
+import { archiveAll, evictable, liveShas, needsArchive } from "./archive.js";
+import { completeAlbums, partialAlbums } from "./complete.js";
+import { loadReplacements, resourceLost } from "./resource.js";
+import { SlskdApi, slskdConfig } from "./soulseek.js";
+import { auditDue, auditSources } from "./audit.js";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -1164,6 +1170,10 @@ async function main(): Promise<void> {
     };
 
     let lastDropped = -1;
+    // What the last manifest left out because no copy could play; the
+    // Soulseek pass (resource.ts) looks for these.
+    let lastGoneProbes: ProbeResult[] = [];
+    const replacementsFile = join(env.dataDir, "replacements.json");
     const manifestBuilder = async () => {
       const metaBySha = state.allSeenMeta();
       const objects = await store.listObjects();
@@ -1175,6 +1185,7 @@ async function main(): Promise<void> {
           artSha: artists.get(name) ?? null,
           ...(meta && meta.tags.length > 0 ? { tags: meta.tags } : {}),
           ...(meta && meta.listeners != null ? { listeners: meta.listeners } : {}),
+          ...(meta && meta.tags.length > 0 ? { genres: genresFromTags(meta.tags) } : {}),
         };
       });
       const enrichForManifest = new Map<string, TrackEnrichment>();
@@ -1194,12 +1205,27 @@ async function main(): Promise<void> {
       }
       // Only list what can be played: held here, or sourced from a channel we
       // still ingest from. Hidden, never deleted (see playableOnly).
-      const liveShas = new Set(state.sightingsFor(channelIds).map((r) => r.sha));
-      const { kept: playableProbes, dropped } = playableOnly(
-        [...probeCache.values()],
+      // A source Telegram has said is gone does not count (see audit.ts).
+      // Neither does R2: it is the fetch worker's evicting cache, and the
+      // publish ledger kept saying "held" for copies long since evicted
+      // (all 42 gone-source copies it claimed were missing, 16 Oct).
+      const liveShas = new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));
+      const allProbes = [...probeCache.values()];
+      // Loaded before anything below reads it (redundant files are left out
+      // of the playable list; replacements point lost copies at live ones).
+      const replacements = await loadReplacements(replacementsFile);
+      const { kept: playableUnfiltered, dropped } = playableOnly(
+        allProbes,
         (sha) => store.has(sha),
         liveShas
       );
+      const playableProbes = playableUnfiltered.filter((p) => replacements.redundant[p.sha] == null);
+      const keptShas = new Set(playableProbes.map((p) => p.sha));
+      const goneProbes = allProbes.filter((p) => !keptShas.has(p.sha));
+      lastGoneProbes = goneProbes;
+      const replacedBy = new Map(Object.entries(replacements.bySha).map(([lost, r]) => [lost, r.sha]));
+      // Redundant re-sourced files stand behind the copy already listed.
+      for (const [file, target] of Object.entries(replacements.redundant)) replacedBy.set(file, target);
       if (dropped !== lastDropped) {
         lastDropped = dropped;
         log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
@@ -1214,7 +1240,9 @@ async function main(): Promise<void> {
         state.allAddedAt(),
         embeddedArt,
         releaseArt,
-        lyricStore.forManifest()
+        lyricStore.forManifest(),
+        goneProbes,
+        replacedBy
       );
     };
 
@@ -1225,58 +1253,6 @@ async function main(): Promise<void> {
     let rowsSince: string | null = null;
     let lastIntegrity: string | null = null;
 
-    // Fetch lyrics for tracks that have none, a few at a time. Not awaited by
-    // the cycle: a slow or absent LRCLIB must never delay the scan schedule.
-    let lyricPassRunning = false;
-    const fetchLyrics = async (): Promise<void> => {
-      if (lyricPassRunning) return;
-      lyricPassRunning = true;
-      try {
-        const m = await manifestBuilder();
-        const targets: LyricTarget[] = m.tracks.map((t) => ({
-          sha: t.sha,
-          title: t.title,
-          artist: t.primaryArtist ?? t.artist,
-          album: t.album,
-          durationMs: t.durationMs,
-        }));
-        const r = await runLyricPass({
-          tracks: targets,
-          store: lyricStore,
-          client: lrclib,
-          limit: 40,
-        });
-        if (r.found > 0 || r.none > 0 || r.stoppedEarly) {
-          log.info({ event: "LYRICS_PASS", ...r });
-        }
-      } catch (e) {
-        log.warn({ event: "LYRICS_PASS_FAILED", err: String(e).slice(0, 200) });
-      } finally {
-        lyricPassRunning = false;
-      }
-    };
-
-    // A listener's lyrics put on the edge straight away, so other phones get
-    // them on their next look and not at the next scan.
-    const publishManifestNow = (): void => {
-      if (!env.publishUrl || !env.publishKey) return;
-      void (async () => {
-        try {
-          const manifest = await manifestBuilder();
-          const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
-          const done = await publishCloud({
-            url: env.publishUrl as string,
-            key: env.publishKey as string,
-            manifest,
-            rows: [],
-            log,
-          });
-          if (done !== null && typeof integrity === "string") lastIntegrity = integrity;
-        } catch (e) {
-          log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
-        }
-      })();
-    };
     const channelIds = channels.map((c) => String(c.id));
     const publishNow = async (): Promise<void> => {
       if (!env.publishUrl || !env.publishKey) return;
@@ -1305,6 +1281,175 @@ async function main(): Promise<void> {
     // once, and one trailing publish so the last file is never left unshown.
     // The download pacing is untouched; this only changes when results appear.
     const publishSoon = coalesce(publishNow, 30_000);
+
+    // A play that finds its source gone shows the live copy next manifest.
+    onDemand.onGone = () => publishSoon.request();
+
+    // Every source checked about once a week, a few minutes after start so it
+    // never competes with the first scan. Reads only; see audit.ts.
+    let auditRunning = false;
+    const auditIfDue = async (): Promise<void> => {
+      if (auditRunning || !auditDue(state.data.auditedAt, new Date())) return;
+      auditRunning = true;
+      try {
+        const r = await auditSources(client, state, log, { channelIds });
+        if (r.gone > 0) publishSoon.request();
+      } finally {
+        auditRunning = false;
+      }
+      await resourceIfConfigured();
+    };
+
+    // Songs with no copy left are looked for on Soulseek (slskd), one at a
+    // time, capped per day. Off unless slskd is configured.
+    const slsk = slskdConfig();
+    let resourceRunning = false;
+    const resourceIfConfigured = async (): Promise<void> => {
+      if (!slsk || resourceRunning) return;
+      resourceRunning = true;
+      try {
+        const m = await manifestBuilder();
+        const pointed = new Set(m.tracks.flatMap((t) => t.dupeShas));
+        // Songs lost to a deleted message (audit, play) first: those were
+        // playing until recently. Then the ones hidden for longer, whose only
+        // source was a channel no longer ingested.
+        const recentlyGone = new Set(
+          state.sightingsFor(channelIds).filter((r) => state.isGone(String(r.chat), r.msg)).map((r) => r.sha)
+        );
+        const norm = (x: string | null | undefined) => (x ?? "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
+        const listed = m.tracks.map((t) => ({
+          sha: t.sha,
+          artist: norm(t.primaryArtist || t.artist),
+          title: norm(t.title),
+          durationMs: t.durationMs ?? null,
+        }));
+        const inLibrary = (w: { artist: string; title: string; durationMs?: number | null }) => {
+          const a = norm(w.artist.split(/[,;/&]| feat/i)[0]);
+          const ti = norm(w.title);
+          const hit = listed.find(
+            (t) =>
+              t.title === ti &&
+              (t.artist.includes(a) || a.includes(t.artist)) &&
+              (w.durationMs == null || t.durationMs == null || Math.abs(t.durationMs - w.durationMs) <= 3000)
+          );
+          return hit?.sha ?? null;
+        };
+        const lost = lastGoneProbes
+          .filter((p) => !pointed.has(p.sha))
+          .sort((a, b) => Number(recentlyGone.has(b.sha)) - Number(recentlyGone.has(a.sha)));
+        const commit = async (path: string, size: number) => {
+          const staging = await store.beginStaging();
+          await rename(path, staging.path);
+          return (await staging.done(size)).sha;
+        };
+        let foundAny = false;
+        if (lost.length > 0) {
+        log.info({ event: "SOULSEEK_PASS", lost: lost.length });
+        const r = await resourceLost(lost, {
+          api: new SlskdApi(slsk.url, slsk.apiKey),
+          downloadsDir: join(env.dataDir, "soulseek", "downloads"),
+          probe: (path, size) => probeFile("pending", size, path),
+          commit: async (path, size) => {
+            const staging = await store.beginStaging();
+            await rename(path, staging.path);
+            return (await staging.done(size)).sha;
+          },
+          ledgerPath: replacementsFile,
+          log,
+          inLibrary,
+        });
+        log.info({ event: "SOULSEEK_PASS_DONE", ...r });
+        if (r.found > 0) foundAny = true;
+        }
+        // Then albums held in part: their missing songs (complete.ts).
+        const albums = partialAlbums(m.releases);
+        if (albums.length > 0) {
+          const c = await completeAlbums(albums, {
+            deezer,
+            api: new SlskdApi(slsk.url, slsk.apiKey),
+            downloadsDir: join(env.dataDir, "soulseek", "downloads"),
+            probe: (path, size) => probeFile("pending", size, path),
+            commit,
+            inLibrary: (w) =>
+              inLibrary({ artist: w.artist, title: w.title, durationMs: w.durationMs ?? null }),
+            ledgerPath: replacementsFile,
+            log,
+          });
+          log.info({ event: "COMPLETE_PASS_DONE", ...c });
+          if (c.found > 0) foundAny = true;
+        }
+        if (foundAny) {
+          await runEnrichPass();
+          publishSoon.request();
+          // New songs are only here until the archive pass sends them up.
+          void archiveAndPrune();
+        }
+      } catch (e) {
+        log.error({ event: "SOULSEEK_PASS_FAILED", err: String(e) });
+      } finally {
+        resourceRunning = false;
+      }
+    };
+    setTimeout(() => void resourceIfConfigured(), 6 * 60_000).unref?.();
+    setInterval(() => void resourceIfConfigured(), 6 * 60 * 60_000).unref?.();
+    setTimeout(() => void auditIfDue(), 3 * 60_000).unref?.();
+    setInterval(() => void auditIfDue(), 6 * 60 * 60_000).unref?.();
+
+    // Telegram is the library's home and the box a cache (archive.ts). Songs
+    // only held here go up to the archive channel; then the store is held to
+    // TUNESD_CACHE_MAX_BYTES, evicting only what Telegram still holds.
+    const archiveChat = Number(process.env["TUNESD_ARCHIVE_CHAT"] ?? channels[0]?.id ?? NaN);
+    const cacheMax = Number(process.env["TUNESD_CACHE_MAX_BYTES"] ?? NaN);
+    let archiveRunning = false;
+    const archiveAndPrune = async (): Promise<void> => {
+      if (archiveRunning) return;
+      archiveRunning = true;
+      try {
+        if (Number.isFinite(archiveChat) && channelIds.includes(String(archiveChat))) {
+          const live = liveShas(state, channelIds);
+          const redundant = new Set(Object.keys((await loadReplacements(replacementsFile)).redundant));
+          const todo = needsArchive(
+            await store.listObjects(),
+            live,
+            (sha) => probeCache.get(sha)?.audioSha ?? undefined,
+            redundant,
+          );
+          if (todo.length > 0) {
+            log.info({ event: "ARCHIVE_PASS", todo: todo.length });
+            const r = await archiveAll(
+              {
+                store,
+                state,
+                tg: client,
+                archiveChat,
+                meta: (sha) => {
+                  const p = probeCache.get(sha);
+                  return p
+                    ? { title: p.tags?.title, artist: p.tags?.artist, album: p.tags?.album, durationMs: p.durationMs ?? undefined, codec: p.codec ?? undefined }
+                    : undefined;
+                },
+                log,
+                sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+              },
+              todo,
+              { max: 40, pauseMs: 20_000 },
+            );
+            log.info({ event: "ARCHIVE_PASS_DONE", ...r });
+            if (r.uploaded > 0) publishSoon.request();
+          }
+        }
+        if (Number.isFinite(cacheMax) && cacheMax > 0) {
+          const r = await store.prune(cacheMax, evictable(state, channelIds));
+          if (r.removed > 0) log.info({ event: "CACHE_PRUNED", ...r });
+        }
+      } catch (e) {
+        log.error({ event: "ARCHIVE_PASS_FAILED", err: String(e) });
+      } finally {
+        archiveRunning = false;
+      }
+    };
+    setTimeout(() => void archiveAndPrune(), 12 * 60_000).unref?.();
+    setInterval(() => void archiveAndPrune(), 60 * 60_000).unref?.();
 
     // New audio goes up to R2 from the local copy straight away, so a friend's
     // first play of it is a cache hit rather than a cold Telegram fetch.
@@ -1363,6 +1508,37 @@ async function main(): Promise<void> {
     // Telegram tells us about new posts; the poll below is only the safety net.
     const wake = new Wake({ settleMs: 5_000, minGapMs: 20_000 });
 
+    // Fetch lyrics for tracks that have none, a few at a time. Not awaited by
+    // the cycle: a slow or absent LRCLIB must never delay the scan schedule.
+    let lyricPassRunning = false;
+    const fetchLyrics = async (): Promise<void> => {
+      if (lyricPassRunning) return;
+      lyricPassRunning = true;
+      try {
+        const m = await manifestBuilder();
+        const targets: LyricTarget[] = m.tracks.map((t) => ({
+          sha: t.sha,
+          title: t.title,
+          artist: t.primaryArtist ?? t.artist,
+          album: t.album,
+          durationMs: t.durationMs,
+        }));
+        const r = await runLyricPass({
+          tracks: targets,
+          store: lyricStore,
+          client: lrclib,
+          limit: 40,
+        });
+        if (r.found > 0 || r.none > 0 || r.stoppedEarly) {
+          log.info({ event: "LYRICS_PASS", ...r });
+        }
+      } catch (e) {
+        log.warn({ event: "LYRICS_PASS_FAILED", err: String(e).slice(0, 200) });
+      } finally {
+        lyricPassRunning = false;
+      }
+    };
+
     const run = async (): Promise<void> => {
       wake.started();
       const result = await engine.runCycle(channels);
@@ -1372,9 +1548,9 @@ async function main(): Promise<void> {
         aborted: result.aborted,
         reason: result.reason,
       });
-      void fetchLyrics();
       // Best effort and not awaited: the scan schedule is ban-safety, publishing
       // must not shift it, and a failure only logs.
+      void fetchLyrics();
       publishSoon.request();
       void queueAudioBacklog().catch((e) =>
         log.warn({ event: "AUDIO_BACKLOG_FAILED", err: String(e).slice(0, 160) })
@@ -1440,7 +1616,8 @@ async function main(): Promise<void> {
         updates,
         onDemand,
         lyricStore,
-        publishManifestNow
+        // A listener's lyrics go to the edge soon, not at the next scan.
+        () => publishSoon.request()
       );
       await server.start();
       // Lyrics are asked for on their own beat as well as after each scan: a

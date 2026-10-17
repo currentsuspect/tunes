@@ -156,6 +156,39 @@ export class DeezerClient {
     return out;
   }
 
+  /** An album's track list (for completing albums held in part). */
+  async albumTracks(albumId: number): Promise<DeezerTrack[]> {
+    await this.rateLimit();
+    const url = `https://api.deezer.com/album/${albumId}/tracks?limit=200`;
+    let res: Response;
+    try {
+      res = await this.fetcher(url, {
+        headers: { "User-Agent": this.userAgent, Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (e) {
+      throw new DeezerUnavailable(`album tracks failed: ${String(e)}`);
+    }
+    if (!res.ok) throw new DeezerUnavailable(`album tracks returned HTTP ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ title?: string; duration?: number; track_position?: number; disk_number?: number; artist?: { name?: string } }>;
+      error?: { message?: string };
+    };
+    if (body.error != null) throw new DeezerUnavailable(`album tracks error: ${body.error.message ?? "?"}`);
+    const out: DeezerTrack[] = [];
+    for (const r of Array.isArray(body.data) ? body.data : []) {
+      if (!r.title?.trim()) continue;
+      out.push({
+        title: r.title.trim(),
+        artist: r.artist?.name?.trim() ?? "",
+        durationMs: (r.duration ?? 0) * 1000,
+        trackNumber: r.track_position ?? null,
+        discNumber: r.disk_number ?? null,
+      });
+    }
+    return out;
+  }
+
   /** Every candidate, so a caller can pick the one whose name actually matches. */
   async searchArtistCandidates(name: string): Promise<DeezerArtist[]> {
     await this.rateLimit();
@@ -193,6 +226,14 @@ export class DeezerClient {
     }
     return out;
   }
+}
+
+export interface DeezerTrack {
+  title: string;
+  artist: string;
+  durationMs: number;
+  trackNumber: number | null;
+  discNumber: number | null;
 }
 
 export interface DeezerAlbum {

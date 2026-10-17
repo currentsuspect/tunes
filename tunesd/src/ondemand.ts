@@ -4,7 +4,7 @@ import type { Log } from "./logger.js";
 import { ObjectStore } from "./store.js";
 import { State } from "./state.js";
 import type { MtprotoClient } from "./telegram/mtproto.js";
-import { RetryableError } from "./telegram/ports.js";
+import { RetryableError, SourceGoneError } from "./telegram/ports.js";
 
 export interface OnDemandEnv {
   dailyCapFiles: number;
@@ -29,6 +29,9 @@ export interface OnDemandEnv {
 export class OnDemandFetcher {
   private readonly inflight = new Map<string, Promise<string | null>>();
   private readonly maxInflight: number;
+
+  /** Told when a source turned out to be gone, so the manifest is rebuilt. */
+  onGone: (() => void) | null = null;
 
   constructor(
     private readonly client: MtprotoClient,
@@ -76,6 +79,8 @@ export class OnDemandFetcher {
     // the next is tried -- seen live when the pre-swap channel's messages
     // answered "not found" while the bytes were reachable elsewhere.
     for (const src of sources) {
+      // Known gone: trying it again only spends a Telegram call to hear so.
+      if (this.state.isGone(src.channelId, src.messageId)) continue;
       const got = await this.trySource(sha, src.channelId, src.messageId);
       if (got !== null) return got;
     }
@@ -111,6 +116,15 @@ export class OnDemandFetcher {
       await rm(staging.path, { force: true });
       if (e instanceof RetryableError) {
         this.log.error({ event: "ONDEMAND_TRANSPORT", err: String(e) });
+        return null;
+      }
+      if (e instanceof SourceGoneError) {
+        // Remembered, so the next manifest offers a live copy of the same
+        // recording instead of this one, which can never play again.
+        this.state.markGone(channelId, messageId);
+        await this.state.save();
+        this.log.warn({ event: "ONDEMAND_SOURCE_GONE", msg: messageId });
+        this.onGone?.();
         return null;
       }
       this.log.warn({ event: "ONDEMAND_FAILED", err: String(e) });

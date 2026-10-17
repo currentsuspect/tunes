@@ -1,3 +1,4 @@
+import { ARCHIVE_MARK } from "./archive.js";
 import type { Log } from "./logger.js";
 import { ObjectStore } from "./store.js";
 import { State } from "./state.js";
@@ -104,6 +105,12 @@ export class FetchEngine {
           minId: cursor.headCursor,
         })) {
           stats.scanned += 1;
+
+          // An archive upload (archive.ts) is recorded by the archiver.
+          if (ref.caption?.includes(ARCHIVE_MARK)) {
+            if (ref.messageId > maxSeen) maxSeen = ref.messageId;
+            continue;
+          }
 
           if (this.state.hasSeen(String(channel.id), ref.messageId)) {
             if (ref.messageId > maxSeen) maxSeen = ref.messageId;

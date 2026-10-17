@@ -932,6 +932,18 @@ describe("exact-audio dedupe", () => {
     expect(m.tracks).toHaveLength(1);
   });
 
+  it("a track with no cover wears its album's", () => {
+    const m = buildManifest(
+      [
+        probe({ sha: sha("a"), audioSha: "a1", tags: { title: "SUMMER", artist: "The Carters", album: "EVERYTHING IS LOVE", trackNumber: 1 } }),
+        probe({ sha: sha("b"), audioSha: "b1", tags: { title: "APESHIT", artist: "The Carters", album: "EVERYTHING IS LOVE", trackNumber: 2 } }),
+      ],
+      new Map(), new Map(), [], [], new Map(), new Map(),
+      new Map([[sha("b"), "c".repeat(64)]])
+    );
+    expect(m.tracks.map((t) => t.artSha)).toEqual(["c".repeat(64), "c".repeat(64)]);
+  });
+
   it("keeps the lowest sha256 as canonical, per SPEC §5's tiebreak", () => {
     const m = buildManifest([
       probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "T" } }),
@@ -947,6 +959,28 @@ describe("exact-audio dedupe", () => {
       probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "T" } }),
     ]);
     expect(m.tracks[0]?.dupeShas).toEqual([sha("b"), sha("c")]);
+  });
+
+  it("points a copy that can no longer play at the listed one", () => {
+    // sha("a") is the lowest, but its source is gone: it is not listed, and the
+    // live copy carries it as a dupe so likes and playlists follow the song.
+    const m = buildManifest(
+      [probe({ sha: sha("c"), audioSha: "aaaa", tags: { title: "Team ceo" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map(), new Map(),
+      [probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Team ceo" } })]
+    );
+    expect(m.tracks.map((t) => t.sha)).toEqual([sha("c")]);
+    expect(m.tracks[0]?.dupeShas).toEqual([sha("a")]);
+  });
+
+  it("drops a gone copy with no live twin rather than inventing one", () => {
+    const m = buildManifest(
+      [probe({ sha: sha("c"), audioSha: "cccc", tags: { title: "Other" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map(), new Map(),
+      [probe({ sha: sha("a"), audioSha: "aaaa", tags: { title: "Gone" } })]
+    );
+    expect(m.tracks.map((t) => t.sha)).toEqual([sha("c")]);
+    expect(m.tracks[0]?.dupeShas).toEqual([]);
   });
 
   it("does not merge different recordings that share a title", () => {

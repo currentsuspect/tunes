@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnDemandFetcher } from "../src/ondemand.js";
 import { ObjectStore } from "../src/store.js";
 import { State } from "../src/state.js";
-import { RetryableError, PermanentError } from "../src/telegram/ports.js";
+import { RetryableError, PermanentError, SourceGoneError } from "../src/telegram/ports.js";
 
 const log = {
   info: () => {},
@@ -196,5 +196,25 @@ describe("State.findMessage", () => {
 
   it("returns null for unknown shas", async () => {
     expect(state.findMessage("zzz")).toBeNull();
+  });
+
+  it("remembers a source that is gone and does not ask Telegram again", async () => {
+    const sha = "e".repeat(64);
+    state.markSeen("-99", 5328, sha, null, null);
+    const c = client(async () => {
+      throw new SourceGoneError("Source message 5328 not found in -99");
+    });
+    const f = new OnDemandFetcher(c, store, state, { dailyCapFiles: 10 }, log);
+    let told = 0;
+    f.onGone = () => {
+      told += 1;
+    };
+    expect(await f.fetchTrack(sha)).toBeNull();
+    expect(state.isGone("-99", 5328)).toBe(true);
+    expect(told).toBe(1);
+    expect(await f.fetchTrack(sha)).toBeNull();
+    expect(c.downloadAudioTo).toHaveBeenCalledTimes(1);
+    const reloaded = await new State(join(dir, "state.json")).load();
+    expect(reloaded.isGone("-99", 5328)).toBe(true);
   });
 });

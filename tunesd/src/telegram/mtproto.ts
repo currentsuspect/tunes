@@ -1,10 +1,11 @@
 import { statSync } from "node:fs";
 import type { Log } from "../logger.js";
-import { PermanentError, RetryableError } from "./ports.js";
+import { PermanentError, RetryableError, SourceGoneError } from "./ports.js";
 import { TelegramClient, Api } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
 import { NewMessage } from "teleproto/events/index.js";
 import { FloodWaitError, SlowModeWaitError } from "teleproto/errors/index.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 
 export interface AudioRef {
   messageId: number;
@@ -223,6 +224,25 @@ export class MtprotoClient {
     }
   }
 
+  /** Which of [ids] in [chatId] no longer hold audio: deleted, emptied, or
+   * edited to something else. One call for up to 100 ids, no downloads. */
+  async missingAudio(chatId: number, ids: number[]): Promise<number[]> {
+    try {
+      const client = await this.connect();
+      const peer = await this.peer(chatId);
+      const fetched = await client.getMessages(peer, { ids });
+      const present = new Set<number>();
+      for (const m of fetched as unknown as Array<Api.Message | undefined>) {
+        if (!m || (m as { className?: string }).className === "MessageEmpty") continue;
+        if (MtprotoClient.audioDocOf(m) == null) continue;
+        present.add(Number(m.id));
+      }
+      return ids.filter((id) => !present.has(id));
+    } catch (e) {
+      throw this.onInvokeError(e);
+    }
+  }
+
   async downloadAudioTo(
     chatId: number,
     messageId: number,
@@ -233,9 +253,11 @@ export class MtprotoClient {
       const peer = await this.peer(chatId);
       const fetched = await client.getMessages(peer, { ids: [messageId] });
       const msg = fetched[0];
-      if (!msg) throw new PermanentError(`Source message ${messageId} not found in ${chatId}`);
+      if (!msg || (msg as { className?: string }).className === "MessageEmpty") {
+        throw new SourceGoneError(`Source message ${messageId} not found in ${chatId}`);
+      }
       const doc = MtprotoClient.audioDocOf(msg as Api.Message);
-      if (!doc) throw new PermanentError(`Source message ${messageId} has no audio media`);
+      if (!doc) throw new SourceGoneError(`Source message ${messageId} has no audio media`);
       await client.downloadMedia(msg as Api.Message, {
         outputFile: outPath,
         progressCallback: (downloaded: unknown) => {
@@ -250,6 +272,51 @@ export class MtprotoClient {
         },
       });
       return statSync(outPath).size;
+    } catch (e) {
+      throw this.onInvokeError(e);
+    }
+  }
+
+  /**
+   * Uploads a file as an audio document (never re-encoded: Telegram keeps a
+   * document's bytes as sent, so the copy hashes the same). Returns the new
+   * message's id and the document's size as Telegram recorded it.
+   */
+  async uploadAudio(
+    chatId: number,
+    filePath: string,
+    meta: { fileName: string; title?: string; performer?: string; durationSec?: number; caption?: string },
+  ): Promise<{ messageId: number; size: number }> {
+    try {
+      const client = await this.connect();
+      const peer = await this.peer(chatId);
+      // Named, not a bare path: store objects are named by sha with no
+      // extension, and the library takes the file type from the name. A bare
+      // path went up as an untyped document (17 Oct).
+      const file = new CustomFile(meta.fileName, statSync(filePath).size, filePath);
+      const sent = (await client.sendFile(peer, {
+        file,
+        caption: meta.caption ?? "",
+        forceDocument: false,
+        attributes: [
+          new Api.DocumentAttributeAudio({
+            duration: Math.max(0, Math.round(meta.durationSec ?? 0)),
+            title: meta.title,
+            performer: meta.performer,
+          }),
+          new Api.DocumentAttributeFilename({ fileName: meta.fileName }),
+        ],
+      })) as Api.Message;
+      // Judged on the message as Telegram holds it, read back, not on the
+      // send's reply.
+      const [back] = await client.getMessages(peer, { ids: [sent.id] });
+      const doc = back ? MtprotoClient.audioDocOf(back as Api.Message) : null;
+      if (!doc) {
+        // Not playable as audio: take it down again so no stray copy is left.
+        await client.deleteMessages(peer, [sent.id], { revoke: true }).catch(() => undefined);
+        throw new Error("upload did not come back as an audio document");
+      }
+      return { messageId: sent.id, size: Number(doc.size) };
     } catch (e) {
       throw this.onInvokeError(e);
     }
