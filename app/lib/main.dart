@@ -516,11 +516,12 @@ Future<void> main() async {
     }
   });
   player.isOffline = () => reachability.offline;
-  // Asked when a stream fails, so a failure offline is known as one straight
-  // away instead of after the heartbeat's three strikes.
+  // Asked when a stream fails, so an unreachable service contributes to the
+  // same three-strike counter as the heartbeat instead of flipping the app
+  // offline on one transient miss.
   player.checkOnline = () async {
     if (!await hasNetworkAddress()) {
-      reachability.setOffline(true);
+      reachability.failed();
       return false;
     }
     // Bounded: while this runs, further stream errors are ignored, so a
@@ -533,8 +534,10 @@ Future<void> main() async {
     if (answered) {
       reachability.ok();
     } else {
-      // A failed stream and a failed ping together: offline enough.
-      reachability.setOffline(true);
+      // A single failed stream plus ping can still be a transient server or
+      // network wobble. Keep the same three-strike threshold as the heartbeat
+      // so one missed request cannot flip the whole app offline.
+      reachability.failed();
     }
     return answered;
   };
