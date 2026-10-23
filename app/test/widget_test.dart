@@ -457,8 +457,14 @@ List<ManifestTrack> _library() => [
   _track('Nightdrive', 'mp3', 320000, addedAt: DateTime.utc(2026, 1, 1)),
 ];
 
-TunesManifest _manifestOf(List<ManifestTrack> tracks) =>
-    TunesManifest(tracks: tracks, releases: groupReleases(tracks));
+TunesManifest _manifestOf(
+  List<ManifestTrack> tracks, {
+  DateTime? generatedAt,
+}) => TunesManifest(
+  tracks: tracks,
+  releases: groupReleases(tracks),
+  generatedAt: generatedAt,
+);
 
 void main() {
   late Directory tempDir;
@@ -559,7 +565,8 @@ void main() {
     tester,
   ) async {
     final client = _FakeClient(
-      () async => _manifestOf(_library()),
+      () async =>
+          _manifestOf(_library(), generatedAt: DateTime.utc(2026, 8, 31)),
       onChanges: (_) async => ChangesResponse(
         generatedAt: null,
         integrity: '',
@@ -585,12 +592,59 @@ void main() {
     // Second sync: _lastSyncAt is set → /changes called with it; empty
     // addedShas short-circuits the /manifest download.
     expect(client.changesCalls, hasLength(1));
-    // The 'since' parameter should be the time of the previous sync, well
-    // in the past (we wait some pump cycles between the two).
+    // The 'since' parameter is the watermark: the moment the manifest the
+    // phone holds was built, never the moment of the last sync. A watermark
+    // of "now" would retire every track the applied manifest did not contain,
+    // and /changes only ever names what arrived after the watermark
+    // (domain/sync_watermark).
     final since = client.changesCalls.single;
-    final now = DateTime.now();
-    expect(since.isBefore(now), isTrue);
-    expect(now.difference(since).inMinutes < 5, isTrue);
+    expect(since, DateTime.utc(2026, 8, 31));
+  });
+
+  testWidgets('a stale manifest does not retire the tracks it is missing', (
+    tester,
+  ) async {
+    // The edge answers /manifest from a cached copy while /changes is
+    // answered by the live daemon, so the two can disagree: /changes names a
+    // track the cached manifest predates. Applying that manifest and then
+    // claiming "now" would retire the track for good — nothing would ever
+    // name it again, and the library would stop growing. The watermark has
+    // to stay at the moment that copy was built.
+    final stale = _track(
+      'Bassline',
+      'flac',
+      950000,
+      addedAt: DateTime.utc(2026, 8, 30),
+    );
+    final client = _FakeClient(
+      () async => _manifestOf([stale], generatedAt: DateTime.utc(2026, 8, 31)),
+      onChanges: (_) async => ChangesResponse(
+        generatedAt: null,
+        integrity: '',
+        addedShas: ['c' * 64],
+      ),
+    );
+    await pumpApp(tester, client, FakeTunePlayer());
+    expect(client.changesCalls, isEmpty);
+
+    await tester.fling(
+      find.byType(TunesRefreshList),
+      const Offset(0, 320),
+      1000,
+    );
+    await tester.pumpAndSettle();
+
+    // The second sync asked about the tracks it is missing, and the watermark
+    // it sent is when that stale copy was built -- not the moment it synced,
+    // so the track the copy predates keeps being named.
+    expect(client.changesCalls, hasLength(1));
+    final since = client.changesCalls.single;
+    expect(since, DateTime.utc(2026, 8, 31));
+    expect(
+      DateTime.now().difference(since).inDays,
+      greaterThan(1),
+      reason: 'the watermark must not run past the manifest that was applied',
+    );
   });
 
   testWidgets('the library is asked about again every few minutes, and on '

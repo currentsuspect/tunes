@@ -363,6 +363,7 @@ class TunesManifest {
     required this.releases,
     this.artists = const [],
     this.integrity,
+    this.generatedAt,
     this.pointers = const {},
   });
 
@@ -382,6 +383,14 @@ class TunesManifest {
   /// arrived after it was first shown -- so it is how the app tells that a
   /// library it already has has changed.
   final String? integrity;
+
+  /// When the daemon built this snapshot of the library.
+  ///
+  /// The edge can hand out a cached copy from R2 while the live daemon keeps
+  /// naming what arrived since, so this is the only timestamp that says how
+  /// much of the library this copy is known to cover. The sync watermark is
+  /// taken from it (domain/sync_watermark).
+  final DateTime? generatedAt;
 
   /// The library as it is without a connection: only the songs [held] says are
   /// on the phone, the records that have any of them left, and each record cut
@@ -454,6 +463,7 @@ class TunesManifest {
         releases: groupReleases(tracks),
         artists: artists,
         integrity: json['integrity'] as String?,
+        generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
         pointers: pointers,
       );
     }
@@ -462,6 +472,7 @@ class TunesManifest {
       releases: releases,
       artists: artists,
       integrity: json['integrity'] as String?,
+      generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
       pointers: pointers,
     );
   }

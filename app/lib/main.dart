@@ -70,6 +70,7 @@ import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'domain/mixes.dart';
+import 'domain/sync_watermark.dart';
 import 'domain/whats_new.dart';
 import 'features/album/album_page.dart';
 import 'features/artist/artist_page.dart';
@@ -1496,6 +1497,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // advance the watermark when this is true — otherwise a transient
     // error could mask new tracks behind a stale timestamp.
     var synced = false;
+    // The build time and the track timestamps the applied manifest actually
+    // carried. The watermark is derived from those rather than from the clock:
+    // the clock would claim this phone holds tracks that a stale manifest
+    // never contained, and those tracks would then never be named again
+    // (domain/sync_watermark).
+    DateTime? appliedGeneratedAt;
+    final appliedAddedAts = <DateTime?>[];
     // Try the delta endpoint first. If the daemon says nothing has
     // changed since our last sync, skip the full manifest download
     // entirely. Falls through to /manifest on any error.
@@ -1561,6 +1569,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (mounted) setState(() => _lastSyncError = e);
         }
         if (mounted && applyOk) {
+          appliedGeneratedAt = raw.generatedAt;
+          appliedAddedAts
+            ..clear()
+            ..addAll(raw.tracks.map((t) => t.addedAt));
           final fresh = await _manifestFromStore();
           if (mounted) setState(() => _manifest = fresh);
           unawaited(_refreshPlayerTracks());
@@ -1575,7 +1587,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (mounted) {
       setState(() {
-        if (synced) _lastSyncAt = DateTime.now();
+        if (synced) {
+          _lastSyncAt = watermarkAfterApply(
+            current: _lastSyncAt,
+            generatedAt: appliedGeneratedAt,
+            addedAts: appliedAddedAts,
+          );
+        }
         _syncing = false;
       });
     }
