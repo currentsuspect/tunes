@@ -517,12 +517,15 @@ Future<void> main() async {
     }
   });
   player.isOffline = () => reachability.offline;
-  // Asked when a stream fails, so an unreachable service contributes to the
-  // same three-strike counter as the heartbeat instead of flipping the app
-  // offline on one transient miss.
+  // Asked when a stream fails, so a service that cannot be reached counts
+  // toward the same three strikes as the heartbeat instead of flipping the
+  // app offline on one transient miss.
   player.checkOnline = () async {
     if (!await hasNetworkAddress()) {
-      reachability.failed();
+      // Not a miss: there is no address to reach anything from. Saying so at
+      // once is honest, and three beats of "online" here would only delay the
+      // banner behind a fact that is already known.
+      reachability.setOffline(true);
       return false;
     }
     // Bounded: while this runs, further stream errors are ignored, so a
