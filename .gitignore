@@ -1,5 +1,7 @@
 # node
-node_modules/
+# No trailing slash: a node_modules SYMLINK is a file, and "node_modules/" let
+# two of them be committed (tunesd/, edge/), which took the box daemon down.
+node_modules
 dist/
 *.log
 
