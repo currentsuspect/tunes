@@ -1,0 +1,58 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/data/gets.dart';
+import 'package:tunes/core/net/tunes_client.dart';
+import 'package:tunes/domain/soulseek.dart';
+
+class _Box extends TunesClient {
+  _Box() : super('http://test');
+  List<GetJob> jobs = const [];
+
+  @override
+  Future<GetJob> soulseekGet({
+    required String title,
+    required String artist,
+    String? album,
+    int? durationMs,
+    String? release,
+    FoundSong? copy,
+  }) async =>
+      GetJob(id: 'old', title: title, artist: artist, state: GetState.queued);
+
+  @override
+  Future<List<GetJob>> soulseekJobs() async => jobs;
+}
+
+void main() {
+  test(
+    'follows a song across a box restart, by song when the id is new',
+    () async {
+      final box = _Box();
+      var landed = 0;
+      final g = GetsController(client: box, onLanded: () => landed++);
+      await g.get(null, title: 'In Need', artist: 'Skyte');
+      box.jobs = const [
+        GetJob(
+          id: 'new',
+          title: 'In Need',
+          artist: 'Skyte',
+          state: GetState.done,
+          sha: 'abc',
+        ),
+      ];
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      expect(g.jobFor('Skyte', 'In Need')?.state, GetState.done);
+      expect(landed, 1);
+      g.dispose();
+    },
+  );
+
+  test('a get the box no longer knows shows as failed, not forever', () async {
+    final box = _Box();
+    final g = GetsController(client: box, onLanded: () {});
+    await g.get(null, title: 'In Need', artist: 'Skyte');
+    box.jobs = const [];
+    await Future<void>.delayed(const Duration(milliseconds: 2100));
+    expect(g.jobFor('Skyte', 'In Need')?.state, GetState.failed);
+    g.dispose();
+  });
+}

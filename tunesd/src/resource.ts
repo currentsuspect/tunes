@@ -188,6 +188,9 @@ export interface ResourceDeps {
    * length within 3 s), if any. Found, the lost copy points at it and
    * nothing is downloaded. */
   inLibrary?: (w: Wanted) => string | null;
+  /** True when someone has asked for a song (getter.ts): the pass stops
+   * between songs so the ask goes first, and picks up at the next pass. */
+  shouldYield?: () => boolean;
   dailyCap?: number;
   acquireOptions?: AcquireOptions;
 }
@@ -215,6 +218,10 @@ export async function resourceLost(
   let missed = 0;
   let skipped = 0;
   for (const p of lost) {
+    if (deps.shouldYield?.()) {
+      deps.log.info({ event: "SOULSEEK_PASS_YIELDS" });
+      break;
+    }
     if (ledger.bySha[p.sha]) continue;
     const missAt = ledger.misses[p.sha];
     if (missAt && now().getTime() - Date.parse(missAt) < 7 * 24 * 3600_000) {

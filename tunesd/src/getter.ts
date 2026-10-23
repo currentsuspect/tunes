@@ -324,6 +324,11 @@ export class Getter {
     return this.running;
   }
 
+  /** Someone is waiting on a get: the background pass stops between songs. */
+  get waiting(): boolean {
+    return this.jobs.some((j) => j.state === "queued");
+  }
+
   private now(): Date {
     return this.deps.now?.() ?? new Date();
   }

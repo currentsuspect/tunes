@@ -68,6 +68,9 @@ export interface CompleteDeps {
   inLibrary: (w: Wanted) => string | null;
   ledgerPath: string;
   log: Log;
+  /** True when someone has asked for a song (getter.ts): the pass stops
+   * between songs so the ask goes first, and picks up at the next pass. */
+  shouldYield?: () => boolean;
   dailyCap?: number;
   acquireOptions?: AcquireOptions;
 }
@@ -113,6 +116,10 @@ export async function completeAlbums(
       continue;
     }
     for (const t of tracks) {
+      if (deps.shouldYield?.()) {
+        deps.log.info({ event: "COMPLETE_PASS_YIELDS" });
+        return { albums: looked, found, missed };
+      }
       const w: Wanted = {
         artist: t.artist || album.artist,
         title: t.title,

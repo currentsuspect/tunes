@@ -90,11 +90,29 @@ class GetsController extends ChangeNotifier {
   Future<void> _check() async {
     try {
       final jobs = await client.soulseekJobs();
-      // Only the ones this phone is following; the list is everyone's.
-      final mine = {for (final j in _bySong.values) j.id};
+      // Only the songs this phone is following; the list is everyone's.
+      // Matched by id, else by song: the box forgets its queue when it
+      // restarts, and the same song asked again is a new job. One it no
+      // longer knows at all is shown as failed, so it can be asked again,
+      // rather than turning forever.
+      final byId = {for (final j in jobs) j.id: j};
+      final bySong = <String, GetJob>{};
+      for (final j in jobs) {
+        bySong.putIfAbsent(j.songKey, () => j);
+      }
       _take([
-        for (final j in jobs)
-          if (mine.contains(j.id)) j,
+        for (final f in _bySong.values)
+          if (!f.finished)
+            byId[f.id] ??
+                bySong[f.songKey] ??
+                GetJob(
+                  id: f.id,
+                  title: f.title,
+                  artist: f.artist,
+                  album: f.album,
+                  release: f.release,
+                  state: GetState.failed,
+                ),
       ]);
     } catch (_) {
       // The box is unreachable for a moment; ask again next tick.

@@ -116,6 +116,13 @@ describe("resourceLost", () => {
     expect(ledger.bySha["a".repeat(64)]?.sha).toBe("b".repeat(64));
   });
 
+  it("stops between songs when someone has asked for one", async () => {
+    const { api, started } = fakeApi();
+    const r = await resourceLost([probe()], { ...deps(api, 246000, []), shouldYield: () => true });
+    expect(r.found + r.missed).toBe(0);
+    expect(started).toEqual([]);
+  });
+
   it("leaves the downloads folder in place, which slskd needs to start", async () => {
     const { api } = fakeApi();
     await resourceLost([], deps(api, 246000, []));

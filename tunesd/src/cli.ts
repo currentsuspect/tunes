@@ -1307,6 +1307,7 @@ async function main(): Promise<void> {
     let resourceRunning = false;
     // Set once the getter exists (below, with the server).
     let gettersBusy: () => boolean = () => false;
+    let getsWaiting: () => boolean = () => false;
     const resourceIfConfigured = async (): Promise<void> => {
       // A get on request is using the downloads folder this pass clears.
       if (!slsk || resourceRunning || gettersBusy()) return;
@@ -1361,6 +1362,7 @@ async function main(): Promise<void> {
           ledgerPath: replacementsFile,
           log,
           inLibrary,
+          shouldYield: () => getsWaiting(),
         });
         log.info({ event: "SOULSEEK_PASS_DONE", ...r });
         if (r.found > 0) foundAny = true;
@@ -1378,6 +1380,7 @@ async function main(): Promise<void> {
               inLibrary({ artist: w.artist, title: w.title, durationMs: w.durationMs ?? null }),
             ledgerPath: replacementsFile,
             log,
+            shouldYield: () => getsWaiting(),
           });
           log.info({ event: "COMPLETE_PASS_DONE", ...c });
           if (c.found > 0) foundAny = true;
@@ -1650,6 +1653,7 @@ async function main(): Promise<void> {
           })
         : null;
       gettersBusy = () => getter?.busy ?? false;
+      getsWaiting = () => getter?.waiting ?? false;
 
       const server = new ManifestServer(
         store,
