@@ -29,7 +29,14 @@ enum StatsRange {
 
 /// A name and how many plays it had.
 class Ranked {
-  const Ranked(this.name, this.plays, {this.sub, this.artSha, this.sha});
+  const Ranked(
+    this.name,
+    this.plays, {
+    this.sub,
+    this.artSha,
+    this.sha,
+    this.releaseId,
+  });
 
   final String name;
   final int plays;
@@ -38,6 +45,9 @@ class Ranked {
   final String? sub;
   final String? artSha;
   final String? sha;
+
+  /// For an album: its release, when the library knows it.
+  final String? releaseId;
 }
 
 /// What the "Your listening" page says, worked out from the history.
@@ -282,7 +292,13 @@ class ListeningStats {
       }),
       topAlbums: rank(albumPlays, (k, n) {
         final t = albumInfo[k]!;
-        return Ranked(t.album, n, sub: t.artistKey, artSha: t.artSha);
+        return Ranked(
+          t.album,
+          n,
+          sub: t.artistKey,
+          artSha: t.artSha,
+          releaseId: t.releaseId,
+        );
       }),
       streakDays: streak,
       heardShare: libraryShas.isEmpty ? 0 : heard / libraryShas.length,

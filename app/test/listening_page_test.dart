@@ -166,4 +166,62 @@ void main() {
     expect(find.text('Minutes a month'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('names in the top lists go to the thing itself', (tester) async {
+    await tester.runAsync(_fonts);
+    tester.view.physicalSize = const Size(1080, 2400 * 4);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final history = (await tester.runAsync(seeded))!;
+    final artists = <String>[];
+    final albums = <String>[];
+    final songs = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTunesTheme(const MediaQueryData()),
+        home: ListeningPage(
+          history: history,
+          library: lib,
+          onArtist: artists.add,
+          onAlbum: (a) => albums.add(a.name),
+          onSong: (s) => songs.add(s.sha!),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future.delayed(const Duration(milliseconds: 200)),
+    );
+    await tester.pump();
+
+    Finder rowUnder(String heading) => find.descendant(
+      of: find.ancestor(
+        of: find.text(heading),
+        matching: find.byType(ListView),
+      ),
+      matching: find.byIcon(Icons.chevron_right_rounded),
+    );
+    expect(rowUnder('Top artists'), findsWidgets);
+
+    // The first row under each heading.
+    Future<void> tapFirstAfter(String heading) async {
+      final top = tester.getTopLeft(find.text(heading)).dy;
+      final chevrons = find.byIcon(Icons.chevron_right_rounded).evaluate();
+      final below =
+          chevrons
+              .map((e) => tester.getCenter(find.byWidget(e.widget)))
+              .where((c) => c.dy > top)
+              .toList()
+            ..sort((a, b) => a.dy.compareTo(b.dy));
+      await tester.tapAt(below.first);
+      await tester.pump();
+    }
+
+    await tapFirstAfter('Top artists');
+    await tapFirstAfter('Top songs');
+    await tapFirstAfter('Top albums');
+    expect(artists, hasLength(1));
+    expect(songs, hasLength(1));
+    expect(albums, hasLength(1));
+    expect(lib.containsKey(songs.single), isTrue);
+  });
 }

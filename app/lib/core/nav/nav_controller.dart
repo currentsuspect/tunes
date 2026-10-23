@@ -55,6 +55,7 @@ abstract final class TunesPanels {
   static const settings = 'tunes/settings';
   static const nowPlaying = 'tunes/now-playing';
   static const liked = 'tunes/liked';
+  static const listening = 'tunes/listening';
   static String album(String id) => 'tunes/album/$id';
   static String artist(String name) => 'tunes/artist/$name';
   static String playlist(int id) => 'tunes/playlist/$id';

@@ -49,11 +49,15 @@ class SettingsPage extends StatefulWidget {
     this.accountSync,
     this.library = const {},
     this.artUrlFor,
+    this.listeningLinks = const ListeningLinks(),
   });
 
   /// The library by sha, for the listening page's names and covers.
   final Map<String, ManifestTrack> library;
   final String Function(String sha)? artUrlFor;
+
+  /// Where the names on "Your listening" go.
+  final ListeningLinks listeningLinks;
 
   /// Account sync, when this build has an account. Absent in tests.
   final AccountSync? accountSync;
@@ -336,6 +340,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       history: widget.history,
                       library: widget.library,
                       artUrlFor: widget.artUrlFor,
+                      links: widget.listeningLinks,
                     ),
                     _Group(
                       title: 'Look',
@@ -1383,11 +1388,13 @@ class _ListeningCard extends StatefulWidget {
     required this.history,
     required this.library,
     required this.artUrlFor,
+    required this.links,
   });
 
   final PlayHistory history;
   final Map<String, ManifestTrack> library;
   final String Function(String sha)? artUrlFor;
+  final ListeningLinks links;
 
   @override
   State<_ListeningCard> createState() => _ListeningCardState();
@@ -1439,15 +1446,23 @@ class _ListeningCardState extends State<_ListeningCard> {
       child: InkWell(
         borderRadius: BorderRadius.circular(RadiusTokens.card),
         onTap: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => ListeningPage(
-                history: widget.history,
-                library: widget.library,
-                artUrlFor: widget.artUrlFor,
-              ),
-            ),
+          ListeningPage page() => ListeningPage(
+            history: widget.history,
+            library: widget.library,
+            artUrlFor: widget.artUrlFor,
+            onArtist: widget.links.onArtist,
+            onAlbum: widget.links.onAlbum,
+            onSong: widget.links.onSong,
           );
+          // In the app it is a panel, so an artist or album opened from it
+          // stacks on top and Back comes back to it.
+          final nav = NavScope.maybeOf(context);
+          if (nav != null) {
+            nav.openPanel(TunesPanels.listening, page);
+            return;
+          }
+          await Navigator.of(context)
+              .push(MaterialPageRoute<void>(builder: (_) => page()));
           _load();
         },
         child: Container(

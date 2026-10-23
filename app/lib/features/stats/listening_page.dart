@@ -1,11 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../../core/data/play_history.dart';
+import '../../core/nav/nav_controller.dart';
+import '../../core/ui/pressable.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/listening_stats.dart';
 import '../../domain/manifest.dart';
+
+/// Where the names on "Your listening" lead, handed down from the app shell.
+class ListeningLinks {
+  const ListeningLinks({this.onArtist, this.onAlbum, this.onSong});
+
+  final void Function(String artist)? onArtist;
+  final void Function(Ranked album)? onAlbum;
+  final void Function(Ranked song)? onSong;
+}
 
 /// "Your listening": how much, when, and what, over a range you pick.
 ///
@@ -19,11 +30,20 @@ class ListeningPage extends StatefulWidget {
     required this.history,
     required this.library,
     this.artUrlFor,
+    this.onArtist,
+    this.onAlbum,
+    this.onSong,
   });
 
   final PlayHistory history;
   final Map<String, ManifestTrack> library;
   final String Function(String sha)? artUrlFor;
+
+  /// Where a name in the top lists goes: the artist's page, the album's
+  /// page, the song itself. Without one the row is just a row.
+  final void Function(String artist)? onArtist;
+  final void Function(Ranked album)? onAlbum;
+  final void Function(Ranked song)? onSong;
 
   @override
   State<ListeningPage> createState() => _ListeningPageState();
@@ -66,7 +86,15 @@ class _ListeningPageState extends State<ListeningPage> {
             Align(
               alignment: Alignment.centerLeft,
               child: IconButton(
-                onPressed: () => Navigator.of(context).maybePop(),
+                onPressed: () {
+                  // Opened as a panel from Settings, or pushed on its own.
+                  final nav = NavScope.maybeOf(context);
+                  if (nav != null && nav.canPop) {
+                    nav.back();
+                  } else {
+                    Navigator.of(context).maybePop();
+                  }
+                },
                 tooltip: 'Back',
                 padding: EdgeInsets.zero,
                 icon: Icon(Icons.arrow_back_rounded, color: Tones.textMuted),
@@ -178,17 +206,30 @@ class _ListeningPageState extends State<ListeningPage> {
       if (s.topArtists.isNotEmpty) ...[
         const SizedBox(height: Space.xl),
         const _Heading('Top artists'),
-        _TopList(items: s.topArtists),
+        _TopList(
+          items: s.topArtists,
+          onTap: widget.onArtist == null
+              ? null
+              : (r) => widget.onArtist!(r.name),
+        ),
       ],
       if (s.topSongs.isNotEmpty) ...[
         const SizedBox(height: Space.xl),
         const _Heading('Top songs'),
-        _TopList(items: s.topSongs, artUrlFor: widget.artUrlFor),
+        _TopList(
+          items: s.topSongs,
+          artUrlFor: widget.artUrlFor,
+          onTap: widget.onSong,
+        ),
       ],
       if (s.topAlbums.isNotEmpty) ...[
         const SizedBox(height: Space.xl),
         const _Heading('Top albums'),
-        _TopList(items: s.topAlbums, artUrlFor: widget.artUrlFor),
+        _TopList(
+          items: s.topAlbums,
+          artUrlFor: widget.artUrlFor,
+          onTap: widget.onAlbum,
+        ),
       ],
       const SizedBox(height: Space.xl),
       const _Heading('Also'),
@@ -442,10 +483,11 @@ class _BarPainter extends CustomPainter {
 
 /// A ranked list, with a thin bar for each item's share of the leader.
 class _TopList extends StatelessWidget {
-  const _TopList({required this.items, this.artUrlFor});
+  const _TopList({required this.items, this.artUrlFor, this.onTap});
 
   final List<Ranked> items;
   final String Function(String sha)? artUrlFor;
+  final void Function(Ranked)? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -453,68 +495,78 @@ class _TopList extends StatelessWidget {
     return Column(
       children: [
         for (var i = 0; i < items.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(top: Space.sm + 2),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 22,
-                  child: Text('${i + 1}', style: TypeScale.mono),
-                ),
-                if (artUrlFor != null) ...[
-                  Artwork(
-                    url: items[i].artSha == null
-                        ? null
-                        : artUrlFor!(items[i].artSha!),
-                    artSha: items[i].artSha,
-                    size: 40,
-                    borderRadius: 8,
-                    fallback: GeneratedArtwork(
-                      title: items[i].name,
-                      artist: items[i].sub ?? '',
+          PressRow(
+            onTap: onTap == null ? null : () => onTap!(items[i]),
+            borderRadius: BorderRadius.circular(RadiusTokens.control),
+            child: Padding(
+              padding: const EdgeInsets.only(top: Space.sm + 2, bottom: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    child: Text('${i + 1}', style: TypeScale.mono),
+                  ),
+                  if (artUrlFor != null) ...[
+                    Artwork(
+                      url: items[i].artSha == null
+                          ? null
+                          : artUrlFor!(items[i].artSha!),
+                      artSha: items[i].artSha,
                       size: 40,
                       borderRadius: 8,
-                    ),
-                  ),
-                  const SizedBox(width: Space.md),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        items[i].name,
-                        style: TypeScale.title.copyWith(fontSize: 15),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      fallback: GeneratedArtwork(
+                        title: items[i].name,
+                        artist: items[i].sub ?? '',
+                        size: 40,
+                        borderRadius: 8,
                       ),
-                      if (items[i].sub != null)
+                    ),
+                    const SizedBox(width: Space.md),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          items[i].sub!,
-                          style: TypeScale.caption,
+                          items[i].name,
+                          style: TypeScale.title.copyWith(fontSize: 15),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      const SizedBox(height: Space.xs),
-                      LayoutBuilder(
-                        builder: (context, c) => Container(
-                          height: 3,
-                          width: c.maxWidth * items[i].plays / lead,
-                          decoration: BoxDecoration(
-                            color: Tones.primary.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(2),
+                        if (items[i].sub != null)
+                          Text(
+                            items[i].sub!,
+                            style: TypeScale.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        const SizedBox(height: Space.xs),
+                        LayoutBuilder(
+                          builder: (context, c) => Container(
+                            height: 3,
+                            width: c.maxWidth * items[i].plays / lead,
+                            decoration: BoxDecoration(
+                              color: Tones.primary.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: Space.md),
-                Text(
-                  '${items[i].plays} ${items[i].plays == 1 ? 'play' : 'plays'}',
-                  style: TypeScale.mono,
-                ),
-              ],
+                  const SizedBox(width: Space.md),
+                  Text(
+                    '${items[i].plays} ${items[i].plays == 1 ? 'play' : 'plays'}',
+                    style: TypeScale.mono,
+                  ),
+                  if (onTap != null)
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: Tones.textMuted,
+                    ),
+                ],
+              ),
             ),
           ),
       ],

@@ -70,6 +70,7 @@ import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'domain/mixes.dart';
+import 'features/stats/listening_page.dart';
 import 'domain/sync_watermark.dart';
 import 'domain/whats_new.dart';
 import 'features/album/album_page.dart';
@@ -1803,6 +1804,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             t.sha: t,
         },
         artUrlFor: _artUrlFor,
+        listeningLinks: ListeningLinks(
+          onArtist: (name) {
+            final m = _manifest;
+            if (m != null) _openArtist(name, m);
+          },
+          onAlbum: (a) {
+            final m = _manifest;
+            if (m == null) return;
+            // By release when known; else by name and artist; else the artist.
+            for (final r in m.releases) {
+              if ((a.releaseId != null && r.id == a.releaseId) ||
+                  (a.releaseId == null &&
+                      r.title == a.name &&
+                      r.artist == a.sub)) {
+                _openAlbum(r, m);
+                return;
+              }
+            }
+            if (a.sub != null) _openArtist(a.sub!, m);
+          },
+          onSong: (song) {
+            final m = _manifest;
+            final sha = song.sha;
+            if (m == null || sha == null) return;
+            for (final t in m.tracks) {
+              if (t.sha == sha) {
+                widget.player.playQueue([t], 0);
+                return;
+              }
+            }
+          },
+        ),
         supportDir: widget.store.dir,
         onResync: _reload,
         onServerChanged: (url) async {
