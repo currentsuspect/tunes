@@ -25,7 +25,8 @@ import {
 import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
 import { handleSync } from "./sync.js";
-import { handleArtGet, handleArtPut, handleAudioPut, handlePublish, handleTrackGet } from "./publish.js";
+import { handleArtGet, handleArtPut, handleAudioPut, handlePublish,
+  handleManifestPut, handleTrackGet } from "./publish.js";
 import {
   accountById,
   deviceById,
@@ -237,6 +238,12 @@ export default {
     // rather than a device credential.
     if (url.pathname === "/internal/publish") {
       return handlePublish(req, env);
+    }
+
+    // ---- PUT /internal/manifest ------------------------------------------
+    // The manifest alone, raw, streamed to R2 (publish.ts says why).
+    if (url.pathname === "/internal/manifest") {
+      return handleManifestPut(req, env);
     }
 
     // ---- PUT /internal/art/:sha ------------------------------------------

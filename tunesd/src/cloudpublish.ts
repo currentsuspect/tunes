@@ -53,35 +53,83 @@ export async function publishCloud(opts: {
   timeoutMs?: number;
 }): Promise<{ rows: number; manifestBytes: number } | null> {
   const { url, key, manifest, rows, log } = opts;
-  const body = JSON.stringify({ manifest, rows });
+  const fetchFn = opts.fetchFn ?? fetch;
+  const timeout = () => AbortSignal.timeout(opts.timeoutMs ?? 60_000);
+  const auth = { authorization: `Bearer ${key}` };
+  // The manifest goes raw to its own route, which the edge streams to R2
+  // without parsing it; the rows go as a small JSON publish. Both together
+  // in one JSON body made the Worker parse and re-encode the whole manifest,
+  // and at 7.9 MB it ran out of CPU on every publish (23 Oct, from 23:53).
+  const manifestText = JSON.stringify(manifest);
   try {
-    const res = await (opts.fetchFn ?? fetch)(url, {
-      method: "POST",
+    if (rows.length > 0) {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ rows }),
+        signal: timeout(),
+      });
+      if (!res.ok) {
+        log.warn({ event: "PUBLISH_REJECTED", status: res.status, part: "rows" });
+        return null;
+      }
+    }
+    const res = await fetchFn(url.replace(/\/internal\/publish$/, "/internal/manifest"), {
+      method: "PUT",
       headers: {
-        authorization: `Bearer ${key}`,
+        ...auth,
         "content-type": "application/json; charset=utf-8",
+        "content-length": String(Buffer.byteLength(manifestText)),
       },
-      body,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
+      body: manifestText,
+      signal: timeout(),
     });
+    if (res.status === 404) {
+      // An edge from before the raw route: the old combined publish.
+      return await combined(opts, manifestText);
+    }
     if (!res.ok) {
-      log.warn({ event: "PUBLISH_REJECTED", status: res.status });
+      log.warn({ event: "PUBLISH_REJECTED", status: res.status, part: "manifest" });
       return null;
     }
-    const answer = (await res.json()) as { rows?: number; manifestBytes?: number };
-    log.info({
-      event: "PUBLISH_DONE",
-      rows: answer.rows ?? rows.length,
-      manifestBytes: answer.manifestBytes ?? body.length,
-    });
-    return {
-      rows: answer.rows ?? rows.length,
-      manifestBytes: answer.manifestBytes ?? body.length,
-    };
+    log.info({ event: "PUBLISH_DONE", rows: rows.length, manifestBytes: manifestText.length });
+    return { rows: rows.length, manifestBytes: manifestText.length };
   } catch (e) {
     log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });
     return null;
   }
+}
+
+/** The publish as it was: manifest and rows in one JSON body. */
+async function combined(
+  opts: { url: string; key: string; rows: PublishRow[]; log: Log; fetchFn?: typeof fetch; timeoutMs?: number },
+  manifestText: string,
+): Promise<{ rows: number; manifestBytes: number } | null> {
+  const { url, key, rows, log } = opts;
+  const body = `{"manifest":${manifestText},"rows":${JSON.stringify(rows)}}`;
+  const res = await (opts.fetchFn ?? fetch)(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body,
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
+  });
+  if (!res.ok) {
+    log.warn({ event: "PUBLISH_REJECTED", status: res.status });
+    return null;
+  }
+  const answer = (await res.json()) as { rows?: number; manifestBytes?: number };
+  log.info({
+    event: "PUBLISH_DONE",
+    rows: answer.rows ?? rows.length,
+    manifestBytes: answer.manifestBytes ?? body.length,
+  });
+  return {
+    rows: answer.rows ?? rows.length,
+    manifestBytes: answer.manifestBytes ?? body.length,
+  };
 }
 
 const SHA_RE = /^[0-9a-f]{64}$/;

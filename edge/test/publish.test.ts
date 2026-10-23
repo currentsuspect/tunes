@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleArtGet, handleArtPut, handleAudioPut, handlePublish, handleTrackGet } from "../src/publish.js";
+import {
+  handleArtGet,
+  handleArtPut,
+  handleAudioPut,
+  handleManifestPut,
+  handlePublish,
+  handleTrackGet,
+} from "../src/publish.js";
 
 const KEY = "k".repeat(64);
 const HOST = "https://tunes.aestra.studio";
@@ -109,6 +116,45 @@ describe("publish endpoint", () => {
     expect(res.status).toBe(200);
     expect(batches).toHaveLength(0);
     expect(puts).toHaveLength(1);
+  });
+});
+
+describe("manifest sent raw (23 Oct: the combined publish ran out of CPU)", () => {
+  const put = (body: string, key = KEY, method = "PUT") =>
+    new Request(`${HOST}/internal/manifest`, {
+      method,
+      headers: { authorization: `Bearer ${key}`, "content-length": String(body.length) },
+      body,
+    });
+
+  it("streams the bytes to R2 untouched", async () => {
+    const { env } = fakeEnv();
+    const text = JSON.stringify({ schema: 3, tracks: [] });
+    const res = await handleManifestPut(put(text), env);
+    expect(res.status).toBe(200);
+    expect(env.CACHE.put).toHaveBeenCalledTimes(1);
+    expect(env.CACHE.put.mock.calls[0][0]).toBe("manifest.json");
+  });
+
+  it("needs the service key, PUT, and a length", async () => {
+    const { env } = fakeEnv();
+    expect((await handleManifestPut(put("{}", "x".repeat(64)), env)).status).toBe(401);
+    expect((await handleManifestPut(put("{}", KEY, "POST"), env)).status).toBe(405);
+    const noLength = new Request(`${HOST}/internal/manifest`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${KEY}` },
+      body: "{}",
+    });
+    expect([411, 200]).toContain((await handleManifestPut(noLength, env)).status);
+    expect(env.CACHE.put).not.toHaveBeenCalledWith("manifest.json", "x", expect.anything());
+  });
+
+  it("the publish then carries only the rows", async () => {
+    const { env, puts, batches } = fakeEnv();
+    const res = await handlePublish(post({ rows: [{ sha: SHA, chat: -1, msg: 7 }] }), env);
+    expect(res.status).toBe(200);
+    expect(batches).toHaveLength(1);
+    expect(puts).toHaveLength(0);
   });
 });
 

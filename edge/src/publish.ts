@@ -73,15 +73,21 @@ export async function handlePublish(req: Request, env: PublishEnv): Promise<Resp
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) return error(400);
   const { manifest, rows } = body as { manifest?: unknown; rows?: unknown };
-  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+  // The manifest may come separately, raw, to PUT /internal/manifest: then
+  // this carries only the rows. Parsing and re-encoding an 8 MB manifest
+  // here ran the Worker out of CPU on 23 Oct.
+  if (
+    manifest !== undefined &&
+    (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
+  ) {
     return error(400);
   }
   if (!Array.isArray(rows) || rows.length > MAX_ROWS || !rows.every(validRow)) {
     return error(400);
   }
 
-  const manifestBody = JSON.stringify(manifest);
-  if (manifestBody.length > MAX_MANIFEST_BYTES) return error(413);
+  const manifestBody = manifest === undefined ? null : JSON.stringify(manifest);
+  if (manifestBody !== null && manifestBody.length > MAX_MANIFEST_BYTES) return error(413);
 
   // Binding checks read as dead code in production, where both always exist.
   // They are the test seam: unit tests stub one side at a time, and a Worker
@@ -102,13 +108,36 @@ export async function handlePublish(req: Request, env: PublishEnv): Promise<Resp
       )
     );
   }
-  await cache.put("manifest.json", manifestBody, {
-    httpMetadata: { contentType: "application/json; charset=utf-8" },
-  });
+  if (manifestBody !== null) {
+    await cache.put("manifest.json", manifestBody, {
+      httpMetadata: { contentType: "application/json; charset=utf-8" },
+    });
+  }
   return new Response(
-    JSON.stringify({ ok: true, rows: rows.length, manifestBytes: manifestBody.length }),
+    JSON.stringify({ ok: true, rows: rows.length, manifestBytes: manifestBody?.length ?? 0 }),
     { headers: { "content-type": "application/json; charset=utf-8" } }
   );
+}
+
+/** PUT /internal/manifest: the manifest's bytes, as the box built them,
+ * streamed into R2 untouched. No parse and no re-encode, so its cost does not
+ * grow with the library: the combined publish ran out of CPU at 7.9 MB
+ * (23 Oct). The box is the only writer (service key) and sends what it
+ * serves itself; a length is required so R2 can take the stream as is. */
+export async function handleManifestPut(req: Request, env: PublishEnv): Promise<Response> {
+  if (req.method !== "PUT") return error(405);
+  if (!checkAuth(req, env)) return error(401);
+  const length = Number(req.headers.get("content-length") ?? NaN);
+  if (!Number.isFinite(length) || length <= 1) return error(411);
+  if (length > MAX_MANIFEST_BYTES) return error(413);
+  const cache = env.CACHE;
+  if (!cache || !req.body) return error(500);
+  await cache.put("manifest.json", req.body, {
+    httpMetadata: { contentType: "application/json; charset=utf-8" },
+  });
+  return new Response(JSON.stringify({ ok: true, manifestBytes: length }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
 /** Cover bytes named by magic, not by the uploader's label. */

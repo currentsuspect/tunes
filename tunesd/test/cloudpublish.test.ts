@@ -8,11 +8,11 @@ import { State } from "../src/state.js";
 const log = { info: () => {}, warn: (...a: unknown[]) => void a, error: () => {}, debug: () => {} } as any;
 
 describe("publishCloud", () => {
-  it("posts manifest and rows with the service key", async () => {
-    const seen: { url: unknown; init: unknown }[] = [];
-    const fetchFn = vi.fn(async (url: unknown, init: any) => {
+  it("sends the rows as JSON, then the manifest raw to its own route", async () => {
+    const seen: { url: string; init: any }[] = [];
+    const fetchFn = vi.fn(async (url: string, init: any) => {
       seen.push({ url, init });
-      return { ok: true, json: async () => ({ rows: 2, manifestBytes: 10 }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     const res = await publishCloud({
       url: "https://edge/internal/publish",
@@ -25,13 +25,40 @@ describe("publishCloud", () => {
       log,
       fetchFn: fetchFn as any,
     });
-    expect(res).toMatchObject({ rows: 2, manifestBytes: 10 });
+    expect(res).toMatchObject({ rows: 2, manifestBytes: '{"schema":3}'.length });
+    expect(seen.map((x) => [x.init.method, x.url])).toEqual([
+      ["POST", "https://edge/internal/publish"],
+      ["PUT", "https://edge/internal/manifest"],
+    ]);
+    expect(seen.every((x) => x.init.headers.authorization === "Bearer k")).toBe(true);
+    expect(JSON.parse(seen[0]!.init.body)).toEqual({
+      rows: [
+        { sha: "a", chat: -1, msg: 7 },
+        { sha: "b", chat: -1, msg: 8 },
+      ],
+    });
+    // The manifest as built, not wrapped or re-encoded by the edge.
+    expect(seen[1]!.init.body).toBe('{"schema":3}');
+  });
+
+  it("with no new rows, only the manifest goes", async () => {
+    const fetchFn = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: {}, rows: [], log, fetchFn: fetchFn as any });
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const init = seen[0]!.init as any;
-    expect(init.headers.authorization).toBe("Bearer k");
-    const body = JSON.parse(init.body);
-    expect(body.manifest).toMatchObject({ schema: 3 });
-    expect(body.rows).toHaveLength(2);
+  });
+
+  it("an edge without the raw route gets the old combined publish", async () => {
+    const seen: { url: string; init: any }[] = [];
+    const fetchFn = vi.fn(async (url: string, init: any) => {
+      seen.push({ url, init });
+      if (url.endsWith("/internal/manifest")) return { ok: false, status: 404 };
+      return { ok: true, status: 200, json: async () => ({ rows: 0, manifestBytes: 2 }) };
+    });
+    const res = await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: {}, rows: [], log, fetchFn: fetchFn as any });
+    expect(res).not.toBeNull();
+    const last = seen[seen.length - 1]!;
+    expect(last.url).toBe("https://edge/internal/publish");
+    expect(JSON.parse(last.init.body)).toEqual({ manifest: {}, rows: [] });
   });
 
   it("returns null on rejection without throwing", async () => {
