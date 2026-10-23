@@ -851,6 +851,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final List<Key> _tabKeys = List.generate(4, (_) => UniqueKey());
   TunesManifest? _manifest;
   Map<String, int> _playsByArtist = const {};
+
+  /// Plays per song, for search's "most played" and which songs lead.
+  Map<String, int> _playCounts = const {};
   List<ManifestTrack> _onRepeat = const [];
   List<ManifestTrack> _listenAgain = const [];
   List<Mix> _mixes = const [];
@@ -1194,6 +1197,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       recentPlays[p.sha] = (recentPlays[p.sha] ?? 0) + 1;
     }
     setState(() {
+      _playCounts = counts;
       _playsByArtist = plays;
       _taste = TasteSnapshot.build(
         playCounts: counts,
@@ -2499,6 +2503,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       2 => SearchView(
         tracks: tracks,
         releases: manifest.releases,
+        artists: manifest.artists,
+        plays: _playCounts,
+        onPlaylistTap: PlaylistScope.maybeOf(context) == null
+            ? null
+            : (p) => _nav.openPanel(
+                TunesPanels.playlist(p.id),
+                () => PlaylistPage(
+                  summary: p,
+                  store: PlaylistScope.maybeOf(context)!,
+                  player: widget.player,
+                  tracks: tracks,
+                  artUrlFor: _artUrlFor,
+                ),
+              ),
         client: widget.client,
         player: widget.player,
         store: widget.store,

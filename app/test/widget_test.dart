@@ -851,10 +851,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
 
+    // Records and artists the box knows join the library's own results.
     expect(find.text('Albums'), findsOneWidget);
-    expect(find.text('Artists'), findsOneWidget);
     expect(find.text('Nightdrive (Remaster)'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Nightdrive (Remaster)'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Nightdrive (Remaster)'));
     await tester.pumpAndSettle();
     expect(find.byType(AlbumPage), findsOneWidget);
@@ -898,8 +900,10 @@ void main() {
 
       expect(find.text('Albums on MusicBrainz'), findsOneWidget);
       expect(find.text('OCTANE'), findsOneWidget);
-      expect(find.text('Don Toliver · Album · 2026'), findsOneWidget);
-      expect(find.text('not in library'), findsOneWidget);
+      expect(
+        find.text('Don Toliver · Album · 2026 · not in your library'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('OCTANE'));
       await tester.pumpAndSettle();
@@ -1310,10 +1314,11 @@ void main() {
     await tester.enterText(find.byType(TextField), 'night');
     await tester.pumpAndSettle();
 
-    expect(find.text('Nightdrive'), findsOneWidget);
+    // The top result and its row in Songs.
+    expect(find.text('Nightdrive'), findsWidgets);
     expect(find.text('Bassline'), findsNothing);
 
-    await tester.tap(find.text('Nightdrive'));
+    await tester.tap(find.text('Nightdrive').last);
     await tester.pumpAndSettle();
     expect(player.playQueueCalls, 1);
   });

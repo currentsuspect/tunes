@@ -42,23 +42,36 @@ const _fold = {
   '\$': 's',
   '&': ' and ',
   '@': 'a',
+  // "don't" is "dont": an apostrophe joins, it does not split.
+  "'": '',
+  '\u2019': '',
 };
 
 /// Lower case, accents off, symbols that stand for letters turned back into
 /// them, everything else that is not a letter or digit made a space.
 String foldForSearch(String s) {
+  // Character by character, with no pattern matching per character: this
+  // runs over every title and, for lyric search, every line of every song.
   final b = StringBuffer();
+  var space = true;
   for (final ch in s.toLowerCase().split('')) {
     final f = _fold[ch];
-    if (f != null) {
-      b.write(f);
-    } else if (RegExp(r'[a-z0-9]').hasMatch(ch) || ch.codeUnitAt(0) > 0x2ff) {
-      b.write(ch);
-    } else {
-      b.write(' ');
+    final c = ch.codeUnitAt(0);
+    final keep =
+        f == null &&
+        ((c >= 0x61 && c <= 0x7a) || (c >= 0x30 && c <= 0x39) || c > 0x2ff);
+    final out = f ?? (keep ? ch : ' ');
+    for (final o in out.split('')) {
+      if (o == ' ') {
+        if (!space) b.write(' ');
+        space = true;
+      } else {
+        b.write(o);
+        space = false;
+      }
     }
   }
-  return b.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  return b.toString().trimRight();
 }
 
 /// Edit distance with swaps counted as one, stopping early past [max].
@@ -98,7 +111,13 @@ int _distance(String a, String b, int max) {
 }
 
 /// How well one typed word lands on a field's words: 0 when it does not.
-double _wordScore(String q, List<String> words, String joined) {
+double _wordScore(
+  String q,
+  List<String> words,
+  String joined, {
+  bool typos = true,
+  Map<String, int>? near,
+}) {
   var best = 0.0;
   for (final w in words) {
     if (w == q) return 4;
@@ -106,14 +125,19 @@ double _wordScore(String q, List<String> words, String joined) {
       best = best < 3 ? 3 : best;
     } else if (q.length >= 3 && w.contains(q)) {
       best = best < 2 ? 2 : best;
-    } else if (q.length >= 4) {
+    } else if (typos && q.length >= 4) {
       final allowed = q.length >= 7 ? 2 : 1;
       // Against the word, and against its start, so "hihg" finds "highest".
-      final head = w.length > q.length ? w.substring(0, q.length) : w;
-      final d = [
-        _distance(q, w, allowed),
-        _distance(q, head, allowed),
-      ].reduce((x, y) => x < y ? x : y);
+      // The same word turns up in hundreds of titles; measured once each.
+      int measure() {
+        final head = w.length > q.length ? w.substring(0, q.length) : w;
+        return [
+          _distance(q, w, allowed),
+          _distance(q, head, allowed),
+        ].reduce((x, y) => x < y ? x : y);
+      }
+
+      final d = near == null ? measure() : near.putIfAbsent(w, measure);
       if (d <= allowed) {
         final s = d == 1 ? 1.5 : 1.0;
         if (s > best) best = s;
@@ -139,15 +163,49 @@ class SearchField {
 }
 
 /// Score of [query] against [fields], or 0 when some typed word lands nowhere.
-double fuzzyScore(String query, List<SearchField> fields) {
-  final folded = foldForSearch(query);
-  if (folded.isEmpty) return 0;
-  final tokens = folded.split(' ');
+double fuzzyScore(String query, List<SearchField> fields) =>
+    PreparedQuery(query).score(fields);
+
+/// A query folded once, for scoring against a whole library: folding it
+/// again for each of two thousand songs was most of a keystroke's cost.
+///
+/// With [typos] off only exact, prefix and inside-a-word matches count: the
+/// edit-distance pass is most of the cost, and is only worth paying when the
+/// plain pass finds little.
+class PreparedQuery {
+  PreparedQuery(String query, {this.typos = true})
+    : folded = foldForSearch(query),
+      tokens = foldForSearch(query).split(' ') {
+    for (final t in tokens) {
+      _near[t] = {};
+    }
+  }
+
+  final String folded;
+  final List<String> tokens;
+  final bool typos;
+
+  /// Per typed word: each library word's edit distance from it.
+  final Map<String, Map<String, int>> _near = {};
+
+  double score(List<SearchField> fields) =>
+      folded.isEmpty ? 0 : _score(folded, tokens, fields, typos, _near);
+}
+
+double _score(
+  String folded,
+  List<String> tokens,
+  List<SearchField> fields,
+  bool typos, [
+  Map<String, Map<String, int>>? near,
+]) {
   var total = 0.0;
   for (final t in tokens) {
     var best = 0.0;
     for (final f in fields) {
-      final s = _wordScore(t, f.words, f.joined) * f.weight;
+      final s =
+          _wordScore(t, f.words, f.joined, typos: typos, near: near?[t]) *
+          f.weight;
       if (s > best) best = s;
     }
     if (best == 0) return 0;
@@ -169,9 +227,10 @@ List<T> fuzzyRank<T>(
   int limit = 200,
 }) {
   final scored = <(T, double, int)>[];
+  final q = PreparedQuery(query);
   var i = 0;
   for (final it in items) {
-    final s = fuzzyScore(query, fieldsOf(it));
+    final s = q.score(fieldsOf(it));
     if (s > 0) scored.add((it, s, i));
     i++;
   }
