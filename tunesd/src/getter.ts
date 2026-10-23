@@ -236,6 +236,13 @@ export function groupSongs(
     .slice(0, limit);
 }
 
+/** Whether a found song holds every word of [query] (a prefix will do) in
+ * its artist, title or album. */
+export function holdsAll(query: string, s: { artist: string; title: string; album: string | null }): boolean {
+  const ws = new Set(words(`${s.artist} ${s.title} ${s.album ?? ""}`));
+  return words(query).every((w) => ws.has(w) || [...ws].some((x) => x.startsWith(w)));
+}
+
 /** The query as typed, then shorter forms of it for when Soulseek answers
  * nothing: without its first word, then its last two. */
 export function queryVariants(q: string): string[] {
@@ -350,6 +357,10 @@ export class Getter {
     let songs: FoundSong[] = [];
     for (const v of queryVariants(q)) {
       songs = groupSongs(await this.deps.api.search(v, 8_000), v, this.deps.inLibrary, 15, q);
+      // A shorter ask finds other songs too. Only those that still hold
+      // every word typed count: "skyte in need" asked as "in need" found
+      // INXS and Stevie Wonder, which is worse than saying nothing is there.
+      if (v !== q) songs = songs.filter((s) => holdsAll(q, s));
       if (songs.length > 0) break;
     }
     this.searchCache.set(q, { at: Date.now(), songs });

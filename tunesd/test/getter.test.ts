@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Getter, groupSongs, queryVariants, readPath, songKey, type GetJob } from "../src/getter.js";
+import { Getter, groupSongs, holdsAll, queryVariants, readPath, songKey, type GetJob } from "../src/getter.js";
 import * as resource from "../src/resource.js";
 import type { SlskResponse } from "../src/soulseek.js";
 
@@ -94,6 +94,24 @@ describe("real folder names (live search, 23 Oct)", () => {
     expect(songKey("Travis Scott", "Sicko Mode (feat. Drake)")).toBe(songKey("Travis Scott", "SICKO MODE"));
     expect(songKey("Ayra Starr", "Rush (Clean)")).toBe(songKey("Ayra Starr", "Rush"));
     expect(songKey("Travis Scott", "SICKO MODE (Skrillex Remix)")).not.toBe(songKey("Travis Scott", "SICKO MODE"));
+  });
+
+  it("a shorter ask only keeps songs holding every word typed", () => {
+    expect(holdsAll("burna boy last last", { artist: "Burna Boy", title: "Last Last", album: "Love, Damini" })).toBe(true);
+    expect(holdsAll("burna boy last last", { artist: "Fall Out Boy", title: "The Last of the Real Ones", album: null })).toBe(false);
+    expect(holdsAll("skyte in need", { artist: "INXS", title: "Need You Tonight", album: null })).toBe(false);
+  });
+
+  it("a fallback that finds only other songs says nothing is there", async () => {
+    const api = {
+      loggedIn: async () => true,
+      search: async (text: string) =>
+        text === "in need"
+          ? [resp("p", [{ filename: "INXS/Kick/INXS - Need You Tonight.flac" }])]
+          : [],
+    };
+    const g = new Getter({ api, inLibrary: () => null, log } as never);
+    expect(await g.search("skyte in need")).toEqual([]);
   });
 
   it("shorter asks for when Soulseek drops a phrase", () => {
