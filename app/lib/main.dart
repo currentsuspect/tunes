@@ -12,8 +12,8 @@ import 'package:path_provider/path_provider.dart';
 import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
 import 'core/audio/stream_relay.dart';
-import 'core/net/update_check.dart';
 import 'core/net/update_installer.dart';
+import 'features/updates/update_controller.dart';
 import 'core/platform/device.dart';
 import 'features/desktop/desktop_keys.dart';
 import 'features/lyrics/lyrics_sheet.dart';
@@ -999,6 +999,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     FocusManager.instance.removeListener(_regainFocus);
     _keys.dispose();
     _gets.dispose();
+    _updates.dispose();
     if (widget.accountSync?.onChanged == _onAccountSynced) {
       widget.accountSync?.onChanged = null;
     }
@@ -1338,60 +1339,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   // --- updates -------------------------------------------------------------
 
-  AvailableUpdate? _update;
-  bool _updateDismissed = false;
-  bool _needsInstallPermission = false;
-  double? _updateProgress;
-  late final UpdateInstaller _installer = UpdateInstaller(
-    // Must sit under the path res/xml/update_paths.xml exposes, or the
-    // installer is handed a URI the FileProvider refuses to resolve.
-    cacheDir: Directory('${widget.store.dir.path}/updates'),
+  /// Whether a newer build exists, shared by the note on Home and the
+  /// Updates card in Settings.
+  late final UpdateController _updates = UpdateController(
+    client: widget.client,
+    buildNumber: _buildNumber,
+    installer: UpdateInstaller(
+      // Must sit under the path res/xml/update_paths.xml exposes, or the
+      // installer is handed a URI the FileProvider refuses to resolve.
+      cacheDir: Directory('${widget.store.dir.path}/updates'),
+    ),
   );
 
-  /// Asks the daemon whether a newer build exists.
-  ///
-  /// The daemon answers, not GitHub: the repository is private and a token
-  /// inside an APK is a token anyone can read out of it.
-  ///
-  /// Never throws and never blocks anything: an app that fails to start
-  /// because it could not check for updates has its priorities backwards.
-  Future<void> _checkForUpdate() async {
-    // APK self-update is Android-only. The Linux bundle is delivered by CI
-    // artifacts, and offering an APK download there would be a dead button
-    // behind a permission prompt that can never be granted.
-    if (!Platform.isAndroid) return;
-    try {
-      final available = await widget.client.fetchUpdate();
-      if (!mounted) return;
-      if (!shouldOfferUpdate(_buildNumber, available)) return;
-      final canInstall = await _installer.canInstall();
-      if (!mounted) return;
-      setState(() {
-        _update = available;
-        // Asked before offering the download rather than after: the permission
-        // is grantable only from Settings on Android 8+, and discovering that
-        // after 100 MB is the wrong order.
-        _needsInstallPermission = !canInstall;
-      });
-    } catch (_) {
-      // No update is the correct answer when the question could not be asked.
-    }
-  }
-
   Future<void> _startUpdate() async {
-    final update = _update;
-    if (update == null) return;
-    try {
-      await _installer.downloadAndInstall(
-        widget.client.updateApkUrl,
-        update.build,
-        onProgress: (p) {
-          if (mounted) setState(() => _updateProgress = p);
-        },
-      );
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _updateProgress = null);
+    final ok = await _updates.start();
+    if (!ok && mounted) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Update download failed')));
@@ -1467,7 +1429,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) await _sync();
     // Last, and not awaited by anything. The library is what the app is for;
     // an update notice is worth exactly as much attention as is left over.
-    if (mounted) unawaited(_checkForUpdate());
+    if (mounted) unawaited(_updates.check());
   }
 
   Future<TunesManifest> _manifestFromStore() async {
@@ -1804,6 +1766,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         offline: widget.reachability.offline,
         commit: _gitCommit,
         buildNumber: _buildNumber,
+        updates: _updates.supported ? _updates : null,
+        onUpdate: _startUpdate,
         channel: _channel,
         trackCount: trackCount,
         downloadCount: widget.store.shas.length,
@@ -2294,23 +2258,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               // Above everything, and only when there is something to say.
               // A strip rather than a dialog: nobody opened a music app to
               // be told about software.
-              if (_update != null && !_updateDismissed)
-                UpdateBanner(
-                  update: _update!,
-                  progress: _updateProgress,
-                  needsPermission: _needsInstallPermission,
-                  onGrantPermission: () async {
-                    await _installer.openInstallSettings();
-                    // Re-checked on return rather than assumed: the person
-                    // may have looked at the settings page and backed out.
-                    final ok = await _installer.canInstall();
-                    if (mounted) {
-                      setState(() => _needsInstallPermission = !ok);
-                    }
-                  },
-                  onInstall: _startUpdate,
-                  onDismiss: () => setState(() => _updateDismissed = true),
-                ),
+              ListenableBuilder(
+                listenable: Listenable.merge([_updates, widget.settings]),
+                builder: (context, _) {
+                  final update = _updates.available;
+                  if (update == null ||
+                      !_updates.showNoteOnHome(
+                        enabled: widget.settings.updateNoteOnHome,
+                      )) {
+                    return const SizedBox.shrink();
+                  }
+                  return UpdateBanner(
+                    update: update,
+                    progress: _updates.progress,
+                    needsPermission: _updates.needsPermission,
+                    onGrantPermission: _updates.grantPermission,
+                    onInstall: _startUpdate,
+                    onDismiss: _updates.dismissNote,
+                  );
+                },
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   Space.lg,
@@ -2332,10 +2299,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         // came back to, without a restart.
                         child: ListenableBuilder(
                           listenable: widget.settings,
-                          builder: (context, _) => ProfileAvatar(
-                            name: widget.settings.displayName,
-                            path: widget.settings.avatarPath,
-                            size: 38,
+                          // A dot while an update waits, so saying "not now"
+                          // on Home does not lose it: it is in Settings.
+                          builder: (context, _) => ListenableBuilder(
+                            listenable: _updates,
+                            builder: (context, _) => Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ProfileAvatar(
+                                  name: widget.settings.displayName,
+                                  path: widget.settings.avatarPath,
+                                  size: 38,
+                                ),
+                                if (_updates.available != null)
+                                  Positioned(
+                                    right: -2,
+                                    top: -2,
+                                    child: Semantics(
+                                      label: 'An update is waiting in Settings',
+                                      child: Container(
+                                        width: 13,
+                                        height: 13,
+                                        decoration: BoxDecoration(
+                                          color: Tones.primary,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Tones.base,
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

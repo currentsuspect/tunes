@@ -2,7 +2,7 @@
 ///
 /// [id] names the pack. The screen is shown once per id, so a later pack gets its
 /// own: change the id and the entries together.
-const kWhatsNewId = 'birthday-2026-10';
+const kWhatsNewId = 'asked-for-2026-10';
 
 class WhatsNewEntry {
   const WhatsNewEntry(this.title, this.body);
@@ -11,71 +11,71 @@ class WhatsNewEntry {
   final String body;
 }
 
-const kWhatsNewTitle = 'The Birthday Pack';
+const kWhatsNewTitle = 'You Asked For It';
 
 const kWhatsNewIntro =
-    'A gift from Dylan to the boys. Here is everything that is new in Tunes.';
+    'Most of this came from you. Dennis asked for half of it. Here is '
+    'everything new since the Birthday Pack.';
 
 const kWhatsNewSignoff =
-    'Made by Dylan, for the people he listens with. Tell him what you find.';
+    'Made by Dylan, for the people he listens with. Keep asking.';
 
 const kWhatsNew = <WhatsNewEntry>[
   WhatsNewEntry(
-    'A new look',
-    'Ink and lilac, names set in a serif, and covers that light the screen '
-        'with their own colour.',
+    'Search that gets you',
+    'Songs, albums, artists and playlists, each with a count. "travis 2018" '
+        'means Travis Scott in 2018; tap a chip to undo how it read you. '
+        'Typos are fine.',
   ),
   WhatsNewEntry(
-    'Now Playing',
-    'The cover lights the page. Tap an artist\'s name to go to them. The '
-        'lyrics are only there when a song has them, and you scroll down for '
-        'the rest: credits, the album, the file.',
+    'Find a song by its words',
+    'Type a line you remember. Tunes finds the song and shows you the line.',
   ),
   WhatsNewEntry(
-    'Lyrics you can read',
-    'A full screen with the line being sung large and the rest fading around '
-        'it. Pick a text size, hold a line to copy it.',
+    "Get songs you don't have",
+    "If it isn't in the library, search asks Soulseek. Tap Get and it lands "
+        "in everyone's library, cover and all.",
   ),
   WhatsNewEntry(
-    'Artist pages in the right order',
-    'The songs you have come first, then the ones you do not. Faces for the '
-        'people they play with.',
+    "Albums show what's missing",
+    "The songs you don't have sit in their places, greyed out. Get one, or "
+        'get them all.',
   ),
   WhatsNewEntry(
-    'Made for you',
-    'Playlists the app builds from how you listen: Feel Good Friday, Late '
-        'Night, Deep Cuts, and a lane for each kind of music you have. It also '
-        'points at albums you own and never opened. All of it stays on your '
-        'phone.',
+    'Fix a mix',
+    'Swipe a song out of a mix the app made. It stays out, and the mix keeps '
+        'its length.',
   ),
   WhatsNewEntry(
-    'Home that follows you',
-    'On repeat is what you have had on today. Listen again is what you left a '
-        'while ago. Released this year is genuinely this year.',
+    'Your listening, tappable',
+    'Top artists, albums and songs take you to the real thing.',
   ),
   WhatsNewEntry(
-    'Playlists that behave',
-    'Shuffle, add songs by searching, drag to reorder, swipe to remove, and '
-        'Undo if that was a slip.',
+    'Three looks',
+    'Room, Noir and Crayon, each light and dark. Crayon tapes the real cover '
+        'into a notebook.',
   ),
   WhatsNewEntry(
-    'Shuffle that does what it says',
-    'Turn it on mid-song and what comes next is random. Turn it off and it '
-        'carries on in order from where you are.',
+    'You on every device',
+    "Likes, playlists and history follow your account. See what's playing "
+        'on your other phone or computer, and control it from here.',
   ),
   WhatsNewEntry(
-    'Downloads you can see',
-    'A ring that fills, a tick when it is on your phone, and a bar showing how '
-        'many are coming down, from any screen.',
+    'Radio with a mood',
+    'Pick how adventurous it gets. It reaches a little further now and then, '
+        'and forgets what you have worn out.',
   ),
   WhatsNewEntry(
-    'It works with no connection',
-    'Offline, the app shows only what is on your phone, and search looks only '
-        'there. Nothing is offered that cannot play.',
+    'Lyrics for everyone',
+    'Add lyrics to a song and everyone sees them.',
   ),
   WhatsNewEntry(
-    'The little things',
-    'Pull down to sync, in the same voice as everything else. Tabs that stay '
-        'put wherever you are. Settings in plain words.',
+    'Headphone EQ',
+    'Profiles in Settings, applied to everything you play.',
+  ),
+  WhatsNewEntry(
+    'Updates that wait for you',
+    'Say "not now" on Home and the update waits in Settings until you are '
+        'ready.',
   ),
 ];

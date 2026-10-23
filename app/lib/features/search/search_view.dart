@@ -742,7 +742,22 @@ class _SearchViewState extends State<SearchView> {
           release: finish,
           artUrlFor: widget.artUrlFor,
           pending: gets.pendingFor(finish.id),
-          onGet: () => gets.complete(finish.id),
+          onGet: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            final n = await gets.complete(finish.id);
+            // The box gets only what the library lacks: songs filed under
+            // another edition count as here.
+            if (n == 0) {
+              messenger.showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Nothing to get: the rest are already in your library, '
+                    'under another release.',
+                  ),
+                ),
+              );
+            }
+          },
         ),
       ],
       const SizedBox(height: Space.md),

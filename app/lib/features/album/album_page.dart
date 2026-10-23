@@ -452,7 +452,10 @@ class _TracklistState extends State<_Tracklist> {
     final entries = _entries;
     final gets = GetsScope.maybeOf(context);
     final bySha = {for (final row in widget.owned) row.track.sha: row};
-    final missing = entries?.where((e) => !bySha.containsKey(e.have)).length;
+    // Missing means not in the library at all. A song filed under another
+    // edition (The Gift and its Deluxe) is here: it is not greyed out, and
+    // there is nothing to get.
+    final missing = entries?.where((e) => e.have == null).length;
     final children = <Widget>[];
     if (entries == null || missing == 0) {
       children.addAll(widget.owned);
@@ -462,6 +465,9 @@ class _TracklistState extends State<_Tracklist> {
         final row = e.have == null ? null : bySha[e.have];
         if (row != null && used.add(row.track.sha)) {
           children.add(row);
+        } else if (e.have != null) {
+          // In the library under another release: left to that release.
+          continue;
         } else {
           children.add(
             _MissingRow(

@@ -1497,14 +1497,14 @@ void main() {
       FakeTunePlayer(),
     );
 
-    expect(find.text('The Birthday Pack'), findsOneWidget);
-    expect(find.text('A new look'), findsOneWidget);
+    expect(find.text('You Asked For It'), findsOneWidget);
+    expect(find.text('Search that gets you'), findsOneWidget);
     // Recorded as shown straight away, so an interruption does not bring it back.
     expect(settings.whatsNewSeen, kWhatsNewId);
 
     await tester.tap(find.text('Let\'s go'));
     await tester.pumpAndSettle();
-    expect(find.text('The Birthday Pack'), findsNothing);
+    expect(find.text('You Asked For It'), findsNothing);
     // The app is there underneath.
     expect(find.text('Home'), findsOneWidget);
   });
@@ -1516,7 +1516,7 @@ void main() {
       _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
-    expect(find.text('The Birthday Pack'), findsNothing);
+    expect(find.text('You Asked For It'), findsNothing);
   });
 
   testWidgets('settings open from the avatar', (tester) async {

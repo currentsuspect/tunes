@@ -124,6 +124,15 @@ class SettingsStore extends ChangeNotifier {
     );
   }
 
+  // --- updates -------------------------------------------------------------
+
+  static const _updateNoteOnHome = 'updates.noteOnHome';
+
+  /// A note at the top of Home when a new build is ready. Off, the update
+  /// still waits in Settings.
+  bool get updateNoteOnHome => _bool(_updateNoteOnHome, fallback: true);
+  Future<void> setUpdateNoteOnHome(bool v) => _put(_updateNoteOnHome, '$v');
+
   // --- sync ----------------------------------------------------------------
 
   /// Whether listening is shared with the account's other devices. On by

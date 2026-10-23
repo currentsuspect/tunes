@@ -20,6 +20,9 @@ import '../../core/ui/profile_avatar.dart';
 import '../../domain/listening_stats.dart';
 import '../../domain/manifest.dart';
 import '../stats/listening_page.dart';
+import '../updates/update_controller.dart';
+import '../../domain/whats_new.dart';
+import '../../core/theme/looks.dart';
 import 'eq_sheet.dart';
 
 /// Who you are and how the app behaves.
@@ -45,6 +48,8 @@ class SettingsPage extends StatefulWidget {
     required this.onResync,
     required this.onServerChanged,
     this.onWhatsNew,
+    this.updates,
+    this.onUpdate,
     this.supportDir,
     this.accountSync,
     this.library = const {},
@@ -75,6 +80,11 @@ class SettingsPage extends StatefulWidget {
   final bool offline;
   final String commit;
   final String buildNumber;
+
+  /// Whether a newer build exists; null where the app cannot update itself
+  /// (the computer). Shown as the Updates card.
+  final UpdateController? updates;
+  final VoidCallback? onUpdate;
   final String channel;
   final int trackCount;
   final int downloadCount;
@@ -342,6 +352,19 @@ class _SettingsPageState extends State<SettingsPage> {
                       artUrlFor: widget.artUrlFor,
                       links: widget.listeningLinks,
                     ),
+                    if (widget.updates case final u?)
+                      ListenableBuilder(
+                        listenable: u,
+                        builder: (context, _) => _Updates(
+                          updates: u,
+                          buildNumber: widget.buildNumber,
+                          channel: widget.channel,
+                          noteOnHome: s.updateNoteOnHome,
+                          onNoteOnHome: s.setUpdateNoteOnHome,
+                          onUpdate: widget.onUpdate ?? () {},
+                          onWhatsNew: widget.onWhatsNew,
+                        ),
+                      ),
                     _Group(
                       title: 'Look',
                       children: [
@@ -692,7 +715,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           _LinkTile(
                             title: 'What\'s new',
                             detail:
-                                'The Birthday Pack: everything new in this '
+                                '$kWhatsNewTitle: everything new in this '
                                 'release.',
                             onTap: widget.onWhatsNew,
                           ),
@@ -1012,6 +1035,298 @@ class _Profile extends StatelessWidget {
 }
 
 /// A titled card of related settings, rows divided by hairlines.
+/// Updates (design approved 23 Oct): a card that says where things stand --
+/// newest, a new one ready, getting it, or Android's one-time permission --
+/// with the Home note switch and Check now underneath. Always here, so an
+/// update dismissed on Home is never lost.
+class _Updates extends StatelessWidget {
+  const _Updates({
+    required this.updates,
+    required this.buildNumber,
+    required this.channel,
+    required this.noteOnHome,
+    required this.onNoteOnHome,
+    required this.onUpdate,
+    this.onWhatsNew,
+  });
+
+  final UpdateController updates;
+  final String buildNumber;
+  final String channel;
+  final bool noteOnHome;
+  final ValueChanged<bool> onNoteOnHome;
+  final VoidCallback onUpdate;
+  final VoidCallback? onWhatsNew;
+
+  static String _ago(DateTime? at) {
+    if (at == null) return 'not checked yet';
+    final d = DateTime.now().difference(at);
+    if (d.inMinutes < 1) return 'checked just now';
+    if (d.inMinutes < 60) {
+      return 'checked ${d.inMinutes} minute${d.inMinutes == 1 ? '' : 's'} ago';
+    }
+    final h = d.inHours;
+    return 'checked $h hour${h == 1 ? '' : 's'} ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = updates;
+    final crayon = Looks.current.kind == LookKind.crayon;
+    final update = u.available;
+    final progress = u.progress;
+    final Widget card;
+    if (update != null && u.needsPermission && progress == null) {
+      card = _UpdateCard(
+        dashed: true,
+        title: 'Let Tunes install its updates',
+        detail:
+            'Android asks once. Turn on "Allow from this source", then come '
+            'back.',
+        action: OutlinedButton(
+          onPressed: u.grantPermission,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Tones.text,
+            side: BorderSide(color: Tones.text, width: crayon ? 2 : 1),
+            shape: const StadiumBorder(),
+          ),
+          child: const Text('Open Android settings'),
+        ),
+      );
+    } else if (update != null && progress != null) {
+      final total = update.size;
+      card = _UpdateCard(
+        title: 'Getting build ${update.build}',
+        trailing: total > 0
+            ? '${(total * progress / 1048576).round()} of '
+                  '${(total / 1048576).round()} MB'
+            : '${(progress * 100).round()}%',
+        detail: 'Keep listening. Android asks you to confirm when it is done.',
+        progress: progress,
+      );
+    } else if (update != null) {
+      card = _UpdateCard(
+        icon: Icons.system_update_alt_rounded,
+        iconFill: Looks.current.crayons[1].withValues(alpha: 0.55),
+        title: 'A new Tunes is ready',
+        detail: [
+          'Build ${update.build}',
+          if (update.readableSize.isNotEmpty) update.readableSize,
+          'you have $buildNumber',
+        ].join(' · '),
+        notes: update.notes.isEmpty ? null : update.notes,
+        onWhatsNew: onWhatsNew,
+        action: Row(
+          children: [
+            Expanded(
+              child: FilledButton(
+                onPressed: onUpdate,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Tones.primary,
+                  foregroundColor: crayon ? Tones.text : Tones.onPrimary,
+                  minimumSize: const Size.fromHeight(46),
+                  shape: StadiumBorder(
+                    side: crayon
+                        ? BorderSide(color: Tones.text, width: 2)
+                        : BorderSide.none,
+                  ),
+                ),
+                child: const Text('Update now'),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      card = _UpdateCard(
+        icon: Icons.check_rounded,
+        iconFill: Tones.held.withValues(alpha: 0.25),
+        iconColor: Tones.held,
+        title: u.failed
+            ? "Couldn't check for updates"
+            : 'You have the newest Tunes',
+        detail: u.failed
+            ? 'The box did not answer. Try again in a moment.'
+            : 'Build $buildNumber',
+      );
+    }
+    return _Group(
+      title: 'Updates',
+      children: [
+        Padding(padding: const EdgeInsets.all(Space.sm + 2), child: card),
+        _SwitchTile(
+          title: 'Tell me on Home',
+          detail: 'A note at the top when a new one is ready',
+          value: noteOnHome,
+          onChanged: onNoteOnHome,
+        ),
+        Padding(
+          padding: _tilePadding,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$channel · build $buildNumber · ${_ago(u.checkedAt)}',
+                  style: TypeScale.caption,
+                ),
+              ),
+              OutlinedButton(
+                onPressed: u.checking ? null : u.check,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Tones.text,
+                  side: BorderSide(
+                    color: crayon ? Tones.text : Tones.hairline,
+                    width: crayon ? 1.5 : 1,
+                  ),
+                  shape: const StadiumBorder(),
+                ),
+                child: Text(u.checking ? 'Checking…' : 'Check now'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _UpdateCard extends StatelessWidget {
+  const _UpdateCard({
+    required this.title,
+    required this.detail,
+    this.icon,
+    this.iconFill,
+    this.iconColor,
+    this.notes,
+    this.onWhatsNew,
+    this.action,
+    this.trailing,
+    this.progress,
+    this.dashed = false,
+  });
+
+  final String title;
+  final String detail;
+  final IconData? icon;
+  final Color? iconFill;
+  final Color? iconColor;
+  final String? notes;
+  final VoidCallback? onWhatsNew;
+  final Widget? action;
+  final String? trailing;
+  final double? progress;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    final crayon = look.kind == LookKind.crayon;
+    return Container(
+      padding: const EdgeInsets.all(Space.md - 2),
+      decoration: BoxDecoration(
+        color: dashed ? Tones.surface : Tones.surfaceRaised,
+        borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+        border: Border.all(
+          color: crayon ? Tones.text : Tones.hairline,
+          width: crayon ? 2 : 1,
+        ),
+        boxShadow: crayon && !dashed
+            ? [BoxShadow(color: look.inkShadow, offset: const Offset(3, 3))]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: iconFill,
+                    borderRadius: BorderRadius.circular(12),
+                    border: crayon
+                        ? Border.all(color: Tones.text, width: 2)
+                        : null,
+                  ),
+                  child: Icon(icon, color: iconColor ?? Tones.text, size: 22),
+                ),
+                const SizedBox(width: Space.md),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: _tileTitle().copyWith(fontSize: 16)),
+                    Text(detail, style: TypeScale.caption),
+                  ],
+                ),
+              ),
+              if (trailing != null) Text(trailing!, style: TypeScale.caption),
+            ],
+          ),
+          if (notes != null) ...[
+            const SizedBox(height: Space.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.md - 4,
+                vertical: Space.sm + 2,
+              ),
+              decoration: BoxDecoration(
+                color: Tones.surface,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    notes!,
+                    style: TypeScale.body.copyWith(color: Tones.text),
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (onWhatsNew != null)
+                    GestureDetector(
+                      onTap: onWhatsNew,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          "What's new",
+                          style: TypeScale.body.copyWith(
+                            color: Tones.text,
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          if (progress != null) ...[
+            const SizedBox(height: Space.sm),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 6,
+                color: Tones.held,
+                backgroundColor: Tones.hairline,
+              ),
+            ),
+          ],
+          if (action != null) ...[
+            const SizedBox(height: Space.sm + 2),
+            action!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _Group extends StatelessWidget {
   const _Group({required this.title, required this.children});
 

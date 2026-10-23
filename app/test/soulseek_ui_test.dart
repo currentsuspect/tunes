@@ -182,6 +182,13 @@ void main() {
           artist: 'Travis Scott',
           trackNumber: 4,
         ),
+        // Here, but filed under another edition: not missing.
+        TracklistEntry(
+          title: 'SKELETONS',
+          artist: 'Travis Scott',
+          trackNumber: 5,
+          have: 'elsewhere',
+        ),
       ];
     final gets = await pump(
       tester,
@@ -203,6 +210,7 @@ void main() {
     expect(find.text('R.I.P. SCREW'), findsOneWidget);
     expect(find.text('not in your library'), findsNWidgets(2));
     expect(find.text('2 songs not in your library yet'), findsOneWidget);
+    expect(find.text('SKELETONS'), findsNothing);
     // In order: the missing second song sits between the first and third.
     double y(String t) => tester.getTopLeft(find.text(t)).dy;
     expect(y('STARGAZING') < y('CAROUSEL'), isTrue);
