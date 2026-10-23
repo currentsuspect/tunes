@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'offline_anchor.dart';
 import 'queue_order.dart';
 import 'restore_seek.dart';
 import 'source_plan.dart';
@@ -184,6 +185,7 @@ class MediaKitTunePlayer extends TunePlayer {
   int _heardIndex = -1;
   String? _heardSha;
   Duration _heardAt = Duration.zero;
+  final OfflineAnchor _anchor = OfflineAnchor();
   DateTime? _heardWhen;
 
   /// Offline with nothing on the phone to play: paused on the song that was
@@ -452,6 +454,7 @@ class MediaKitTunePlayer extends TunePlayer {
   void playQueue(List<ManifestTrack> tracks, int startIndex) {
     _heldForNetwork = false;
     _heardWhen = null;
+    _anchor.clear();
     if (tracks.isEmpty) return;
     _claimLive();
     if (!_firstPlayDone && onFirstPlay != null) {
@@ -650,6 +653,7 @@ class MediaKitTunePlayer extends TunePlayer {
   void next() {
     _heldForNetwork = false;
     _heardWhen = null;
+    _anchor.clear();
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
@@ -740,6 +744,7 @@ class MediaKitTunePlayer extends TunePlayer {
   void previous() {
     _heldForNetwork = false;
     _heardWhen = null;
+    _anchor.clear();
     final player = _player;
     if (player == null) return;
     if (_queue.isEmpty) return;
@@ -780,6 +785,7 @@ class MediaKitTunePlayer extends TunePlayer {
   void playAt(int index) {
     _heldForNetwork = false;
     _heardWhen = null;
+    _anchor.clear();
     final player = _player;
     if (player == null) return;
     if (index < 0 || index >= _queue.length) return;
@@ -798,6 +804,7 @@ class MediaKitTunePlayer extends TunePlayer {
     _restartedAt = null;
     _clearPendingSeek();
     _heardWhen = null;
+    _anchor.clear();
     if (_heldForNetwork) {
       // Nothing is loaded to seek in: move the spot it will resume from.
       _position = target;
@@ -1080,6 +1087,7 @@ class MediaKitTunePlayer extends TunePlayer {
           _heardSha = _queue[_index].sha;
           _heardAt = p;
           _heardWhen = DateTime.now();
+          _anchor.heard(_heardSha!);
           if (p > const Duration(seconds: 5)) _skipsInRow = 0;
         }
         if ((p - _lastNotifiedPosition).abs() >=
@@ -1190,8 +1198,15 @@ class MediaKitTunePlayer extends TunePlayer {
           _heardIndex <= _index &&
           _heardIndex < _queue.length &&
           _queue[_heardIndex].sha == _heardSha) {
-        index = _heardIndex;
-        from = _heardAt;
+        // Once per song: with the server down and some songs still playing,
+        // going back every time the next one failed replayed the same song
+        // over and over. A second time, carry on forward from here instead.
+        if (_anchor.take(_heardSha!)) {
+          index = _heardIndex;
+          from = _heardAt;
+        } else {
+          DiagLog.log('player: offline, already went back to this song');
+        }
       }
       // A song that has to stream cannot play offline however often it is
       // retried, and skipping through the queue only fails song after song.
