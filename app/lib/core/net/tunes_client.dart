@@ -5,6 +5,7 @@ import '../../domain/discography.dart';
 import '../sync/sync_models.dart';
 import 'update_check.dart';
 import '../../domain/manifest.dart';
+import '../../domain/soulseek.dart';
 
 class ChangesResponse {
   const ChangesResponse({
@@ -531,6 +532,116 @@ class TunesClient {
       await f.parent.create(recursive: true);
       await f.writeAsString(body);
     } catch (_) {}
+  }
+
+  // --- Soulseek (tunesd getter.ts) ---------------------------------------
+
+  Future<Map<String, dynamic>> _json(
+    String method,
+    String path, {
+    Object? body,
+    Duration timeout = _timeout,
+  }) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.openUrl(method, Uri.parse('$baseUrl$path'));
+      await _authorize(req);
+      if (body != null) {
+        req.headers.contentType = ContentType.json;
+        req.add(utf8.encode(jsonEncode(body)));
+      }
+      final res = await req.close().timeout(timeout);
+      final text = await res.transform(utf8.decoder).join();
+      if (res.statusCode != 200) {
+        throw TunesFetchException('$path ${res.statusCode}');
+      }
+      return jsonDecode(text) as Map<String, dynamic>;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Songs out there for [q]. Slow: the box asks Soulseek and waits for
+  /// answers (about ten seconds), so this has a long timeout of its own.
+  Future<List<FoundSong>> soulseekSearch(String q) async {
+    final j = await _json(
+      'GET',
+      '/soulseek/search?q=${Uri.encodeQueryComponent(q)}',
+      timeout: const Duration(seconds: 60),
+    );
+    return [
+      for (final s in j['songs'] as List<dynamic>? ?? const [])
+        FoundSong.fromJson(s as Map<String, dynamic>),
+    ];
+  }
+
+  /// Asks the box to get [song] (the copy found in search, else whatever
+  /// it finds), or a song by name for an album's missing track.
+  Future<GetJob> soulseekGet({
+    required String title,
+    required String artist,
+    String? album,
+    int? durationMs,
+    String? release,
+    FoundSong? copy,
+  }) async {
+    final j = await _json(
+      'POST',
+      '/soulseek/get',
+      body: {
+        'title': title,
+        'artist': artist,
+        'album': ?album,
+        'durationMs': ?durationMs,
+        'release': ?release,
+        if (copy != null) ...{
+          'username': copy.username,
+          'filename': copy.filename,
+          'size': copy.sizeBytes,
+        },
+      },
+    );
+    return GetJob.fromJson(j['job'] as Map<String, dynamic>);
+  }
+
+  /// The last day's gets, newest first.
+  Future<List<GetJob>> soulseekJobs() async {
+    final j = await _json('GET', '/soulseek/jobs');
+    return [
+      for (final x in j['jobs'] as List<dynamic>? ?? const [])
+        GetJob.fromJson(x as Map<String, dynamic>),
+    ];
+  }
+
+  /// Gets every song of [releaseId] the library lacks.
+  Future<List<GetJob>> soulseekComplete(String releaseId) async {
+    final j = await _json(
+      'POST',
+      '/soulseek/complete',
+      body: {'release': releaseId},
+      timeout: const Duration(seconds: 30),
+    );
+    return [
+      for (final x in j['jobs'] as List<dynamic>? ?? const [])
+        GetJob.fromJson(x as Map<String, dynamic>),
+    ];
+  }
+
+  /// An album's full track list, or null when the box does not know it.
+  Future<List<TracklistEntry>?> tracklist(String releaseId) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/tracklist?release=${Uri.encodeQueryComponent(releaseId)}',
+        timeout: const Duration(seconds: 20),
+      );
+      return [
+        for (final t in j['tracks'] as List<dynamic>? ?? const [])
+          TracklistEntry.fromJson(t as Map<String, dynamic>),
+      ];
+    } on TunesFetchException {
+      return null;
+    }
   }
 
   Future<TunesManifest?> _readCache() async {

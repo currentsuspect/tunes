@@ -32,6 +32,7 @@ import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/core/sync/sync_models.dart';
 import 'package:tunes/core/net/update_check.dart';
 import 'package:tunes/domain/manifest.dart';
+import 'package:tunes/domain/soulseek.dart';
 import 'package:tunes/domain/whats_new.dart';
 import 'package:tunes/domain/discography.dart';
 import 'package:tunes/features/album/album_page.dart';
@@ -215,6 +216,29 @@ class _FakeClient implements TunesClient {
 
   @override
   Future<bool> putLyrics(String sha, String text) async => true;
+
+  @override
+  Future<List<FoundSong>> soulseekSearch(String q) async => const [];
+
+  @override
+  Future<GetJob> soulseekGet({
+    required String title,
+    required String artist,
+    String? album,
+    int? durationMs,
+    String? release,
+    FoundSong? copy,
+  }) async =>
+      GetJob(id: 'j', title: title, artist: artist, state: GetState.queued);
+
+  @override
+  Future<List<GetJob>> soulseekJobs() async => const [];
+
+  @override
+  Future<List<GetJob>> soulseekComplete(String releaseId) async => const [];
+
+  @override
+  Future<List<TracklistEntry>?> tracklist(String releaseId) async => null;
 
   @override
   Future<void> warm(String sha, {String? signedPath}) async {}
@@ -1377,6 +1401,9 @@ void main() {
     // The second track is below the fold of a short surface with the dock up.
     await tester.scrollUntilVisible(find.text('ESCAPE PLAN'), 120);
     expect(find.text('ESCAPE PLAN'), findsOneWidget);
+    // Clear of the mini player at the bottom before tapping.
+    await tester.drag(find.text('ESCAPE PLAN'), const Offset(0, -200));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('MAFIA'));
     await tester.pumpAndSettle();

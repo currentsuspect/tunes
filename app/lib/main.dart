@@ -69,6 +69,7 @@ import 'domain/collection_gaps.dart';
 import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
+import 'core/data/gets.dart';
 import 'domain/mixes.dart';
 import 'features/stats/listening_page.dart';
 import 'domain/sync_watermark.dart';
@@ -852,6 +853,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   TunesManifest? _manifest;
   Map<String, int> _playsByArtist = const {};
 
+  /// Songs being got from Soulseek (search, album pages).
+  late final GetsController _gets;
+
   /// Plays per song, for search's "most played" and which songs lead.
   Map<String, int> _playCounts = const {};
   List<ManifestTrack> _onRepeat = const [];
@@ -943,6 +947,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _gets = GetsController(client: widget.client, onLanded: _reload);
     WidgetsBinding.instance.addObserver(this);
     _nav.addListener(_onNavChanged);
     // The screens below still take a Set<String> of in-flight shas; keep it in
@@ -993,6 +998,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     FocusManager.instance.removeListener(_regainFocus);
     _keys.dispose();
+    _gets.dispose();
     if (widget.accountSync?.onChanged == _onAccountSynced) {
       widget.accountSync?.onChanged = null;
     }
@@ -1946,9 +1952,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // The scope lives in TunesApp, above the Navigator. Re-publishing it here
-    // would cover this shell only, which is the bug that was.
-    return _buildShell(context);
+    // The download scope lives in TunesApp, above the Navigator. Re-publishing
+    // it here would cover this shell only, which is the bug that was. Gets
+    // are only offered on panels, which live in this shell.
+    return GetsScope(gets: _gets, child: _buildShell(context));
   }
 
   Widget _buildShell(BuildContext context) {

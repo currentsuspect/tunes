@@ -72,6 +72,13 @@ const API_PATHS = new Set([
   "/search",
   "/missing",
   "/discography",
+  // Songs got from Soulseek on request, and an album's full track list
+  // (tunesd getter.ts). Token-checked like the rest; the box does the work.
+  "/soulseek/search",
+  "/soulseek/get",
+  "/soulseek/jobs",
+  "/soulseek/complete",
+  "/tracklist",
 ]);
 
 /**

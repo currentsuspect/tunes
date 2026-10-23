@@ -116,6 +116,13 @@ describe("resourceLost", () => {
     expect(ledger.bySha["a".repeat(64)]?.sha).toBe("b".repeat(64));
   });
 
+  it("leaves the downloads folder in place, which slskd needs to start", async () => {
+    const { api } = fakeApi();
+    await resourceLost([], deps(api, 246000, []));
+    const { stat } = await import("node:fs/promises");
+    expect((await stat(join(dir, "dl"))).isDirectory()).toBe(true);
+  });
+
   it("points at a copy already in the library instead of downloading", async () => {
     const { api, started } = fakeApi();
     const commits: string[] = [];

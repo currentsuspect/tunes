@@ -1,4 +1,4 @@
-import { readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { Log } from "./logger.js";
@@ -207,6 +207,9 @@ export async function resourceLost(
   // Only this pass writes here; anything left is from a pass that was cut
   // short (a restart mid-download) and is never going to be committed.
   await rm(deps.downloadsDir, { recursive: true, force: true });
+  // And put the folder back: slskd will not start without it, and from
+  // 18 Oct it failed every boot after a pass had removed it.
+  await mkdir(deps.downloadsDir, { recursive: true });
   await deps.api.clearFinished?.().catch(() => undefined);
   let found = 0;
   let missed = 0;

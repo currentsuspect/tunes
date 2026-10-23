@@ -3,6 +3,7 @@ import { archiveAll, evictable, liveShas, needsArchive } from "./archive.js";
 import { completeAlbums, partialAlbums } from "./complete.js";
 import { loadReplacements, resourceLost } from "./resource.js";
 import { SlskdApi, slskdConfig } from "./soulseek.js";
+import { Getter } from "./getter.js";
 import { auditDue, auditSources } from "./audit.js";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
@@ -22,7 +23,7 @@ import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
 import { buildManifest, isCategoryRelease, releaseArtKey } from "./manifest.js";
-import type { ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
+import type { ManifestV3, ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { LyricStore, runLyricPass, type LyricTarget } from "./lyricstore.js";
@@ -1304,8 +1305,11 @@ async function main(): Promise<void> {
     // time, capped per day. Off unless slskd is configured.
     const slsk = slskdConfig();
     let resourceRunning = false;
+    // Set once the getter exists (below, with the server).
+    let gettersBusy: () => boolean = () => false;
     const resourceIfConfigured = async (): Promise<void> => {
-      if (!slsk || resourceRunning) return;
+      // A get on request is using the downloads folder this pass clears.
+      if (!slsk || resourceRunning || gettersBusy()) return;
       resourceRunning = true;
       try {
         const m = await manifestBuilder();
@@ -1594,6 +1598,59 @@ async function main(): Promise<void> {
         // that has already finished everything else.
         updateTimer.unref();
       }
+      // Songs got on request from search (getter.ts). Same checks and store
+      // as the background passes, which wait for a get and vice versa.
+      const getterNorm = (x: string | null | undefined) =>
+        (x ?? "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
+      let getterReleases = new Map<string, ManifestV3["releases"][number]>();
+      let getterListed: Array<{ sha: string; artist: string; title: string; durationMs: number | null }> = [];
+      const refreshListed = async () => {
+        const m = await manifestBuilder();
+        getterReleases = new Map(m.releases.map((r) => [r.id, r]));
+        getterListed = m.tracks.map((t) => ({
+          sha: t.sha,
+          artist: getterNorm(t.primaryArtist || t.artist),
+          title: getterNorm(t.title),
+          durationMs: t.durationMs ?? null,
+        }));
+      };
+      await refreshListed().catch(() => undefined);
+      setInterval(() => void refreshListed().catch(() => undefined), 60_000).unref?.();
+      const getter = slsk
+        ? new Getter({
+            api: new SlskdApi(slsk.url, slsk.apiKey),
+            downloadsDir: join(env.dataDir, "soulseek", "downloads"),
+            probe: (path, size) => probeFile("pending", size, path),
+            commit: async (path, size) => {
+              const staging = await store.beginStaging();
+              await rename(path, staging.path);
+              return (await staging.done(size)).sha;
+            },
+            inLibrary: (w) => {
+              const a = getterNorm(w.artist.split(/[,;/&]| feat/i)[0]);
+              const ti = getterNorm(w.title);
+              const hit = getterListed.find(
+                (t) =>
+                  t.title === ti &&
+                  (t.artist.includes(a) || a.includes(t.artist)) &&
+                  (w.durationMs == null || t.durationMs == null || Math.abs(t.durationMs - w.durationMs) <= 3000)
+              );
+              return hit?.sha ?? null;
+            },
+            afterCommit: async () => {
+              await runEnrichPass();
+              await refreshListed();
+              publishSoon.request();
+              void archiveAndPrune();
+            },
+            deezer,
+            release: (id) => getterReleases.get(id) ?? null,
+            passRunning: () => resourceRunning,
+            log,
+          })
+        : null;
+      gettersBusy = () => getter?.busy ?? false;
+
       const server = new ManifestServer(
         store,
         join(env.dataDir, "covers"),
@@ -1617,7 +1674,8 @@ async function main(): Promise<void> {
         onDemand,
         lyricStore,
         // A listener's lyrics go to the edge soon, not at the next scan.
-        () => publishSoon.request()
+        () => publishSoon.request(),
+        getter
       );
       await server.start();
       // Lyrics are asked for on their own beat as well as after each scan: a

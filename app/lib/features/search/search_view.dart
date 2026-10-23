@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
+import '../../core/data/gets.dart';
 import '../../core/data/playlist_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/looks.dart';
@@ -15,8 +16,10 @@ import '../../core/ui/pressable.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/initials.dart';
 import '../../core/theme/tokens.dart';
+import '../../domain/fuzzy.dart';
 import '../../domain/library_search.dart';
 import '../../domain/manifest.dart';
+import '../../domain/soulseek.dart';
 import '../library/library_widgets.dart';
 
 /// Search (design approved 23 Oct): everything on the device from one box,
@@ -83,6 +86,15 @@ class _SearchViewState extends State<SearchView> {
   List<ManifestTrack>? _indexedTracks;
   Map<String, int>? _indexedPlays;
 
+  // Soulseek (board 3): asked by itself when the library has nothing for the
+  // query, else on request. Slow -- the box waits on peers -- so it has its
+  // own, longer pause after typing and its own state.
+  Timer? _slskTimer;
+  String? _slskFor;
+  bool _slskBusy = false;
+  bool _slskFailed = false;
+  List<FoundSong> _slsk = const [];
+
   PlaylistStore? _playlistStore;
   List<PlaylistSummary> _playlists = const [];
 
@@ -108,6 +120,7 @@ class _SearchViewState extends State<SearchView> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _slskTimer?.cancel();
     _playlistStore?.removeListener(_loadPlaylists);
     _controller.dispose();
     super.dispose();
@@ -148,9 +161,24 @@ class _SearchViewState extends State<SearchView> {
       }
     });
     _debounce?.cancel();
+    _slskTimer?.cancel();
+    if (_slskFor != null && _slskFor != v.trim()) {
+      _slskFor = null;
+      _slsk = const [];
+      _slskFailed = false;
+    }
     if (v.trim().isEmpty) {
       setState(() => _server = null);
       return;
+    }
+    // Nothing here by that name: look out there once typing settles.
+    if (!widget.offline &&
+        v.trim().length >= 3 &&
+        GetsScope.maybeOf(context) != null &&
+        _idx.search(v).isEmpty) {
+      _slskTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted && _controller.text.trim() == v.trim()) _askSoulseek();
+      });
     }
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (widget.offline) return;
@@ -168,6 +196,26 @@ class _SearchViewState extends State<SearchView> {
         setState(() => _server = null);
       }
     });
+  }
+
+  Future<void> _askSoulseek() async {
+    final q = _query.trim();
+    if (q.length < 2 || _slskBusy) return;
+    setState(() {
+      _slskFor = q;
+      _slskBusy = true;
+      _slskFailed = false;
+      _slsk = const [];
+    });
+    try {
+      final found = await widget.client.soulseekSearch(q);
+      if (!mounted || _slskFor != q) return;
+      setState(() => _slsk = found);
+    } catch (_) {
+      if (mounted && _slskFor == q) setState(() => _slskFailed = true);
+    } finally {
+      if (mounted && _slskFor == q) setState(() => _slskBusy = false);
+    }
   }
 
   void _clear() {
@@ -240,7 +288,11 @@ class _SearchViewState extends State<SearchView> {
         server != null &&
         (server.externalReleases.isNotEmpty ||
             server.externalArtists.isNotEmpty);
-    final hasResults = (r != null && !r.isEmpty) || external;
+    final asked = _slskFor == q && q.isNotEmpty;
+    final hasResults =
+        (r != null && !r.isEmpty) ||
+        external ||
+        (asked && (_slskBusy || _slsk.isNotEmpty || _slskFailed));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -344,6 +396,7 @@ class _SearchViewState extends State<SearchView> {
                           ),
                         ),
                       ),
+                    if (_kind == SearchKind.all) ..._soulseek(context, q),
                     if (_kind == SearchKind.all && server != null)
                       ..._beyond(context, server),
                   ],
@@ -595,6 +648,141 @@ class _SearchViewState extends State<SearchView> {
       TopSong(:final track) => [track],
     };
     if (list.isNotEmpty) widget.player.playQueue(list, 0);
+  }
+
+  // --- Soulseek ----------------------------------------------------------
+
+  List<Widget> _soulseek(BuildContext context, String q) {
+    final gets = GetsScope.maybeOf(context);
+    if (gets == null || widget.offline) return const [];
+    if (_slskFor != q) {
+      if (q.length < 3) return const [];
+      return [
+        const SizedBox(height: Space.sm),
+        Center(
+          child: _Pill(
+            label: 'Look for "$q" on Soulseek',
+            selected: false,
+            leading: Icon(
+              Icons.travel_explore_rounded,
+              size: 16,
+              color: Tones.text,
+            ),
+            onTap: _askSoulseek,
+          ),
+        ),
+        const SizedBox(height: Space.lg),
+      ];
+    }
+    final peers = _slsk.fold<int>(0, (n, s) => n > s.peers ? n : s.peers);
+    final finish = _finishable(_slsk);
+    return [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            'From Soulseek',
+            style: TypeScale.heading.copyWith(fontSize: 20),
+          ),
+          const SizedBox(width: Space.sm),
+          if (_slsk.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                "on $peers people's shares",
+                style: TypeScale.caption,
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: Space.sm),
+      for (final s in _slsk.take(12))
+        Padding(
+          padding: const EdgeInsets.only(bottom: Space.sm + 2),
+          child: _FoundCard(
+            song: s,
+            job: gets.jobFor(s.artist, s.title),
+            playable: _trackFor(s, gets),
+            onGet: () => gets.get(s),
+            onPlay: (t) => widget.player.playQueue([t], 0),
+          ),
+        ),
+      if (_slskBusy)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.sm),
+          child: Row(
+            children: [
+              SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Tones.text,
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+              Text('Asking people on Soulseek…', style: TypeScale.caption),
+            ],
+          ),
+        )
+      else if (_slskFailed)
+        Text(
+          "Soulseek isn't answering right now. Try again in a minute.",
+          style: TypeScale.caption,
+        )
+      else if (_slsk.isEmpty)
+        Text('Nobody on Soulseek has it right now.', style: TypeScale.caption),
+      if (finish != null) ...[
+        const SizedBox(height: Space.md),
+        Text(
+          'Finish the record',
+          style: TypeScale.heading.copyWith(fontSize: 20),
+        ),
+        const SizedBox(height: Space.sm),
+        _FinishCard(
+          release: finish,
+          artUrlFor: widget.artUrlFor,
+          pending: gets.pendingFor(finish.id),
+          onGet: () => gets.complete(finish.id),
+        ),
+      ],
+      const SizedBox(height: Space.md),
+      Text(
+        'The box fetches it, files it under its album with the cover, and it '
+        'plays on every device. A song takes from a minute to a few, '
+        'depending on who has it; keep listening meanwhile.',
+        style: TypeScale.caption,
+      ),
+      const SizedBox(height: Space.lg),
+    ];
+  }
+
+  /// The library's song for a find: already there, or just got.
+  ManifestTrack? _trackFor(FoundSong s, GetsController gets) {
+    final sha = s.inLibrary ?? gets.jobFor(s.artist, s.title)?.sha;
+    if (sha == null) return null;
+    for (final t in widget.tracks) {
+      if (t.sha == sha) return t;
+    }
+    return null;
+  }
+
+  /// A record the finds belong to that the library holds in part.
+  ManifestRelease? _finishable(List<FoundSong> found) {
+    for (final s in found) {
+      final album = s.album;
+      if (album == null) continue;
+      final a = foldForSearch(album);
+      for (final r in widget.releases) {
+        final total = r.totalTracks;
+        if (total == null || r.trackShas.length >= total) continue;
+        if (foldForSearch(r.title) == a &&
+            foldForSearch(r.artist)
+                .contains(foldForSearch(s.artist).split(' ').first)) {
+          return r;
+        }
+      }
+    }
+    return null;
   }
 
   // --- beyond the library ------------------------------------------------
@@ -1431,6 +1619,336 @@ class _BrowseHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
       child: Text(label, style: _sectionStyle()),
+    );
+  }
+}
+
+/// One song found on Soulseek: what it is, how good the copy is, and Get,
+/// then a ring while it comes, then Play once it is in the library.
+class _FoundCard extends StatelessWidget {
+  const _FoundCard({
+    required this.song,
+    required this.job,
+    required this.playable,
+    required this.onGet,
+    required this.onPlay,
+  });
+
+  final FoundSong song;
+  final GetJob? job;
+  final ManifestTrack? playable;
+  final VoidCallback onGet;
+  final void Function(ManifestTrack) onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = song;
+    final j = job;
+    final facts = [
+      s.artist,
+      ?s.album,
+      if (s.durationMs != null) _mmss(s.durationMs!),
+    ].join(' \u00b7 ');
+    final Widget action;
+    final String? note;
+    if (playable case final t?) {
+      note = 'in your library now';
+      action = _RoundButton(
+        tooltip: 'Play ${s.title}',
+        icon: Icons.play_arrow_rounded,
+        filled: true,
+        onTap: () => onPlay(t),
+      );
+    } else if (j != null && !j.finished) {
+      note = switch (j.state) {
+        GetState.queued => 'waiting its turn',
+        GetState.searching => 'looking for another copy',
+        GetState.checking => 'checking it',
+        _ =>
+          j.progress == null
+              ? 'getting it'
+              : 'getting it \u2026 ${(j.progress! * 100).round()}%',
+      };
+      action = _crayon
+          ? CrayonDownloadFace(
+              state: CrayonDownloadState.running,
+              progress: j.progress,
+              size: 34,
+            )
+          : SizedBox.square(
+              dimension: 30,
+              child: CircularProgressIndicator(
+                value: j.progress,
+                strokeWidth: 3,
+                color: Tones.held,
+                backgroundColor: Tones.hairline,
+              ),
+            );
+    } else if (j != null && j.state == GetState.done) {
+      note = 'adding it to your library';
+      action = const SizedBox.square(dimension: 34);
+    } else {
+      note = j == null
+          ? null
+          : j.state == GetState.notFound
+          ? 'nobody would send it; try another'
+          : "that copy didn't work; try again";
+      action = _GetButton(onTap: onGet);
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(Space.md, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: Tones.surfaceRaised,
+        borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+        border: _edge(),
+        boxShadow: _crayon
+            ? [
+                BoxShadow(
+                  color: Looks.current.inkShadow,
+                  offset: const Offset(3, 3),
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TypeScale.title.copyWith(fontSize: 15),
+                ),
+                Text(
+                  facts,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TypeScale.caption,
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    _Tag(s.quality, strong: s.lossless),
+                    if (s.peers > 1) ...[
+                      const SizedBox(width: 6),
+                      _Tag('${s.peers} people have it'),
+                    ],
+                    if (note != null) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          note,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TypeScale.caption.copyWith(fontSize: 11.5),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: Space.sm),
+          action,
+        ],
+      ),
+    );
+  }
+
+  static String _mmss(int ms) {
+    final s = (ms / 1000).round();
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag(this.text, {this.strong = false});
+
+  final String text;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+      decoration: BoxDecoration(
+        color: strong ? Tones.badge.withValues(alpha: 0.18) : null,
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(
+          color: strong || _crayon ? Tones.text : Tones.hairline,
+          width: _crayon ? 1.5 : 1,
+        ),
+      ),
+      child: Text(
+        text,
+        style: TypeScale.caption.copyWith(
+          fontSize: 11,
+          letterSpacing: 0,
+          color: Tones.text,
+          fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+}
+
+class _GetButton extends StatelessWidget {
+  const _GetButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Tones.primary,
+      shape: StadiumBorder(
+        side: _crayon
+            ? BorderSide(color: Tones.text, width: 2)
+            : BorderSide.none,
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44, minWidth: 72),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.arrow_downward_rounded,
+                  size: 18,
+                  color: _crayon ? Tones.text : Tones.onPrimary,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Get',
+                  style: TypeScale.title.copyWith(
+                    fontSize: 14,
+                    color: _crayon ? Tones.text : Tones.onPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: filled ? Tones.text : Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox.square(
+            dimension: 44,
+            child: Icon(icon, color: filled ? Tones.base : Tones.text),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "You have 11 of 17. Get the other 6?"
+class _FinishCard extends StatelessWidget {
+  const _FinishCard({
+    required this.release,
+    required this.artUrlFor,
+    required this.pending,
+    required this.onGet,
+  });
+
+  final ManifestRelease release;
+  final String Function(String sha) artUrlFor;
+  final int pending;
+  final VoidCallback onGet;
+
+  @override
+  Widget build(BuildContext context) {
+    final have = release.trackShas.length;
+    final total = release.totalTracks ?? have;
+    final missing = total - have;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Tones.surface,
+        borderRadius: BorderRadius.circular(RadiusTokens.card - 2),
+        border: Border.all(
+          color: _crayon ? Tones.text : Tones.hairline,
+          width: _crayon ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          ArtThumb(
+            sha: release.artSha,
+            artUrlFor: artUrlFor,
+            size: 52,
+            title: release.title,
+            artist: release.artist,
+          ),
+          const SizedBox(width: Space.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  release.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TypeScale.title.copyWith(fontSize: 15),
+                ),
+                Text(
+                  pending > 0
+                      ? 'Getting $pending of the missing songs'
+                      : 'You have $have of $total. Get the other $missing?',
+                  style: TypeScale.caption,
+                ),
+              ],
+            ),
+          ),
+          if (pending == 0)
+            OutlinedButton(
+              onPressed: onGet,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Tones.text,
+                side: BorderSide(
+                  color: _crayon ? Tones.text : Tones.hairline,
+                  width: _crayon ? 2 : 1,
+                ),
+                shape: const StadiumBorder(),
+              ),
+              child: Text('Get $missing'),
+            ),
+        ],
+      ),
     );
   }
 }

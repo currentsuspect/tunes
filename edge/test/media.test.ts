@@ -75,7 +75,18 @@ describe("media edge", () => {
 
   it("refuses library metadata without a token", async () => {
     // /manifest names every track we hold, so it cannot be public.
-    for (const p of ["/manifest", "/search?q=a", "/changes", "/missing"]) {
+    // Getting songs from Soulseek spends the box's line and account: never
+    // without a token either.
+    for (const p of [
+      "/manifest",
+      "/search?q=a",
+      "/changes",
+      "/missing",
+      "/soulseek/search?q=a",
+      "/soulseek/get",
+      "/soulseek/complete",
+      "/tracklist?release=r",
+    ]) {
       const res = await verdict(p);
       expect(res?.status, `${p} should need a token`).toBe(401);
     }
@@ -88,7 +99,18 @@ describe("media edge", () => {
       { sub: "acct-1", did: "dev-1", iat: NOW, exp: NOW + 600 },
       ENV.ACCESS_SECRET,
     );
-    for (const p of ["/manifest", "/search?q=a", "/changes", "/missing", "/discography?artist=x"]) {
+    for (const p of [
+      "/manifest",
+      "/search?q=a",
+      "/changes",
+      "/missing",
+      "/discography?artist=x",
+      "/soulseek/search?q=a",
+      "/soulseek/get",
+      "/soulseek/jobs",
+      "/soulseek/complete",
+      "/tracklist?release=r",
+    ]) {
       const res = await verdict(p, { headers: { authorization: `Bearer ${token}` } });
       expect(res, `${p} should pass through`).toBeNull();
     }

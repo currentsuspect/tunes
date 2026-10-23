@@ -5,6 +5,7 @@ import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { OnDemandFetcher } from "./ondemand.js";
+import type { Getter, GetRequest } from "./getter.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
@@ -81,7 +82,10 @@ export class ManifestServer {
     private readonly lyrics: LyricStore | null = null,
     /// Told after a listener's lyrics are stored, so the daemon can put the new
     /// manifest on the edge now instead of at the next cycle.
-    private readonly onLyricsChanged: (() => void) | null = null
+    private readonly onLyricsChanged: (() => void) | null = null,
+    /// Soulseek search and gets on request (getter.ts), or null when slskd is
+    /// not set up: those routes then answer 503.
+    private readonly getter: Getter | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -335,6 +339,66 @@ export class ManifestServer {
             JSON.stringify({ tracks, releases, artists, externalArtists, externalReleases })
           );
           return;
+        }
+
+        // Songs out there, getting one, how gets are going, an album's full
+        // track list, and filling an album in (getter.ts).
+        if (
+          url.pathname === "/soulseek/search" ||
+          url.pathname === "/soulseek/get" ||
+          url.pathname === "/soulseek/jobs" ||
+          url.pathname === "/soulseek/complete" ||
+          url.pathname === "/tracklist"
+        ) {
+          const json = (code: number, body: unknown) => {
+            res.writeHead(code, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify(body));
+          };
+          const getter = this.getter;
+          if (!getter) return json(503, { error: "soulseek is not set up" });
+          if (url.pathname === "/soulseek/search") {
+            const q = (url.searchParams.get("q") ?? "").trim();
+            if (q.length < 2) return json(400, { error: "missing q" });
+            try {
+              return json(200, { songs: await getter.search(q) });
+            } catch (e) {
+              return json(503, { error: String(e) });
+            }
+          }
+          if (url.pathname === "/soulseek/jobs") return json(200, { jobs: getter.list() });
+          if (url.pathname === "/tracklist") {
+            const id = url.searchParams.get("release") ?? "";
+            const tracks = await getter.tracklist(id).catch(() => null);
+            return tracks ? json(200, { tracks }) : json(404, { error: "no track list" });
+          }
+          if (req.method !== "POST") return json(405, { error: "POST only" });
+          const body = await readBody(req, 16 * 1024);
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = JSON.parse(body ?? "") as Record<string, unknown>;
+          } catch {
+            return json(400, { error: "expected JSON" });
+          }
+          if (url.pathname === "/soulseek/complete") {
+            const id = typeof parsed.release === "string" ? parsed.release : "";
+            return json(200, { jobs: await getter.complete(id).catch(() => []) });
+          }
+          const str = (k: string) => (typeof parsed[k] === "string" ? (parsed[k] as string) : null);
+          const num = (k: string) => (typeof parsed[k] === "number" ? (parsed[k] as number) : null);
+          const title = str("title");
+          const artist = str("artist");
+          if (!title || !artist) return json(400, { error: "title and artist" });
+          const reqBody: GetRequest = {
+            title,
+            artist,
+            album: str("album"),
+            durationMs: num("durationMs"),
+            release: str("release"),
+            username: str("username"),
+            filename: str("filename"),
+            size: num("size"),
+          };
+          return json(200, { job: getter.get(reqBody) });
         }
 
         if (url.pathname === "/missing") {

@@ -5,6 +5,7 @@ import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
 import '../../core/data/queue_store.dart';
 import '../../core/nav/nav_controller.dart';
+import '../../core/data/gets.dart';
 import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
@@ -20,6 +21,7 @@ import '../../core/ui/playing_bars.dart';
 import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
+import '../../domain/soulseek.dart';
 import '../artist/artist_page.dart';
 
 class AlbumPage extends StatelessWidget {
@@ -355,24 +357,30 @@ class AlbumPage extends StatelessWidget {
                           ),
                           const SizedBox(height: Space.md),
                           const SizedBox(height: Space.lg),
-                          for (var i = 0; i < rows.length; i++) ...[
-                            _AlbumTrackRow(
-                              track: rows[i].track,
-                              position:
-                                  rows[i].number ??
-                                  releaseTracks[i].trackNumber ??
-                                  i + 1,
-                              player: player,
-                              onPlay: () => player.playQueue(releaseTracks, i),
-                              store: store,
-                              downloading: downloading.contains(
-                                releaseTracks[i].sha,
-                              ),
-                              onDownload: () => onDownload(releaseTracks[i]),
-                              offline: offline,
-                            ),
-                            if (i < releaseTracks.length - 1) const Divider(),
-                          ],
+                          _Tracklist(
+                            release: release,
+                            offline: offline,
+                            owned: [
+                              for (var i = 0; i < rows.length; i++)
+                                _AlbumTrackRow(
+                                  track: rows[i].track,
+                                  position:
+                                      rows[i].number ??
+                                      releaseTracks[i].trackNumber ??
+                                      i + 1,
+                                  player: player,
+                                  onPlay: () =>
+                                      player.playQueue(releaseTracks, i),
+                                  store: store,
+                                  downloading: downloading.contains(
+                                    releaseTracks[i].sha,
+                                  ),
+                                  onDownload: () =>
+                                      onDownload(releaseTracks[i]),
+                                  offline: offline,
+                                ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -384,6 +392,251 @@ class AlbumPage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The album's songs in order, with the ones the library lacks shown in
+/// their places, greyed out (Dennis, 23 Oct: "show the songs that are
+/// missing and just gray them out"), each with a Get, and a Get for all of
+/// them at the top. The full track list comes from the box (Deezer, via
+/// tunesd /tracklist); offline, or for an album it does not know, this is
+/// the owned songs as before.
+class _Tracklist extends StatefulWidget {
+  const _Tracklist({
+    required this.release,
+    required this.owned,
+    required this.offline,
+  });
+
+  final ManifestRelease release;
+  final List<_AlbumTrackRow> owned;
+  final bool offline;
+
+  @override
+  State<_Tracklist> createState() => _TracklistState();
+}
+
+class _TracklistState extends State<_Tracklist> {
+  List<TracklistEntry>? _entries;
+  String? _for;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _fetch();
+  }
+
+  @override
+  void didUpdateWidget(_Tracklist old) {
+    super.didUpdateWidget(old);
+    // A song landed: the release now lists it, so ask again.
+    if (old.release.trackShas.length != widget.release.trackShas.length) {
+      _for = null;
+      _fetch();
+    }
+  }
+
+  Future<void> _fetch() async {
+    final r = widget.release;
+    final total = r.totalTracks;
+    final gets = GetsScope.maybeOf(context);
+    if (widget.offline || gets == null || _for == r.id) return;
+    if (total == null || r.trackShas.length >= total) return;
+    _for = r.id;
+    final list = await gets.client.tracklist(r.id);
+    if (mounted && list != null) setState(() => _entries = list);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _entries;
+    final gets = GetsScope.maybeOf(context);
+    final bySha = {for (final row in widget.owned) row.track.sha: row};
+    final missing = entries?.where((e) => !bySha.containsKey(e.have)).length;
+    final children = <Widget>[];
+    if (entries == null || missing == 0) {
+      children.addAll(widget.owned);
+    } else {
+      final used = <String>{};
+      for (final e in entries) {
+        final row = e.have == null ? null : bySha[e.have];
+        if (row != null && used.add(row.track.sha)) {
+          children.add(row);
+        } else {
+          children.add(
+            _MissingRow(
+              entry: e,
+              job: gets?.jobFor(e.artist, e.title),
+              onGet: gets == null
+                  ? null
+                  : () => gets.get(
+                      null,
+                      title: e.title,
+                      artist: e.artist,
+                      album: widget.release.title,
+                      durationMs: e.durationMs,
+                      release: widget.release.id,
+                    ),
+            ),
+          );
+        }
+      }
+      // Songs the library files under this album that the list does not
+      // name (a bonus track, another edition): kept, at the end.
+      for (final row in widget.owned) {
+        if (!used.contains(row.track.sha)) children.add(row);
+      }
+    }
+    final pending = gets?.pendingFor(widget.release.id) ?? 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (missing != null && missing > 0 && gets != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.sm),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    pending > 0
+                        ? 'Getting $pending of the $missing missing'
+                        : '$missing ${missing == 1 ? 'song' : 'songs'} '
+                              'not in your library yet',
+                    style: TypeScale.note.copyWith(
+                      fontSize: 14,
+                      color: Tones.textMuted,
+                    ),
+                  ),
+                ),
+                if (missing - pending > 0)
+                  TextButton(
+                    onPressed: () => gets.complete(widget.release.id),
+                    style: TextButton.styleFrom(foregroundColor: Tones.text),
+                    child: Text(
+                      pending > 0
+                          ? 'Get the rest'
+                          : 'Get ${missing == 1 ? 'it' : 'them'}',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        for (var i = 0; i < children.length; i++) ...[
+          children[i],
+          if (i < children.length - 1) const Divider(),
+        ],
+      ],
+    );
+  }
+}
+
+/// A song of the album the library does not have: there, in its place,
+/// greyed out, with a Get.
+class _MissingRow extends StatelessWidget {
+  const _MissingRow({required this.entry, required this.job, this.onGet});
+
+  final TracklistEntry entry;
+  final GetJob? job;
+  final VoidCallback? onGet;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final j = job;
+    final faint = Tones.textMuted.withValues(alpha: 0.6);
+    final Widget action;
+    if (j != null && !j.finished) {
+      action = SizedBox(
+        width: 40,
+        height: 40,
+        child: Center(
+          child: Looks.current.kind == LookKind.crayon
+              ? CrayonDownloadFace(
+                  state: CrayonDownloadState.running,
+                  progress: j.progress,
+                )
+              : SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(
+                    value: j.progress,
+                    strokeWidth: 2.2,
+                    color: Tones.held,
+                    backgroundColor: Tones.hairline,
+                  ),
+                ),
+        ),
+      );
+    } else if (j != null && j.state == GetState.done) {
+      action = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Space.sm),
+        child: Text('adding…', style: TypeScale.caption),
+      );
+    } else if (onGet != null) {
+      action = TextButton(
+        onPressed: onGet,
+        style: TextButton.styleFrom(
+          foregroundColor: Tones.text,
+          minimumSize: const Size(48, 40),
+        ),
+        child: Text(j == null ? 'Get' : 'Try again'),
+      );
+    } else {
+      action = const SizedBox.shrink();
+    }
+    final n = e.trackNumber;
+    return Semantics(
+      label: '${e.title}, not in your library',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: Space.sm,
+          horizontal: Space.xs,
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 34,
+              child: Text(
+                n == null ? '–' : n.toString().padLeft(2, '0'),
+                style: TypeScale.mono.copyWith(color: faint),
+              ),
+            ),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    e.title,
+                    style: TypeScale.title.copyWith(color: faint),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'not in your library',
+                    style: TypeScale.caption.copyWith(
+                      color: faint,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            action,
+            if (e.durationMs != null)
+              Text(
+                _mmss(e.durationMs!),
+                style: TypeScale.mono.copyWith(color: faint),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _mmss(int ms) {
+    final s = (ms / 1000).round();
+    return '${(s ~/ 60).toString().padLeft(2, '0')}:'
+        '${(s % 60).toString().padLeft(2, '0')}';
   }
 }
 
