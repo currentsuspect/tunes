@@ -27,6 +27,8 @@ describe("searchVariants", () => {
       "kendrick lamar luther",
       "kendrick luther",
       "lamar luther",
+      // The server refuses "kendrick lamar" outright: the title alone too.
+      "luther",
     ]);
     expect(searchVariants({ artist: "Yeat", title: "Team ceo" })).toEqual(["yeat team ceo", "team ceo"]);
   });
@@ -57,6 +59,25 @@ describe("rankCandidates", () => {
       w
     );
     expect(r.map((c) => c.username)).toEqual(["ok"]);
+  });
+});
+
+describe("searching around a refused artist name", () => {
+  it("tries the album and title, and the title alone", () => {
+    const v = searchVariants({ artist: "Rihanna", title: "Desperado", album: "ANTI" });
+    expect(v).toContain("anti desperado");
+    expect(v).toContain("desperado");
+  });
+});
+
+describe("a version asked for", () => {
+  it("a remix needs a file that is the remix", () => {
+    const answers = [
+      resp("a", "Skyte\\Bring It On\\01 Spectacular 2.flac", {}, 110),
+      resp("b", "Skyte\\Bring It On\\06 Spectacular (Remix).flac", {}, 108),
+    ];
+    const got = rankCandidates(answers, { artist: "Skyte", title: "Spectacular (Remix)", durationMs: 108_000 });
+    expect(got.map((c) => c.username)).toEqual(["b"]);
   });
 });
 

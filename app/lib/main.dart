@@ -1056,6 +1056,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.resumed) {
       unawaited(_loadMixes());
+      // Tunes stays alive in the background to play, so a check at cold
+      // start only can miss a build for days (Dennis, 23 Oct). Again on
+      // coming back to the front, at most every half hour.
+      final last = _updates.checkedAt;
+      if (last == null ||
+          DateTime.now().difference(last) > const Duration(minutes: 30)) {
+        unawaited(_updates.check());
+      }
     }
   }
 

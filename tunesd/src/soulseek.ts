@@ -161,14 +161,20 @@ export interface Wanted {
 export function searchVariants(w: Wanted): string[] {
   const artist = words(w.artist.split(/[,;/]| feat\.? | ft\.? | x /i)[0] ?? w.artist);
   const title = words(w.title.replace(/\(.*?\)|\[.*?\]/g, " "));
+  const album = w.album ? words(w.album.replace(/\(.*?\)|\[.*?\]/g, " ")) : [];
   const out = [
     [...artist, ...title],
     [artist[0] ?? "", ...title],
     [artist[artist.length - 1] ?? "", ...title],
-    title.length >= 2 ? title : [],
+    // The Soulseek server drops searches naming some artists outright (23
+    // Oct: anything with "rihanna" got nothing, "anti" 300), so the album
+    // and title, then the title alone. rankCandidates still wants an artist
+    // word in the file's path, which keeps other people's songs out.
+    album.length > 0 ? [...album, ...title] : [],
+    title,
   ]
     .map((ws) => ws.filter(Boolean).join(" "))
-    .filter((q) => q.split(" ").length >= 2);
+    .filter((q) => q.split(" ").length >= 2 || q.length >= 5);
   return [...new Set(out)];
 }
 
@@ -204,6 +210,10 @@ export function rankCandidates(responses: SlskResponse[], w: Wanted): Candidate[
       if (!titleWords.every((t) => pathWords.has(t))) continue;
       if (artistWords.length > 0 && !artistWords.some((a) => pathWords.has(a))) continue;
       if (versions.some((v) => pathWords.has(v) && !wantedAll.has(v))) continue;
+      // And the other way: a title that asks for a version needs a file that
+      // is one. "Spectacular (Remix)" fetched "Spectacular 2" (23 Oct) because
+      // only the words outside the brackets were checked.
+      if (versions.some((v) => wantedAll.has(v) && !pathWords.has(v))) continue;
       const lossless = /\.(flac|wav|aiff?)$/i.test(f.filename);
       if (!lossless && f.bitRate != null && f.bitRate > 0 && f.bitRate < 256) continue;
       let lengthPenalty = 0;

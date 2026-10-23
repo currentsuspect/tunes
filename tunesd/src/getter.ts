@@ -248,9 +248,12 @@ export function holdsAll(query: string, s: { artist: string; title: string; albu
 export function queryVariants(q: string): string[] {
   const w = q.split(/\s+/).filter(Boolean);
   const out = [w.join(" ")];
-  if (w.length >= 3) out.push(w.slice(1).join(" "));
+  // Without the first word (often the artist, which the server may refuse
+  // to search for at all), then the last two, then without the last word.
+  if (w.length >= 2) out.push(w.slice(1).join(" "));
   if (w.length >= 4) out.push(w.slice(-2).join(" "));
-  return [...new Set(out)];
+  if (w.length >= 2) out.push(w.slice(0, -1).join(" "));
+  return [...new Set(out)].filter((v) => v.length >= 4).slice(0, 4);
 }
 
 export type JobState = "queued" | "searching" | "downloading" | "checking" | "done" | "failed" | "notFound";
@@ -363,7 +366,9 @@ export class Getter {
       if (v !== q) songs = songs.filter((s) => holdsAll(q, s));
       if (songs.length > 0) break;
     }
-    this.searchCache.set(q, { at: Date.now(), songs });
+    // Nothing found is not remembered: it is as often the network or the
+    // server's refusal as the song being absent, and asking again is cheap.
+    if (songs.length > 0) this.searchCache.set(q, { at: Date.now(), songs });
     if (this.searchCache.size > 50) {
       const oldest = [...this.searchCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
       if (oldest) this.searchCache.delete(oldest);

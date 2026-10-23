@@ -115,8 +115,14 @@ describe("real folder names (live search, 23 Oct)", () => {
   });
 
   it("shorter asks for when Soulseek drops a phrase", () => {
-    expect(queryVariants("burna boy last last")).toEqual(["burna boy last last", "boy last last", "last last"]);
-    expect(queryVariants("sicko mode")).toEqual(["sicko mode"]);
+    expect(queryVariants("burna boy last last")).toEqual([
+      "burna boy last last",
+      "boy last last",
+      "last last",
+      "burna boy last",
+    ]);
+    // Two words: the artist the server will not search for is dropped.
+    expect(queryVariants("rihanna desperado")).toEqual(["rihanna desperado", "desperado", "rihanna"]);
   });
 });
 
