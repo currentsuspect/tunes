@@ -98,11 +98,16 @@ export async function handlePublish(req: Request, env: PublishEnv): Promise<Resp
 
   if (rows.length > 0) {
     const now = Math.floor(Date.now() / 1000);
+    // OR IGNORE, not OR REPLACE: the key is the whole row, so a row already
+    // there has nothing to change, and REPLACE rewrote it (and its index)
+    // anyway. The box sends every row after each restart, about 2,600, so
+    // a day of restarts and retries came to ~98k written rows and went over
+    // D1's free 100k a day (24 Oct). Ignored rows are not written.
     await db.batch(
       rows.map((r) =>
         db
           .prepare(
-            "INSERT OR REPLACE INTO fetch_map (sha, chat, msg, updated_at) VALUES (?, ?, ?, ?)"
+            "INSERT OR IGNORE INTO fetch_map (sha, chat, msg, updated_at) VALUES (?, ?, ?, ?)"
           )
           .bind(r.sha, r.chat, r.msg, now)
       )
