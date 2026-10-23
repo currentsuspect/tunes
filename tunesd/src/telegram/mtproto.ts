@@ -16,7 +16,7 @@ export interface AudioRef {
 }
 
 const TRANSPORT_RE =
-  /while disconnected|not connected|TIMEOUT|timed?[ _-]?out|ECONNRESET|ECONNREFUSED|ENOTFOUND|EPIPE|EHOSTUNREACH|reconnect/i;
+  /while disconnected|not connected|disconnect|TIMEOUT|timed?[ _-]?out|deadline exceeded|ECONNRESET|ECONNREFUSED|ENOTFOUND|EPIPE|EHOSTUNREACH|ETIMEDOUT|reconnect/i;
 
 export function isTransportError(e: unknown): boolean {
   if (e instanceof RetryableError) return true;
@@ -34,7 +34,7 @@ export function isDefinitiveUnresolved(e: unknown): boolean {
   return DEFINITIVE_PEER_RE.test(msg);
 }
 
-function mapMtprotoError(e: unknown): Error {
+export function mapMtprotoError(e: unknown): Error {
   if (e instanceof FloodWaitError || e instanceof SlowModeWaitError) {
     const seconds = Number((e as unknown as { seconds: number | bigint }).seconds ?? 30);
     return new RetryableError(`flood_wait ${seconds}s`, seconds * 1000 + 1000);
@@ -46,9 +46,11 @@ function mapMtprotoError(e: unknown): Error {
     return new PermanentError(msg);
   }
   if (e instanceof PermanentError || e instanceof RetryableError) return e;
-  if (e instanceof Error && /timeout|ECONNRESET|ENOTFOUND|disconnect/i.test(msg)) {
-    return new RetryableError(msg);
-  }
+  // A slow or dropped connection is not a reason to stop. "Media request
+  // deadline exceeded" and "Could not reconnect to dc 4" fell through to
+  // PermanentError and took the daemon down four times in the week to 24
+  // Oct, losing everyone's queued gets each time.
+  if (isTransportError(msg)) return new RetryableError(msg);
   return new PermanentError(msg);
 }
 

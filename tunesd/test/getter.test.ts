@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -302,5 +302,74 @@ describe("getting a song", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it("keeps the line across a restart: a cut-off get goes back in line", async () => {
+    const statePath = join(dir, "gets.json");
+    // A pass holds the folder, so nothing starts before the "restart".
+    const { deps: d } = deps({ statePath, passRunning: () => true });
+    const g = new Getter(d);
+    const a = g.get({ title: "SICKO MODE", artist: "Travis Scott", by: "Dennis" });
+    const b = g.get({ title: "CAROUSEL", artist: "Travis Scott" });
+    await g.flushed();
+    // As if it died mid-download.
+    const saved = JSON.parse(await readFile(statePath, "utf8"));
+    saved.jobs[0].state = "downloading";
+    saved.jobs[0].progress = 0.4;
+    await writeFile(statePath, JSON.stringify(saved));
+
+    const acq = fakeAcquire();
+    const { deps: d2, committed } = deps({ statePath });
+    const again = new Getter(d2);
+    expect((await settle(again, a.id)).state).toBe("done");
+    expect((await settle(again, b.id)).state).toBe("done");
+    expect(acq).toHaveBeenCalledTimes(2);
+    expect(committed).toHaveLength(2);
+    expect(again.list().find((j) => j.id === a.id)?.by).toBe("Dennis");
+  });
+
+  it("says where each waiting song is in line, and lets one be taken out", async () => {
+    const { deps: d } = deps({ passRunning: () => true });
+    const g = new Getter(d);
+    const a = g.get({ title: "STARGAZING", artist: "Travis Scott" });
+    const b = g.get({ title: "CAROUSEL", artist: "Travis Scott" });
+    const c = g.get({ title: "SICKO MODE", artist: "Travis Scott" });
+    const pos = (id: string) => g.list().find((j) => j.id === id)?.position;
+    expect([pos(a.id), pos(b.id), pos(c.id)]).toEqual([1, 2, 3]);
+    expect(g.cancel(b.id)).toBe(true);
+    expect([pos(a.id), pos(c.id)]).toEqual([1, 2]);
+    expect(g.cancel(b.id)).toBe(false);
+  });
+
+  it("waits for Soulseek to log in rather than failing a resumed get", async () => {
+    fakeAcquire();
+    let online = false;
+    const { deps: d } = deps({ api: { loggedIn: async () => online } });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const g = new Getter(d);
+      const job = g.get({ title: "SICKO MODE", artist: "Travis Scott", durationMs: 312_000 });
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(g.list()[0]?.state).toBe("queued");
+      online = true;
+      await vi.advanceTimersByTimeAsync(11_000);
+      await vi.waitFor(() => expect(g.list().find((j) => j.id === job.id)?.state).toBe("done"), {
+        timeout: 5_000,
+        interval: 20,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("who asked", () => {
+  it("names the account from the token, and nothing from junk", async () => {
+    const { askerName } = await import("../src/serve.js");
+    const tok = (claims: object) =>
+      `Bearer x.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.y`;
+    expect(askerName(tok({ sub: "acct-dennis" }))).toBe("Dennis");
+    expect(askerName(tok({ sub: 42 }))).toBeNull();
+    expect(askerName("Bearer nonsense")).toBeNull();
+    expect(askerName(undefined)).toBeNull();
   });
 });

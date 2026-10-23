@@ -16,7 +16,8 @@
  * failed and it can be asked for again.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, rmdir, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { DeezerAlbum, DeezerTrack } from "./deezer.js";
@@ -270,6 +271,10 @@ export interface GetJob {
   progress: number | null;
   sha: string | null;
   at: string;
+  /** Who asked, by account name ("Dennis"); null when not known. */
+  by?: string | null;
+  /** Place in the line while queued: 1 is next. */
+  position?: number | null;
 }
 
 export interface GetRequest {
@@ -278,6 +283,8 @@ export interface GetRequest {
   album?: string | null;
   durationMs?: number | null;
   release?: string | null;
+  /** Who asked, by account name. */
+  by?: string | null;
   /** The copy picked in search, tried first. */
   username?: string | null;
   filename?: string | null;
@@ -316,7 +323,19 @@ export interface GetterDeps {
   dailyCap?: number;
   acquireOptions?: AcquireOptions;
   now?: () => Date;
+  /** Where the line is kept, so a restart picks it up again instead of
+   * dropping everyone's waiting songs. None: kept in memory only. */
+  statePath?: string;
+  /** Ten-second waits for Soulseek to log in before a get gives up. */
+  loginWaits?: number;
 }
+
+interface Saved {
+  jobs: GetJob[];
+  requests: Array<[string, GetRequest]>;
+}
+
+const UNFINISHED: JobState[] = ["queued", "searching", "downloading", "checking"];
 
 export class Getter {
   private readonly jobs: GetJob[] = [];
@@ -327,7 +346,66 @@ export class Getter {
   private day = "";
   private today = 0;
 
-  constructor(private readonly deps: GetterDeps) {}
+  private saving: Promise<void> = Promise.resolve();
+
+  constructor(private readonly deps: GetterDeps) {
+    this.restore();
+  }
+
+  /** The line as it was when the daemon stopped. A get cut off mid-way goes
+   * back in line: its file, if any, was half a file. */
+  private restore(): void {
+    const path = this.deps.statePath;
+    if (!path) return;
+    let saved: Saved;
+    try {
+      saved = JSON.parse(readFileSync(path, "utf8")) as Saved;
+    } catch {
+      return;
+    }
+    const requests = new Map(saved.requests ?? []);
+    let resumed = 0;
+    for (const j of saved.jobs ?? []) {
+      if (UNFINISHED.includes(j.state)) {
+        const req = requests.get(j.id);
+        if (!req) continue;
+        j.state = "queued";
+        j.progress = null;
+        this.requests.set(j.id, req);
+        resumed += 1;
+      }
+      this.jobs.push(j);
+    }
+    if (resumed > 0) {
+      this.deps.log.info({ event: "GETS_RESUMED", count: resumed });
+      void this.drain();
+    }
+  }
+
+  /** Writes the line down. Serialised, and atomic (temp file, rename), so a
+   * crash mid-write leaves the last good copy. */
+  private persist(): void {
+    const path = this.deps.statePath;
+    if (!path) return;
+    const since = this.now().getTime() - 24 * 3600_000;
+    const body: Saved = {
+      jobs: this.jobs.filter((j) => Date.parse(j.at) >= since || UNFINISHED.includes(j.state)),
+      requests: [...this.requests.entries()],
+    };
+    const text = JSON.stringify(body);
+    this.saving = this.saving
+      .then(async () => {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(`${path}.tmp`, text);
+        await rename(`${path}.tmp`, path);
+      })
+      .catch((e) => this.deps.log.warn({ event: "GETS_SAVE_FAILED", err: String(e) }));
+  }
+
+  /** Waits for the last save; for tests and shutdown. */
+  flushed(): Promise<void> {
+    return this.saving;
+  }
 
   /** A get is under way: the background pass waits for it. */
   get busy(): boolean {
@@ -379,7 +457,26 @@ export class Getter {
   /** The last day's gets, newest first. */
   list(): GetJob[] {
     const since = this.now().getTime() - 24 * 3600_000;
-    return this.jobs.filter((j) => Date.parse(j.at) >= since).slice().reverse();
+    // The one under way counts as first, so the next waiting song is 2nd in
+    // line: what the person sees is how many songs come before theirs.
+    let place = this.jobs.some((j) => ["searching", "downloading", "checking"].includes(j.state)) ? 1 : 0;
+    const out: GetJob[] = [];
+    for (const j of this.jobs) {
+      const position = j.state === "queued" ? ++place : null;
+      if (Date.parse(j.at) >= since || j.state === "queued") out.push({ ...j, position });
+    }
+    return out.reverse();
+  }
+
+  /** Takes a waiting song out of the line. Only one that has not started:
+   * a download under way finishes. */
+  cancel(id: string): boolean {
+    const j = this.jobs.find((x) => x.id === id);
+    if (!j || j.state !== "queued") return false;
+    j.state = "failed";
+    this.requests.delete(id);
+    this.persist();
+    return true;
   }
 
   get(req: GetRequest): GetJob {
@@ -401,6 +498,7 @@ export class Getter {
       progress: null,
       sha: null,
       at: this.now().toISOString(),
+      by: req.by ?? null,
     };
     const have = this.deps.inLibrary({ artist: req.artist, title: req.title, durationMs: req.durationMs ?? null });
     if (have) {
@@ -411,6 +509,7 @@ export class Getter {
     }
     this.jobs.push(job);
     if (this.jobs.length > 300) this.jobs.splice(0, this.jobs.length - 300);
+    this.persist();
     void this.drain();
     return job;
   }
@@ -449,14 +548,14 @@ export class Getter {
   }
 
   /** Queues every song of an album the library lacks. */
-  async complete(releaseId: string): Promise<GetJob[]> {
+  async complete(releaseId: string, by: string | null = null): Promise<GetJob[]> {
     const list = await this.tracklist(releaseId);
     const r = this.deps.release(releaseId);
     if (!list || !r) return [];
     return list
       .filter((t) => !t.have)
       .map((t) =>
-        this.get({ title: t.title, artist: t.artist, album: r.title, durationMs: t.durationMs, release: releaseId }),
+        this.get({ title: t.title, artist: t.artist, album: r.title, durationMs: t.durationMs, release: releaseId, by }),
       );
   }
 
@@ -468,11 +567,13 @@ export class Getter {
         const job = this.jobs.find((j) => j.state === "queued");
         if (!job) return;
         while (this.deps.passRunning?.()) await sleep(5000);
+        this.persist();
         await this.run(job).catch((e) => {
           this.deps.log.warn({ event: "GET_FAILED", err: String(e) });
           job.state = "failed";
         });
         this.requests.delete(job.id);
+        this.persist();
       }
     } finally {
       this.running = false;
@@ -503,7 +604,14 @@ export class Getter {
       job.sha = already;
       return;
     }
-    if (!(await this.deps.api.loggedIn())) {
+    // Soulseek is often still logging in just after a restart, which is
+    // exactly when a resumed line starts: give it a couple of minutes.
+    let online = await this.deps.api.loggedIn().catch(() => false);
+    for (let i = 0; !online && i < (this.deps.loginWaits ?? 12); i++) {
+      await sleep(10_000);
+      online = await this.deps.api.loggedIn().catch(() => false);
+    }
+    if (!online) {
       job.state = "failed";
       return;
     }

@@ -348,6 +348,7 @@ export class ManifestServer {
           url.pathname === "/soulseek/get" ||
           url.pathname === "/soulseek/jobs" ||
           url.pathname === "/soulseek/complete" ||
+          url.pathname === "/soulseek/cancel" ||
           url.pathname === "/tracklist"
         ) {
           const json = (code: number, body: unknown) => {
@@ -379,9 +380,14 @@ export class ManifestServer {
           } catch {
             return json(400, { error: "expected JSON" });
           }
+          const by = askerName(req.headers.authorization);
           if (url.pathname === "/soulseek/complete") {
             const id = typeof parsed.release === "string" ? parsed.release : "";
-            return json(200, { jobs: await getter.complete(id).catch(() => []) });
+            return json(200, { jobs: await getter.complete(id, by).catch(() => []) });
+          }
+          if (url.pathname === "/soulseek/cancel") {
+            const id = typeof parsed.id === "string" ? parsed.id : "";
+            return getter.cancel(id) ? json(200, { ok: true }) : json(409, { error: "not waiting" });
           }
           const str = (k: string) => (typeof parsed[k] === "string" ? (parsed[k] as string) : null);
           const num = (k: string) => (typeof parsed[k] === "number" ? (parsed[k] as number) : null);
@@ -397,6 +403,7 @@ export class ManifestServer {
             username: str("username"),
             filename: str("filename"),
             size: num("size"),
+            by,
           };
           return json(200, { job: getter.get(reqBody) });
         }
@@ -562,4 +569,23 @@ async function readBody(
     chunks.push(buf);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * Who is asking, by account name, from the access token the edge already
+ * checked ("acct-dennis" → "Dennis"). Only a label on a get, so it is read,
+ * not verified: the edge refuses a bad token before it reaches here.
+ */
+export function askerName(authorization: string | undefined): string | null {
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
+  const part = token?.split(".")[1];
+  if (!part) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as { sub?: unknown };
+    if (typeof claims.sub !== "string") return null;
+    const name = claims.sub.replace(/^acct-/, "").replace(/[^a-z0-9 _-]/gi, "").slice(0, 32);
+    return name ? name.charAt(0).toUpperCase() + name.slice(1) : null;
+  } catch {
+    return null;
+  }
 }

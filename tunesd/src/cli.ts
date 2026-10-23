@@ -1649,6 +1649,7 @@ async function main(): Promise<void> {
             deezer,
             release: (id) => getterReleases.get(id) ?? null,
             passRunning: () => resourceRunning,
+            statePath: join(env.dataDir, "soulseek", "gets.json"),
             log,
           })
         : null;

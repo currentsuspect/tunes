@@ -78,6 +78,7 @@ const API_PATHS = new Set([
   "/soulseek/get",
   "/soulseek/jobs",
   "/soulseek/complete",
+  "/soulseek/cancel",
   "/tracklist",
 ]);
 
