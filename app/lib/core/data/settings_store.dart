@@ -87,6 +87,43 @@ class SettingsStore extends ChangeNotifier {
       (double.tryParse(_cache[_volume] ?? '') ?? 1).clamp(0, 1);
   Future<void> setVolume(double v) => _put(_volume, v.toStringAsFixed(2));
 
+  // --- mixes ---------------------------------------------------------------
+
+  static const _mixRemoved = 'mixes.removed';
+
+  /// Songs taken out of the mixes the app makes, by mix id; [allMixes] holds
+  /// the ones kept out of every mix. Stored as one JSON object, because it is
+  /// read whole each time the mixes are built.
+  static const allMixes = '*';
+
+  Map<String, Set<String>> get mixRemoved {
+    final raw = _cache[_mixRemoved];
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        for (final e in m.entries)
+          e.key: {for (final s in e.value as List) s as String},
+      };
+    } on FormatException {
+      return const {};
+    }
+  }
+
+  Future<void> setMixRemoved(String mixId, String sha, bool removed) {
+    final all = {
+      for (final e in mixRemoved.entries) e.key: {...e.value},
+    };
+    final set = all.putIfAbsent(mixId, () => <String>{});
+    removed ? set.add(sha) : set.remove(sha);
+    if (set.isEmpty) all.remove(mixId);
+    if (all.isEmpty) return _clear(_mixRemoved);
+    return _put(
+      _mixRemoved,
+      jsonEncode({for (final e in all.entries) e.key: e.value.toList()}),
+    );
+  }
+
   // --- sync ----------------------------------------------------------------
 
   /// Whether listening is shared with the account's other devices. On by

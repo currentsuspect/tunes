@@ -58,6 +58,7 @@ MixInputs inputs({
   List<PlayStamp> stamps = const [],
   Set<String> liked = const {},
   DateTime? now,
+  Map<String, Set<String>> removed = const {},
 }) => MixInputs(
   tracks: tracks ?? library(),
   artists: artists,
@@ -65,9 +66,76 @@ MixInputs inputs({
   stamps: stamps,
   liked: liked,
   now: now ?? friEvening,
+  removed: removed,
 );
 
 void main() {
+  group('taking songs out of a mix', () {
+    // Every one of 60 songs played on Fridays: Friday's mix has 30 of them
+    // and 30 more waiting.
+    final fridays = DateTime(2026, 10, 2, 20);
+    final stamps = [for (final t in wide()) ...plays(t.sha, fridays)];
+    Mix friday({Map<String, Set<String>> removed = const {}}) =>
+        buildMixes(inputs(tracks: wide(), stamps: stamps, removed: removed))
+            .firstWhere((m) => m.kind == MixKind.weekday);
+
+    test('the song is gone, the mix keeps its length, the rest keep their '
+        'places', () {
+      final before = friday();
+      final out = before.tracks[4].sha;
+      final after = friday(
+        removed: {
+          before.id: {out},
+        },
+      );
+      expect(after.tracks.map((t) => t.sha), isNot(contains(out)));
+      expect(after.tracks.length, before.tracks.length);
+      final kept = [
+        for (final t in before.tracks)
+          if (t.sha != out) t.sha,
+      ];
+      // Same order for everything that stayed; the new song is at the end.
+      expect(after.tracks.take(kept.length).map((t) => t.sha), kept);
+      expect(
+        before.tracks.map((t) => t.sha),
+        isNot(contains(after.tracks.last.sha)),
+      );
+    });
+
+    test('taken out of one mix, it can still be in another', () {
+      final before = friday();
+      final out = before.tracks.first.sha;
+      final after = buildMixes(
+        inputs(
+          tracks: wide(),
+          stamps: stamps,
+          removed: {
+            'late-night': {out},
+          },
+        ),
+      ).firstWhere((m) => m.kind == MixKind.weekday);
+      expect(after.tracks.map((t) => t.sha), contains(out));
+    });
+
+    test('kept out of every mix, it is in none of them', () {
+      final out = friday().tracks.first.sha;
+      final all = buildMixes(
+        inputs(
+          tracks: wide(),
+          stamps: stamps,
+          now: friLate,
+          removed: {
+            removedEverywhere: {out},
+          },
+        ),
+      );
+      expect(all, isNotEmpty);
+      for (final m in all) {
+        expect(m.tracks.map((t) => t.sha), isNot(contains(out)), reason: m.id);
+      }
+    });
+  });
+
   group('the weekday mix', () {
     test('on a Friday it is Feel Good Friday, from your Fridays', () {
       final fridays = DateTime(2026, 10, 2, 20); // last Friday

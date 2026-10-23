@@ -25,6 +25,7 @@ class MixPage extends StatefulWidget {
     required this.player,
     required this.artUrlFor,
     this.playlists,
+    this.onRemove,
   });
 
   final Mix mix;
@@ -34,6 +35,16 @@ class MixPage extends StatefulWidget {
   /// Where Save as playlist puts it. Without one the button is not shown.
   final PlaylistStore? playlists;
 
+  /// Takes a song out of this mix ([everywhere]: out of every mix), or puts
+  /// it back when [removed] is false, and returns the mix as it now stands.
+  /// Without one, songs cannot be taken out.
+  final Future<Mix?> Function(
+    String sha, {
+    required bool everywhere,
+    required bool removed,
+  })?
+  onRemove;
+
   @override
   State<MixPage> createState() => _MixPageState();
 }
@@ -41,6 +52,119 @@ class MixPage extends StatefulWidget {
 class _MixPageState extends State<MixPage> {
   bool _saved = false;
   bool _saving = false;
+  late Mix _mix = widget.mix;
+
+  /// One great song short of a perfect mix: take the one that is not out.
+  /// It stays out of this mix from now on (or out of all of them), and the
+  /// mix fills the gap at the end so it keeps its length. Undo puts it back.
+  Future<void> _remove(ManifestTrack t, {required bool everywhere}) async {
+    final onRemove = widget.onRemove;
+    if (onRemove == null) return;
+    // Gone from the list at once; the refilled mix lands a moment later.
+    setState(() {
+      _mix = Mix(
+        id: _mix.id,
+        title: _mix.title,
+        note: _mix.note,
+        kind: _mix.kind,
+        tracks: [
+          for (final x in _mix.tracks)
+            if (x.sha != t.sha) x,
+        ],
+      );
+    });
+    final messenger = ScaffoldMessenger.of(context);
+    final next = await onRemove(t.sha, everywhere: everywhere, removed: true);
+    if (!mounted) return;
+    if (next != null) setState(() => _mix = next);
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            everywhere
+                ? '"${t.title}" won\'t be in your mixes'
+                : 'Took "${t.title}" out of ${_mix.title}',
+          ),
+          duration: const Duration(seconds: 5),
+          persist: false,
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              final back = await onRemove(
+                t.sha,
+                everywhere: everywhere,
+                removed: false,
+              );
+              if (mounted && back != null) setState(() => _mix = back);
+            },
+          ),
+        ),
+      );
+  }
+
+  Future<void> _ask(ManifestTrack t) async {
+    final everywhere = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Tones.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(RadiusTokens.card),
+        ),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.lg,
+                  Space.sm,
+                  Space.lg,
+                  Space.sm,
+                ),
+                child: Text(
+                  t.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TypeScale.title,
+                ),
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.remove_circle_outline_rounded,
+                  color: Tones.text,
+                ),
+                title: Text(
+                  'Take out of ${_mix.title}',
+                  style: TypeScale.title,
+                ),
+                subtitle: Text(
+                  'It stays out of this mix from now on',
+                  style: TypeScale.caption,
+                ),
+                onTap: () => Navigator.of(context).pop(false),
+              ),
+              ListTile(
+                leading: Icon(Icons.block_rounded, color: Tones.text),
+                title: Text('Keep out of all my mixes', style: TypeScale.title),
+                subtitle: Text(
+                  'It stays in your library; the app just stops picking it',
+                  style: TypeScale.caption,
+                ),
+                onTap: () => Navigator.of(context).pop(true),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (everywhere == null || !mounted) return;
+    await _remove(t, everywhere: everywhere);
+  }
 
   Future<void> _save() async {
     final store = widget.playlists;
@@ -74,7 +198,7 @@ class _MixPageState extends State<MixPage> {
 
   @override
   Widget build(BuildContext context) {
-    final mix = widget.mix;
+    final mix = _mix;
     final tracks = mix.tracks;
     final totalMs = tracks.fold<int>(0, (a, t) => a + (t.durationMs ?? 0));
     final covers = <String>[];
@@ -136,11 +260,31 @@ class _MixPageState extends State<MixPage> {
                           );
                         }
                         final t = tracks[i - 1];
-                        return _SongRow(
+                        final row = _SongRow(
                           track: t,
                           player: widget.player,
                           artUrlFor: widget.artUrlFor,
                           onTap: () => widget.player.playQueue(tracks, i - 1),
+                          onLongPress: widget.onRemove == null
+                              ? null
+                              : () => _ask(t),
+                        );
+                        if (widget.onRemove == null) return row;
+                        // Swipe it away, as in a playlist you made.
+                        return Dismissible(
+                          key: ValueKey('${mix.id}-${t.sha}'),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: Space.lg),
+                            color: Tones.surfaceRaised,
+                            child: Icon(
+                              Icons.remove_circle_outline_rounded,
+                              color: Tones.textMuted,
+                            ),
+                          ),
+                          onDismissed: (_) => _remove(t, everywhere: false),
+                          child: row,
                         );
                       },
                     ),
@@ -354,12 +498,14 @@ class _SongRow extends StatelessWidget {
     required this.player,
     required this.artUrlFor,
     required this.onTap,
+    this.onLongPress,
   });
 
   final ManifestTrack track;
   final TunePlayer player;
   final String Function(String sha) artUrlFor;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -369,6 +515,7 @@ class _SongRow extends StatelessWidget {
         final active = player.current?.sha == track.sha;
         return PressRow(
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: Space.lg,

@@ -1116,6 +1116,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       stamps: stamps,
       liked: liked,
       now: DateTime.now(),
+      removed: widget.settings.mixRemoved,
     );
     setState(() {
       _mixes = buildMixes(inputs);
@@ -1132,8 +1133,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         player: widget.player,
         artUrlFor: _artUrlFor,
         playlists: PlaylistScope.maybeOf(context),
+        onRemove: (sha, {required everywhere, required removed}) =>
+            _removeFromMix(mix.id, sha, everywhere: everywhere, out: removed),
       ),
     );
+  }
+
+  /// Takes a song out of a mix (or every mix), or puts it back, and hands the
+  /// page the mix as it now stands: the gap filled, the rest where they were.
+  /// Null when the mix no longer has enough songs to be one.
+  Future<Mix?> _removeFromMix(
+    String mixId,
+    String sha, {
+    required bool everywhere,
+    required bool out,
+  }) async {
+    await widget.settings.setMixRemoved(
+      everywhere ? removedEverywhere : mixId,
+      sha,
+      out,
+    );
+    await _loadMixes();
+    for (final m in _mixes) {
+      if (m.id == mixId) return m;
+    }
+    return null;
   }
 
   /// Folds the play counters into a per-act tally for the discover ranking.

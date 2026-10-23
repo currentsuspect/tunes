@@ -74,6 +74,80 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    testWidgets('a song swiped away leaves, and Undo brings it back', (
+      tester,
+    ) async {
+      final calls = <(String, bool, bool)>[];
+      Mix without(String sha) => Mix(
+        id: mix.id,
+        title: mix.title,
+        note: mix.note,
+        kind: mix.kind,
+        tracks: [
+          for (final t in tracks)
+            if (t.sha != sha) t,
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NavScope(
+              controller: NavController(),
+              child: MixPage(
+                mix: mix,
+                player: player,
+                artUrlFor: (s) => 'http://test/art/$s',
+                onRemove: (sha, {required everywhere, required removed}) async {
+                  calls.add((sha, everywhere, removed));
+                  return removed ? without(sha) : mix;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.text('Song 1'), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Song 1'), findsNothing);
+      expect(calls, [('sha1', false, true)]);
+      expect(find.textContaining('out of Feel Good Friday'), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(calls.last, ('sha1', false, false));
+      expect(find.text('Song 1'), findsOneWidget);
+    });
+
+    testWidgets('held, a song can be kept out of every mix', (tester) async {
+      final calls = <(String, bool, bool)>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NavScope(
+              controller: NavController(),
+              child: MixPage(
+                mix: mix,
+                player: player,
+                artUrlFor: (s) => 'http://test/art/$s',
+                onRemove: (sha, {required everywhere, required removed}) async {
+                  calls.add((sha, everywhere, removed));
+                  return null;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Song 2'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep out of all my mixes'));
+      await tester.pumpAndSettle();
+      expect(calls, [('sha2', true, true)]);
+      expect(find.text('Song 2'), findsNothing);
+    });
+
     testWidgets('says what it is, why, and how big', (tester) async {
       await pump(tester, playlists: store);
       expect(find.text('Feel Good Friday'), findsOneWidget);

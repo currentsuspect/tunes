@@ -70,6 +70,7 @@ class MixInputs {
     required this.stamps,
     required this.liked,
     required this.now,
+    this.removed = const {},
   });
 
   final List<ManifestTrack> tracks;
@@ -80,7 +81,14 @@ class MixInputs {
   /// Shas the listener has hearted: a decision, not a behaviour.
   final Set<String> liked;
   final DateTime now;
+
+  /// Songs the listener took out, by mix id; under [removedEverywhere], out
+  /// of every mix.
+  final Map<String, Set<String>> removed;
 }
+
+/// The key in [MixInputs.removed] for songs kept out of every mix.
+const removedEverywhere = '*';
 
 /// Every mix that is worth showing right now, most relevant first.
 ///
@@ -88,6 +96,42 @@ class MixInputs {
 /// is a handful, and is left out. [size] is how long one is.
 List<Mix> buildMixes(MixInputs input, {int minTracks = 15, int size = 30}) {
   final ctx = _Context(input);
+  final built = _allMixes(ctx, minTracks, size);
+  if (input.removed.isEmpty) return built;
+
+  // Songs taken out of a mix stay out, and the mix keeps its length. The
+  // rest keep their places: the list is built as it would have been, the
+  // removed songs are dropped, and the gap is filled from the end of a
+  // longer build of the same mix. Building it again without them would
+  // reshuffle every song the moment one is taken out.
+  final everywhere = input.removed[removedEverywhere] ?? const <String>{};
+  final wide = {for (final m in _allMixes(ctx, minTracks, size * 2)) m.id: m};
+  final out = <Mix>[];
+  for (final m in built) {
+    final gone = {...everywhere, ...?input.removed[m.id]};
+    if (gone.isEmpty) {
+      out.add(m);
+      continue;
+    }
+    final kept = [
+      for (final t in m.tracks)
+        if (!gone.contains(t.sha)) t,
+    ];
+    final have = {for (final t in m.tracks) t.sha};
+    for (final t in wide[m.id]?.tracks ?? const <ManifestTrack>[]) {
+      if (kept.length >= m.tracks.length) break;
+      if (gone.contains(t.sha) || have.contains(t.sha)) continue;
+      kept.add(t);
+    }
+    if (kept.length < minTracks) continue;
+    out.add(
+      Mix(id: m.id, title: m.title, note: m.note, kind: m.kind, tracks: kept),
+    );
+  }
+  return out;
+}
+
+List<Mix> _allMixes(_Context ctx, int minTracks, int size) {
   final mixes = <Mix>[];
 
   final day = _weekdayMix(ctx, minTracks, size);
