@@ -305,7 +305,15 @@ class _SwipeableBody extends StatelessWidget {
                       else
                         TextSpan(
                           text: source.label,
-                          style: TextStyle(color: source.color),
+                          // On Crayon's sun-yellow bar the state colours
+                          // (amber, green) all but vanish: ink instead.
+                          style: TextStyle(
+                            color:
+                                Looks.current.kind == LookKind.crayon &&
+                                    !Looks.current.isDark
+                                ? Tones.text
+                                : source.color,
+                          ),
                         ),
                     ],
                   ],
@@ -418,7 +426,9 @@ BoxDecoration _barDecoration(Color tint) {
         color: look.isDark ? look.surfaceRaised : look.crayons[1],
         borderRadius: BorderRadius.circular(_barRadius),
         border: Border.all(color: look.text, width: 2.5),
-        boxShadow: [BoxShadow(color: look.text, offset: const Offset(3, 4))],
+        boxShadow: [
+          BoxShadow(color: look.inkShadow, offset: const Offset(3, 4)),
+        ],
       );
     case LookKind.noir:
       return BoxDecoration(

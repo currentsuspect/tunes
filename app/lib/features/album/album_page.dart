@@ -8,6 +8,7 @@ import '../../core/nav/nav_controller.dart';
 import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/crayon_marks.dart';
 import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/data/download_manager.dart';
@@ -249,14 +250,7 @@ class AlbumPage extends StatelessWidget {
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(16),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: tint.withValues(alpha: 0.5),
-                                        blurRadius: 44,
-                                        spreadRadius: -8,
-                                        offset: const Offset(0, 18),
-                                      ),
-                                    ],
+                                    boxShadow: coverLift(tint),
                                   ),
                                   child: Artwork(
                                     url: release.artSha == null
@@ -484,7 +478,13 @@ class _AlbumFacts extends StatelessWidget {
               style: TypeScale.mono.copyWith(color: Tones.text, fontSize: 13),
             ),
             if (complete)
-              Icon(Icons.check_circle_rounded, size: 15, color: Tones.held)
+              Looks.current.kind == LookKind.crayon
+                  ? CrayonMarkIcon(CrayonMark.tick, size: 16, color: Tones.held)
+                  : Icon(
+                      Icons.check_circle_rounded,
+                      size: 15,
+                      color: Tones.held,
+                    )
             else if (missing > 0)
               Text(
                 '$missing missing',

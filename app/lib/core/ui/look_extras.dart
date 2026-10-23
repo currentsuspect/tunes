@@ -322,3 +322,61 @@ class _ConfettiPainter extends CustomPainter {
   @override
   bool shouldRepaint(_ConfettiPainter old) => old.t != t;
 }
+
+/// A strip of masking tape in a crayon colour, holding a Crayon cover into
+/// the notebook. Translucent, so the cover's corner shows through it, with
+/// torn ends drawn as faint dotted edges.
+class CrayonTape extends StatelessWidget {
+  const CrayonTape({
+    super.key,
+    required this.color,
+    required this.angle,
+    this.length = 74,
+  });
+
+  final Color color;
+  final double angle;
+  final double length;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Looks.current.isDark;
+    return IgnorePointer(
+      child: Transform.rotate(
+        angle: angle,
+        child: CustomPaint(
+          size: Size(length, length * 0.32),
+          painter: _TapePainter(
+            color.withValues(alpha: dark ? 0.7 : 0.78),
+            (dark ? const Color(0xFF1C1A2B) : const Color(0xFF22201C))
+                .withValues(alpha: 0.28),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TapePainter extends CustomPainter {
+  _TapePainter(this.fill, this.edge);
+  final Color fill;
+  final Color edge;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = fill);
+    final dots = Paint()
+      ..color = edge
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    for (var y = 2.0; y < size.height; y += 4) {
+      canvas.drawPoints(PointMode.points, [
+        Offset(1, y),
+        Offset(size.width - 1, y),
+      ], dots);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TapePainter old) => old.fill != fill || old.edge != edge;
+}

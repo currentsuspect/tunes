@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tunes/core/data/download_manager.dart';
 import 'package:tunes/core/data/download_store.dart';
 import 'package:tunes/core/net/tunes_client.dart';
+import 'package:tunes/core/theme/looks.dart';
+import 'package:tunes/core/ui/crayon_marks.dart';
 import 'package:tunes/core/ui/download_button.dart';
 import 'package:tunes/core/ui/downloads_bar.dart';
 import 'package:tunes/core/ui/playing_bars.dart';
@@ -140,6 +142,43 @@ void main() {
     // On the phone: a tick.
     expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('Crayon draws its own faces, through the same stages', (
+    tester,
+  ) async {
+    final was = Looks.current;
+    Looks.current = Looks.crayon.light;
+    addTearDown(() => Looks.current = was);
+    CrayonDownloadState? face() => tester
+        .widgetList<CrayonDownloadFace>(find.byType(CrayonDownloadFace))
+        .lastOrNull
+        ?.state;
+
+    await tester.pumpWidget(
+      harness(
+        DownloadButton(
+          sha: 'a',
+          title: 'Song',
+          store: store,
+          onDownload: () => manager.enqueue('a'),
+        ),
+      ),
+    );
+    expect(face(), CrayonDownloadState.idle);
+    expect(find.byIcon(Icons.arrow_circle_down_outlined), findsNothing);
+
+    await tester.tap(find.byType(DownloadButton));
+    await tester.pump();
+    client.progressOf['a']?.call(1, 2);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(face(), CrayonDownloadState.running);
+
+    client.gate['a']!.complete();
+    await turn(tester);
+    await turn(tester);
+    expect(face(), CrayonDownloadState.held);
+    expect(find.byIcon(Icons.check_rounded), findsNothing);
   });
 
   testWidgets('a second song waits its turn and says so', (tester) async {

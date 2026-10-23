@@ -204,6 +204,35 @@ class ArtworkPlaceholder extends StatelessWidget {
   }
 }
 
+/// What lifts a big sleeve off the page, in the current look.
+///
+/// Room lights the page with the cover's own colour: a soft glow of [tint]
+/// under it. Crayon has no glow; a sticker sits on paper with a hard ink
+/// shadow instead. Noir has neither. Every hero cover asks here, so a look
+/// that turns the glow off turns it off everywhere, not just where a screen
+/// remembered to check.
+List<BoxShadow> coverLift(
+  Color tint, {
+  double alpha = 0.5,
+  double blur = 44,
+  double dy = 18,
+  double ink = 6,
+}) {
+  final look = Looks.current;
+  if (look.covers == CoverStyle.crayon) {
+    return [BoxShadow(color: look.inkShadow, offset: Offset(ink, ink))];
+  }
+  if (look.glowStrength == 0) return const [];
+  return [
+    BoxShadow(
+      color: tint.withValues(alpha: alpha),
+      blurRadius: blur,
+      spreadRadius: -8,
+      offset: Offset(0, dy),
+    ),
+  ];
+}
+
 /// A cover's corner in the current look: the caller's choice (or the card
 /// corner), except that Noir squares every cover off.
 double coverRadius(double? asked) {

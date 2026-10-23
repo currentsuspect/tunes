@@ -558,14 +558,7 @@ class _Mosaic extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: tint.withValues(alpha: 0.5),
-            blurRadius: 40,
-            spreadRadius: -8,
-            offset: const Offset(0, 16),
-          ),
-        ],
+        boxShadow: coverLift(tint, alpha: 0.5, blur: 40, dy: 16),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),

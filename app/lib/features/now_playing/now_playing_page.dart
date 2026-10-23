@@ -11,7 +11,7 @@ import '../../core/data/settings_store.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/theme/looks.dart';
-import '../../core/ui/crayon_cover.dart';
+import '../../core/ui/crayon_marks.dart';
 import '../../core/ui/look_extras.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -728,6 +728,11 @@ class SourceTag extends StatelessWidget {
             : _kind(remote).contains('computer')
             ? Icons.computer_rounded
             : Icons.smartphone_rounded,
+        mark: player.remoteStalled
+            ? CrayonMark.cloudOff
+            : _kind(remote).contains('computer')
+            ? CrayonMark.computer
+            : CrayonMark.phone,
         text: player.remoteStalled
             ? "${_kind(remote)} isn't answering"
             : 'playing on ${_kind(remote)}',
@@ -752,24 +757,27 @@ class SourceTag extends StatelessWidget {
   }
 
   static Widget _sourcePill(TrackSource source) {
-    final (icon, text, color) = switch (source) {
+    final (icon, mark, text, color) = switch (source) {
       TrackSource.saved => (
         Icons.download_done_rounded,
+        CrayonMark.tick,
         'saved on ${Device.thisOne}',
         Tones.held,
       ),
       TrackSource.streaming => (
         Icons.cloud_queue_rounded,
+        CrayonMark.cloud,
         'streaming',
         Tones.textMuted,
       ),
       TrackSource.unavailable => (
         Icons.cloud_off_rounded,
+        CrayonMark.cloudOff,
         'not on ${Device.thisOne} yet',
         Tones.warn,
       ),
     };
-    return _StatusPill(icon: icon, text: text, color: color);
+    return _StatusPill(icon: icon, mark: mark, text: text, color: color);
   }
 
   /// "Dylan's phone" -> "phone": the kind of device is what you need to see.
@@ -786,6 +794,7 @@ class SourceTag extends StatelessWidget {
 class _StatusPill extends StatelessWidget {
   const _StatusPill({
     required this.icon,
+    required this.mark,
     required this.text,
     required this.color,
     this.action,
@@ -793,59 +802,144 @@ class _StatusPill extends StatelessWidget {
   });
 
   final IconData icon;
+
+  /// The same thing, hand-drawn, for Crayon.
+  final CrayonMark mark;
   final String text;
   final Color color;
   final String? action;
   final VoidCallback? onTap;
 
-  @override
-  Widget build(BuildContext context) {
-    final body = Container(
-      padding: EdgeInsets.fromLTRB(10, 5, action == null ? 12 : 5, 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TypeScale.mono.copyWith(
-                fontSize: 11.5,
-                height: 1.2,
-                color: color,
+  /// Crayon's version (design approved 23 Oct): the "a fave!" sticker's
+  /// shape -- ink edge, hard shadow, a slight tilt -- with a drawn mark in
+  /// its crayon and the words in ink, not tinted, so they read on paper.
+  Widget _crayon() {
+    final look = Looks.current;
+    final markColor = switch (mark) {
+      CrayonMark.tick => Tones.held,
+      CrayonMark.cloud => Tones.badge,
+      CrayonMark.cloudOff => Tones.warn,
+      CrayonMark.computer || CrayonMark.phone => Tones.text,
+    };
+    final paper = mark == CrayonMark.cloudOff
+        ? Color.alphaBlend(
+            Tones.warn.withValues(alpha: 0.18),
+            Tones.surfaceRaised,
+          )
+        : Tones.surfaceRaised;
+    final words = TypeScale.caption.copyWith(
+      fontSize: 13,
+      height: 1.1,
+      letterSpacing: 0,
+      color: Tones.text,
+    );
+    return Transform.rotate(
+      angle: -0.026,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(10, 5, action == null ? 13 : 5, 5),
+        decoration: BoxDecoration(
+          color: paper,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: Tones.text, width: 2),
+          boxShadow: [
+            BoxShadow(color: look.inkShadow, offset: const Offset(2, 2)),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CrayonMarkIcon(mark, size: 18, color: markColor),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: words,
               ),
             ),
-          ),
-          if (action != null) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(99),
-              ),
-              child: Text(
-                action!,
-                maxLines: 1,
-                style: TypeScale.mono.copyWith(
-                  fontSize: 11,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
-                  color: Tones.base,
+            if (action != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: Tones.primary,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: Tones.text, width: 2),
+                ),
+                child: Text(
+                  action!,
+                  maxLines: 1,
+                  style: words.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: look.isDark ? Tones.base : Tones.text,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final body = Looks.current.kind == LookKind.crayon
+        ? _crayon()
+        : Container(
+            padding: EdgeInsets.fromLTRB(10, 5, action == null ? 12 : 5, 5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: color),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TypeScale.mono.copyWith(
+                      fontSize: 11.5,
+                      height: 1.2,
+                      color: color,
+                    ),
+                  ),
+                ),
+                if (action != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      action!,
+                      maxLines: 1,
+                      style: TypeScale.mono.copyWith(
+                        fontSize: 11,
+                        height: 1.2,
+                        fontWeight: FontWeight.w600,
+                        color: Tones.base,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
     return Semantics(
       button: onTap != null,
       label: action == null ? text : '$text. $action',
@@ -964,47 +1058,67 @@ class _Artwork extends StatelessWidget {
             borderRadius: 16,
           ),
         );
-        // Crayon: line art that colours in as the song plays, with a sticker
-        // on a liked song. Elsewhere this is the cover as it was.
-        final drawn = Stack(
-          clipBehavior: Clip.none,
-          children: [
-            CrayonCover(
-              player: player,
-              duration: Duration(milliseconds: track.durationMs ?? 0),
-              child: art,
-            ),
-            if (Looks.current.kind == LookKind.crayon &&
-                (LikesScope.maybeOf(context)?.isLiked(track.sha) ?? false))
-              const Positioned(right: -8, top: -10, child: _Sticker('a fave!')),
-          ],
-        );
-        // Lit by its own colour: the glow under the sleeve is the same tint
-        // as the wash behind it, so the cover looks like the lamp.
+        // Crayon: the real cover, taped into the notebook a little crooked,
+        // with a sticker on a liked song. (It used to be redrawn as line art
+        // by a shader, which was ugly on real covers and upside down on
+        // phones whose GPU did not need the flip it applied.) Elsewhere this
+        // is the cover as it was.
+        final crayon = Looks.current.kind == LookKind.crayon;
         final lit = DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: AccentScope.of(context).withValues(alpha: 0.55),
-                blurRadius: 48,
-                spreadRadius: -8,
-                offset: const Offset(0, 22),
-              ),
-            ],
+            boxShadow: coverLift(
+              AccentScope.of(context),
+              alpha: 0.55,
+              blur: 48,
+              dy: 22,
+              ink: 7,
+            ),
           ),
-          child: drawn,
+          child: art,
         );
+        final drawn = !crayon
+            ? lit
+            : Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Transform.rotate(angle: -0.028, child: lit),
+                  Positioned(
+                    left: side * 0.05,
+                    top: -12,
+                    child: CrayonTape(
+                      color: Looks.current.crayons[1],
+                      angle: -0.24,
+                      length: side * 0.23,
+                    ),
+                  ),
+                  Positioned(
+                    right: side * 0.03,
+                    top: -10,
+                    child: CrayonTape(
+                      color: Looks.current.crayons[2],
+                      angle: 0.19,
+                      length: side * 0.23,
+                    ),
+                  ),
+                  if (LikesScope.maybeOf(context)?.isLiked(track.sha) ?? false)
+                    const Positioned(
+                      right: -8,
+                      bottom: -10,
+                      child: _Sticker('a fave!'),
+                    ),
+                ],
+              );
         // Off unless asked for, and off whenever the system asks for less
         // motion. A square sleeve turning for thirty seconds at a time is a
         // choice, not a default.
         final wanted = SettingsScope.maybeOf(context)?.animatedArtwork ?? false;
-        if (!wanted || MediaQuery.disableAnimationsOf(context)) return lit;
+        if (!wanted || MediaQuery.disableAnimationsOf(context)) return drawn;
         return AnimatedRotation(
           turns: playing ? 1 : 0,
           duration: const Duration(seconds: 30),
           curve: Curves.linear,
-          child: lit,
+          child: drawn,
         );
       },
     );
@@ -1155,12 +1269,15 @@ class _Sticker extends StatelessWidget {
           color: look.crayons[3],
           borderRadius: BorderRadius.circular(99),
           border: Border.all(color: look.text, width: 2),
-          boxShadow: [BoxShadow(color: look.text, offset: const Offset(2, 2))],
+          boxShadow: [
+            BoxShadow(color: look.inkShadow, offset: const Offset(2, 2)),
+          ],
         ),
+        // Ink on the green in both modes: white on it was under 2.5:1.
         child: Text(
           text,
           style: TypeScale.caption.copyWith(
-            color: Colors.white,
+            color: const Color(0xFF22201C),
             fontWeight: FontWeight.w700,
           ),
         ),

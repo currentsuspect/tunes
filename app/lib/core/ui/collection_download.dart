@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../data/download_manager.dart';
 import '../data/download_store.dart';
 import '../platform/device.dart';
+import '../theme/looks.dart';
 import '../theme/tokens.dart';
+import 'crayon_marks.dart';
 import '../../domain/manifest.dart';
 
 /// Download the whole album, and say how it is going.
@@ -57,9 +59,16 @@ class CollectionDownload extends StatelessWidget {
             ? 0.0
             : ((held + partial) / total).clamp(0.0, 1.0);
 
+        final crayon = Looks.current.kind == LookKind.crayon;
         final Widget face;
         final String label;
-        if (all) {
+        if (all && crayon) {
+          face = const CrayonDownloadFace(
+            key: ValueKey('all'),
+            state: CrayonDownloadState.held,
+          );
+          label = 'All $total songs are on ${Device.thisOne}';
+        } else if (all) {
           face = Icon(
             Icons.check_circle_rounded,
             key: ValueKey('all'),
@@ -67,6 +76,17 @@ class CollectionDownload extends StatelessWidget {
             color: Tones.held,
           );
           label = 'All $total songs are on ${Device.thisOne}';
+        } else if (working && crayon) {
+          face = TweenAnimationBuilder<double>(
+            key: const ValueKey('working'),
+            tween: Tween<double>(begin: 0, end: value),
+            duration: const Duration(milliseconds: 220),
+            builder: (context, v, _) => CrayonDownloadFace(
+              state: CrayonDownloadState.running,
+              progress: v,
+            ),
+          );
+          label = 'Downloading, $held of $total done';
         } else if (working) {
           face = Stack(
             key: const ValueKey('working'),
@@ -91,12 +111,18 @@ class CollectionDownload extends StatelessWidget {
           );
           label = 'Downloading, $held of $total done';
         } else {
-          face = Icon(
-            Icons.arrow_circle_down_outlined,
-            key: const ValueKey('idle'),
-            size: 22,
-            color: offline ? Tones.hairline : Tones.text,
-          );
+          face = crayon
+              ? CrayonDownloadFace(
+                  key: const ValueKey('idle'),
+                  state: CrayonDownloadState.idle,
+                  dim: offline,
+                )
+              : Icon(
+                  Icons.arrow_circle_down_outlined,
+                  key: const ValueKey('idle'),
+                  size: 22,
+                  color: offline ? Tones.hairline : Tones.text,
+                );
           label = held == 0
               ? 'Download the $noun'
               : 'Download the other ${total - held} songs';

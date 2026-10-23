@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/net/tunes_client.dart';
+import '../../core/theme/looks.dart';
 import '../../core/ui/artwork.dart';
+import '../../core/ui/crayon_marks.dart';
 import '../../core/ui/pressable.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/initials.dart';
@@ -183,7 +185,17 @@ class _SearchViewState extends State<SearchView> {
             padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
             child: Row(
               children: [
-                Icon(Icons.offline_pin_rounded, size: 14, color: Tones.held),
+                Looks.current.kind == LookKind.crayon
+                    ? CrayonMarkIcon(
+                        CrayonMark.tick,
+                        size: 15,
+                        color: Tones.held,
+                      )
+                    : Icon(
+                        Icons.offline_pin_rounded,
+                        size: 14,
+                        color: Tones.held,
+                      ),
                 const SizedBox(width: Space.sm),
                 Text(
                   'Searching what is on ${Device.thisOne}',

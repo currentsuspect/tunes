@@ -468,14 +468,7 @@ class _Hero extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: tint.withValues(alpha: 0.55),
-                  blurRadius: 52,
-                  spreadRadius: -8,
-                  offset: const Offset(0, 20),
-                ),
-              ],
+              boxShadow: coverLift(tint, alpha: 0.55, blur: 52, dy: 20),
             ),
             child: Artwork(
               url: photoSha == null ? null : artUrlFor(photoSha!),

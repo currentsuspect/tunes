@@ -84,6 +84,11 @@ class TunesLook {
 
   bool get isDark => brightness == Brightness.dark;
 
+  /// Crayon's hard, unblurred shadow under stickers and covers: ink on
+  /// paper, and on the chalkboard a deeper board, since chalk would read as
+  /// a second outline rather than a shadow.
+  Color get inkShadow => isDark ? const Color(0xFF0E0D17) : text;
+
   LookKind get kind => switch (themeId) {
     'noir' => LookKind.noir,
     'crayon' => LookKind.crayon,

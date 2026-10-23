@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../data/download_manager.dart';
 import '../data/download_store.dart';
+import '../theme/looks.dart';
 import '../theme/tokens.dart';
+import 'crayon_marks.dart';
 
 /// The download control on a song: one widget for every screen that has one.
 ///
@@ -74,41 +76,63 @@ class DownloadButton extends StatelessWidget {
         final still = MediaQuery.disableAnimationsOf(context);
         final fade = still ? Duration.zero : const Duration(milliseconds: 220);
 
+        // Crayon draws its own faces on a wobbly circle (design approved
+        // 23 Oct); the labels and taps are the same in every look.
+        final crayon = Looks.current.kind == LookKind.crayon;
+        Widget drawn(CrayonDownloadState s, String key, {double? p}) =>
+            CrayonDownloadFace(
+              key: ValueKey(key),
+              state: s,
+              progress: p,
+              dim: offline && s == CrayonDownloadState.idle,
+            );
+
         final Widget face;
         final String label;
         final VoidCallback? onTap;
         if (held) {
-          face = const _Held(key: ValueKey('held'));
+          face = crayon
+              ? drawn(CrayonDownloadState.held, 'held')
+              : const _Held(key: ValueKey('held'));
           label = 'On ${Device.thisOne}. Tap to remove.';
           onTap = () => _remove(context, manager);
         } else if (job != null && job.phase == DownloadPhase.failed) {
-          face = const _Failed(key: ValueKey('failed'));
+          face = crayon
+              ? drawn(CrayonDownloadState.failed, 'failed')
+              : const _Failed(key: ValueKey('failed'));
           label = 'Download failed. Tap to retry.';
           onTap = () {
             manager?.dismiss(sha);
             onDownload();
           };
         } else if (job != null && job.phase == DownloadPhase.running) {
-          face = _Running(
-            key: const ValueKey('running'),
-            progress: job.progress,
-          );
+          face = crayon
+              ? drawn(CrayonDownloadState.running, 'running', p: job.progress)
+              : _Running(
+                  key: const ValueKey('running'),
+                  progress: job.progress,
+                );
           final pct = job.progress == null
               ? ''
               : ' ${(job.progress! * 100).round()} percent';
           label = 'Downloading$pct. Tap to cancel.';
           onTap = () => manager?.cancel(sha);
         } else if (job != null || fallbackActive) {
-          face = const _Queued(key: ValueKey('queued'));
+          face = _Queued(
+            key: const ValueKey('queued'),
+            child: crayon ? drawn(CrayonDownloadState.queued, 'q') : null,
+          );
           label = 'Waiting to download. Tap to cancel.';
           onTap = manager == null ? null : () => manager.cancel(sha);
         } else {
-          face = Icon(
-            Icons.arrow_circle_down_outlined,
-            key: const ValueKey('idle'),
-            size: 22,
-            color: offline ? Tones.hairline : Tones.textMuted,
-          );
+          face = crayon
+              ? drawn(CrayonDownloadState.idle, 'idle')
+              : Icon(
+                  Icons.arrow_circle_down_outlined,
+                  key: const ValueKey('idle'),
+                  size: 22,
+                  color: offline ? Tones.hairline : Tones.textMuted,
+                );
           label = offline
               ? 'Offline. Download unavailable.'
               : 'Download to ${Device.thisOne}.';
@@ -214,7 +238,10 @@ class _Running extends StatelessWidget {
 
 /// Waiting its turn: the arrow, breathing.
 class _Queued extends StatefulWidget {
-  const _Queued({super.key});
+  const _Queued({super.key, this.child});
+
+  /// The look's own arrow; null draws the Material one.
+  final Widget? child;
 
   @override
   State<_Queued> createState() => _QueuedState();
@@ -240,20 +267,13 @@ class _QueuedState extends State<_Queued> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.disableAnimationsOf(context)) {
-      return Icon(
-        Icons.arrow_circle_down_outlined,
-        size: 22,
-        color: Tones.primary,
-      );
-    }
+    final arrow =
+        widget.child ??
+        Icon(Icons.arrow_circle_down_outlined, size: 22, color: Tones.primary);
+    if (MediaQuery.disableAnimationsOf(context)) return arrow;
     return FadeTransition(
       opacity: Tween<double>(begin: 0.35, end: 1).animate(_c),
-      child: Icon(
-        Icons.arrow_circle_down_outlined,
-        size: 22,
-        color: Tones.primary,
-      ),
+      child: arrow,
     );
   }
 }
