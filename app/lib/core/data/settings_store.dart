@@ -133,6 +133,40 @@ class SettingsStore extends ChangeNotifier {
   bool get updateNoteOnHome => _bool(_updateNoteOnHome, fallback: true);
   Future<void> setUpdateNoteOnHome(bool v) => _put(_updateNoteOnHome, '$v');
 
+  // --- search --------------------------------------------------------------
+
+  static const _recentSearches = 'search.recent';
+
+  /// What was searched for lately, newest first, at most ten.
+  List<String> get recentSearches {
+    final raw = _cache[_recentSearches];
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return [for (final s in jsonDecode(raw) as List) s as String];
+    } on FormatException {
+      return const [];
+    }
+  }
+
+  Future<void> addRecentSearch(String q) {
+    final t = q.trim();
+    final rest = [
+      for (final s in recentSearches)
+        if (s.toLowerCase() != t.toLowerCase()) s,
+    ];
+    return _put(_recentSearches, jsonEncode([t, ...rest].take(10).toList()));
+  }
+
+  Future<void> removeRecentSearch(String q) => _put(
+    _recentSearches,
+    jsonEncode([
+      for (final s in recentSearches)
+        if (s != q) s,
+    ]),
+  );
+
+  Future<void> clearRecentSearches() => _clear(_recentSearches);
+
   // --- sync ----------------------------------------------------------------
 
   /// Whether listening is shared with the account's other devices. On by

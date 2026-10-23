@@ -233,6 +233,40 @@ List<BoxShadow> coverLift(
   ];
 }
 
+/// A 2x2 mosaic of covers (a mix, a playlist), framed the way a single cover
+/// is in the current look. In Crayon that is the cover's ink outline and no
+/// offset shadow: a shadowed mosaic beside outlined covers read as covers
+/// cut off on two sides (owner, 23 Oct: "trunc'd, get them flush"). Room
+/// keeps its glow.
+Widget mosaicFrame({
+  required Color tint,
+  required double side,
+  required Widget grid,
+}) {
+  final r = BorderRadius.circular(coverRadius(16));
+  final clipped = ClipRRect(
+    borderRadius: r,
+    child: SizedBox(width: side, height: side, child: grid),
+  );
+  if (Looks.current.covers == CoverStyle.crayon) {
+    return DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        borderRadius: r,
+        border: Border.all(color: Tones.text, width: side >= 80 ? 2.5 : 1.5),
+      ),
+      child: clipped,
+    );
+  }
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      borderRadius: r,
+      boxShadow: coverLift(tint, alpha: 0.5, blur: 40, dy: 16),
+    ),
+    child: clipped,
+  );
+}
+
 /// A cover's corner in the current look: the caller's choice (or the card
 /// corner), except that Noir squares every cover off.
 double coverRadius(double? asked) {

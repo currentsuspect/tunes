@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/native.dart';
+import 'package:tunes/core/data/database.dart';
 import 'package:tunes/core/data/download_store.dart';
+import 'package:tunes/core/data/settings_store.dart';
 import 'package:tunes/core/net/tunes_client.dart';
 import 'package:tunes/domain/manifest.dart';
 import 'package:tunes/features/search/search_view.dart';
@@ -149,5 +152,76 @@ void main() {
     await tester.tap(seeAll.first);
     await tester.pumpAndSettle();
     expect(find.text('Best match'), findsOneWidget);
+  });
+
+  testWidgets('a search that found things is kept in Recent, and taps back', (
+    tester,
+  ) async {
+    final db = TunesDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final settings = SettingsStore(db);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsScope(
+            settings: settings,
+            child: SearchView(
+              tracks: tracks,
+              releases: const [],
+              client: TunesClient('http://test'),
+              player: FakeTunePlayer(),
+              store: store,
+              downloading: const {},
+              onDownload: (_) {},
+              offline: false,
+              artUrlFor: (s) => 'http://test/art/$s',
+              searchOverride: (_) async =>
+                  const SearchResults(tracks: [], releases: [], artists: []),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'travis');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(seconds: 3));
+    expect(settings.recentSearches, ['travis']);
+
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pumpAndSettle();
+    expect(find.text('Recent'), findsOneWidget);
+    await tester.tap(find.text('travis'));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('Songs 3'), findsOneWidget);
+  });
+
+  testWidgets('a search that found nothing is not kept', (tester) async {
+    final db = TunesDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final settings = SettingsStore(db);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsScope(
+            settings: settings,
+            child: SearchView(
+              tracks: tracks,
+              releases: const [],
+              client: TunesClient('http://test'),
+              player: FakeTunePlayer(),
+              store: store,
+              downloading: const {},
+              onDownload: (_) {},
+              offline: true,
+              artUrlFor: (s) => 'http://test/art/$s',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'zzzz');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(seconds: 3));
+    expect(settings.recentSearches, isEmpty);
   });
 }

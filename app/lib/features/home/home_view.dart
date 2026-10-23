@@ -70,7 +70,12 @@ class HomeView extends StatelessWidget {
   // they need horizontal padding (for legibility) or not (carousels
   // peek at the edge).
   static const double _sectionPadding = Space.lg;
-  static const double _carouselPeek = Space.md;
+
+  /// Where a rail's first cover starts: flush with its heading (owner, 23
+  /// Oct). It used to start half a step further left, which read as covers
+  /// out of line rather than as a peek; the peek is at the right edge, where
+  /// the next cover is cut by the screen.
+  static const double _carouselPeek = _sectionPadding;
 
   @override
   Widget build(BuildContext context) {

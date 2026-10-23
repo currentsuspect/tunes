@@ -8,6 +8,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/gets.dart';
 import '../../core/data/playlist_store.dart';
+import '../../core/data/settings_store.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/theme/looks.dart';
 import '../../core/ui/artwork.dart';
@@ -44,6 +45,7 @@ class SearchView extends StatefulWidget {
     this.onAlbumTap,
     this.onArtistTap,
     this.onPlaylistTap,
+    this.onOpenGets,
     this.searchOverride,
   });
 
@@ -63,6 +65,9 @@ class SearchView extends StatefulWidget {
   final void Function(ManifestRelease)? onAlbumTap;
   final void Function(String artist)? onArtistTap;
   final void Function(PlaylistSummary)? onPlaylistTap;
+
+  /// The day's gets from Soulseek, and how each is going.
+  final VoidCallback? onOpenGets;
   final Future<SearchResults> Function(String query)? searchOverride;
 
   @override
@@ -73,6 +78,10 @@ class _SearchViewState extends State<SearchView> {
   final _controller = TextEditingController();
   Timer? _debounce;
   String _query = '';
+  Timer? _typing;
+  Timer? _remember;
+  LibrarySearchResults? _cached;
+  int? _cachedKey;
   SearchResults? _server;
 
   SearchKind _kind = SearchKind.all;
@@ -121,6 +130,8 @@ class _SearchViewState extends State<SearchView> {
   void dispose() {
     _debounce?.cancel();
     _slskTimer?.cancel();
+    _typing?.cancel();
+    _remember?.cancel();
     _playlistStore?.removeListener(_loadPlaylists);
     _controller.dispose();
     super.dispose();
@@ -152,34 +163,48 @@ class _SearchViewState extends State<SearchView> {
     return _index!;
   }
 
+  /// Typing has to feel like typing (owner, 23 Oct: "heavy and slow").
+  /// It used to search the whole library twice and rebuild every result on
+  /// each letter, before the letter could show. Now the box shows the letter
+  /// at once and the results follow when typing pauses for a moment, from
+  /// one search, kept until something it depends on changes.
   void _onChanged(String v) {
-    setState(() {
-      _query = v;
-      if (v.trim().isEmpty) {
-        _off = {};
-        _kind = SearchKind.all;
-      }
-    });
+    _typing?.cancel();
     _debounce?.cancel();
     _slskTimer?.cancel();
+    _remember?.cancel();
     if (_slskFor != null && _slskFor != v.trim()) {
       _slskFor = null;
       _slsk = const [];
       _slskFailed = false;
     }
     if (v.trim().isEmpty) {
-      setState(() => _server = null);
+      setState(() {
+        _query = '';
+        _off = {};
+        _kind = SearchKind.all;
+        _server = null;
+      });
       return;
     }
-    // Nothing here by that name: look out there once typing settles.
-    if (!widget.offline &&
-        v.trim().length >= 3 &&
-        GetsScope.maybeOf(context) != null &&
-        _idx.search(v).isEmpty) {
-      _slskTimer = Timer(const Duration(milliseconds: 900), () {
-        if (mounted && _controller.text.trim() == v.trim()) _askSoulseek();
+    _typing = Timer(const Duration(milliseconds: 110), () {
+      if (!mounted) return;
+      setState(() => _query = v);
+      final r = _current();
+      // Nothing here by that name: look out there once typing settles.
+      if (!widget.offline &&
+          v.trim().length >= 3 &&
+          GetsScope.maybeOf(context) != null &&
+          (r == null || r.isEmpty)) {
+        _slskTimer = Timer(const Duration(milliseconds: 800), () {
+          if (mounted && _controller.text.trim() == v.trim()) _askSoulseek();
+        });
+      }
+      // Kept in Recent once it has settled on something that found things.
+      _remember = Timer(const Duration(seconds: 2), () {
+        if (mounted && _controller.text.trim() == v.trim()) _keep(v);
       });
-    }
+    });
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (widget.offline) return;
       try {
@@ -196,6 +221,44 @@ class _SearchViewState extends State<SearchView> {
         setState(() => _server = null);
       }
     });
+  }
+
+  /// One search per distinct question; a rebuild for any other reason (the
+  /// player, a download, the theme) reuses it.
+  LibrarySearchResults? _current() {
+    final q = _query.trim();
+    if (q.isEmpty) return null;
+    final key = Object.hashAll([
+      _query,
+      Object.hashAllUnordered(_off),
+      _sort,
+      _onPhone,
+      widget.offline,
+      identityHashCode(_server),
+      identityHashCode(_playlists),
+      identityHashCode(_idx),
+      _idx.lyricsReady,
+      widget.store.shas.length,
+    ]);
+    if (key != _cachedKey || _cached == null) {
+      _cachedKey = key;
+      _cached = _withBox(_results(), _server);
+    }
+    return _cached;
+  }
+
+  void _keep(String q) {
+    final r = _current();
+    final settings = SettingsScope.maybeOf(context);
+    if (settings == null || q.trim().length < 2) return;
+    if ((r == null || r.isEmpty) && _slsk.isEmpty) return;
+    settings.addRecentSearch(q.trim());
+  }
+
+  void _useRecent(String q) {
+    _controller.text = q;
+    _controller.selection = TextSelection.collapsed(offset: q.length);
+    _onChanged(q);
   }
 
   Future<void> _askSoulseek() async {
@@ -283,7 +346,7 @@ class _SearchViewState extends State<SearchView> {
   Widget build(BuildContext context) {
     final q = _query.trim();
     final server = _server;
-    final r = q.isEmpty ? null : _withBox(_results(), server);
+    final r = _current();
     final external =
         server != null &&
         (server.externalReleases.isNotEmpty ||
@@ -303,6 +366,7 @@ class _SearchViewState extends State<SearchView> {
             controller: _controller,
             onChanged: _onChanged,
             onClear: _clear,
+            onSubmitted: _keep,
           ),
         ),
         if (widget.offline)
@@ -355,12 +419,26 @@ class _SearchViewState extends State<SearchView> {
         const SizedBox(height: Space.sm),
         Expanded(
           child: q.isEmpty
-              ? _BrowseWhenEmpty(
-                  tracks: widget.tracks,
-                  releases: widget.releases,
-                  artUrlFor: widget.artUrlFor,
-                  onArtistTap: widget.onArtistTap,
-                  onAlbumTap: widget.onAlbumTap,
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (SettingsScope.maybeOf(context) case final settings?)
+                      _Recents(
+                        recent: settings.recentSearches,
+                        onPick: _useRecent,
+                        onRemove: settings.removeRecentSearch,
+                        onClear: settings.clearRecentSearches,
+                      ),
+                    Expanded(
+                      child: _BrowseWhenEmpty(
+                        tracks: widget.tracks,
+                        releases: widget.releases,
+                        artUrlFor: widget.artUrlFor,
+                        onArtistTap: widget.onArtistTap,
+                        onAlbumTap: widget.onAlbumTap,
+                      ),
+                    ),
+                  ],
                 )
               : !hasResults
               ? EmptyState(
@@ -686,12 +764,22 @@ class _SearchViewState extends State<SearchView> {
           ),
           const SizedBox(width: Space.sm),
           if (_slsk.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: Text(
-                "on $peers people's shares",
-                style: TypeScale.caption,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  "on $peers people's shares",
+                  style: TypeScale.caption,
+                ),
               ),
+            )
+          else
+            const Spacer(),
+          if (widget.onOpenGets != null)
+            TextButton(
+              onPressed: widget.onOpenGets,
+              style: TextButton.styleFrom(foregroundColor: Tones.text),
+              child: const Text("Today's gets"),
             ),
         ],
       ),
@@ -876,11 +964,13 @@ class _SearchBox extends StatelessWidget {
     required this.controller,
     required this.onChanged,
     required this.onClear,
+    this.onSubmitted,
   });
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final VoidCallback onClear;
+  final ValueChanged<String>? onSubmitted;
 
   @override
   Widget build(BuildContext context) {
@@ -906,6 +996,7 @@ class _SearchBox extends StatelessWidget {
           controller: controller,
           autofocus: false,
           onChanged: onChanged,
+          onSubmitted: onSubmitted,
           textInputAction: TextInputAction.search,
           style: TypeScale.body.copyWith(color: Tones.text, fontSize: 15),
           decoration: InputDecoration(
@@ -1961,6 +2052,78 @@ class _FinishCard extends StatelessWidget {
                 shape: const StadiumBorder(),
               ),
               child: Text('Get $missing'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Recent searches, above Browse before you type: tap one to search it
+/// again, x to forget it, or clear them all.
+class _Recents extends StatelessWidget {
+  const _Recents({
+    required this.recent,
+    required this.onPick,
+    required this.onRemove,
+    required this.onClear,
+  });
+
+  final List<String> recent;
+  final ValueChanged<String> onPick;
+  final ValueChanged<String> onRemove;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    if (recent.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.sm, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Recent',
+                  style: TypeScale.heading.copyWith(fontSize: 18),
+                ),
+              ),
+              TextButton(
+                onPressed: onClear,
+                style: TextButton.styleFrom(foregroundColor: Tones.textMuted),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+          for (final q in recent.take(6))
+            InkWell(
+              onTap: () => onPick(q),
+              borderRadius: BorderRadius.circular(RadiusTokens.control),
+              child: Row(
+                children: [
+                  Icon(Icons.history_rounded, size: 18, color: Tones.textMuted),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Text(
+                      q,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TypeScale.body.copyWith(color: Tones.text),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Forget "$q"',
+                    onPressed: () => onRemove(q),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: Tones.textMuted,
+                    ),
+                  ),
+                ],
+              ),
             ),
         ],
       ),

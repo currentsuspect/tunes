@@ -463,23 +463,14 @@ class MixMosaic extends StatelessWidget {
       );
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: coverLift(tint, alpha: 0.5, blur: 40, dy: 16),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: side,
-          height: side,
-          child: Column(
-            children: [
-              Row(children: [tile(0), tile(1)]),
-              Row(children: [tile(2), tile(3)]),
-            ],
-          ),
-        ),
+    return mosaicFrame(
+      tint: tint,
+      side: side,
+      grid: Column(
+        children: [
+          Row(children: [tile(0), tile(1)]),
+          Row(children: [tile(2), tile(3)]),
+        ],
       ),
     );
   }

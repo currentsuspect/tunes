@@ -26,6 +26,32 @@ class GetsController extends ChangeNotifier {
   GetJob? jobFor(String artist, String title) =>
       _bySong[GetJob.keyOf(artist, title)];
 
+  /// Everything this phone asked for since it started, newest first.
+  List<GetJob> get following => _bySong.values.toList().reversed.toList();
+
+  /// Gets still going.
+  List<GetJob> get active => [
+    for (final j in following)
+      if (!j.finished) j,
+  ];
+
+  /// The last day's gets on the box, everyone's, newest first; null when it
+  /// cannot be reached. For the list that opens from the bar.
+  Future<List<GetJob>?> everyone() async {
+    try {
+      final jobs = await client.soulseekJobs();
+      // Ours among them update what this phone shows too.
+      final mine = {for (final j in _bySong.values) j.id};
+      _take([
+        for (final j in jobs)
+          if (mine.contains(j.id)) j,
+      ]);
+      return jobs;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Gets of one album's songs, still going.
   int pendingFor(String release) =>
       _bySong.values.where((j) => j.release == release && !j.finished).length;

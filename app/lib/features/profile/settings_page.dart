@@ -509,7 +509,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
 
                     _Group(
-                      title: 'Storage',
+                      title: 'Space used',
                       children: [
                         _StorageBar(
                           downloads: _usage?.downloadBytes ?? 0,
@@ -1448,15 +1448,28 @@ class _ChoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The name above its choices, not beside them: beside, four choices in
+    // Crayon's wide hand left the name one letter wide, written downwards
+    // (owner, 23 Oct).
     return Padding(
       padding: _tilePadding,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: Text(title, style: _tileTitle())),
+          Text(title, style: _tileTitle()),
+          const SizedBox(height: Space.sm),
           SegmentedButton<int>(
             segments: [
               for (var i = 0; i < choices.length; i++)
-                ButtonSegment(value: i, label: Text(choices[i])),
+                ButtonSegment(
+                  value: i,
+                  label: Text(
+                    choices[i],
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.fade,
+                  ),
+                ),
             ],
             selected: {selected},
             onSelectionChanged: (v) => onChanged(v.first),

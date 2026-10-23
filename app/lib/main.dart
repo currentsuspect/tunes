@@ -70,6 +70,7 @@ import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
 import 'core/data/gets.dart';
+import 'core/ui/gets_bar.dart';
 import 'domain/mixes.dart';
 import 'features/stats/listening_page.dart';
 import 'domain/sync_watermark.dart';
@@ -1158,6 +1159,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// The day's gets from Soulseek, from the bar or from search.
+  void _openGets() {
+    final bySha = {
+      for (final t in _manifest?.tracks ?? const <ManifestTrack>[]) t.sha: t,
+    };
+    GetsSheet.show(
+      context,
+      gets: _gets,
+      trackFor: (sha) => bySha[sha],
+      onPlay: (t) => widget.player.playQueue([t], 0),
+    );
+  }
+
   /// Takes a song out of a mix (or every mix), or puts it back, and hands the
   /// page the mix as it now stands: the gap filled, the rest where they were.
   /// Null when the mix no longer has enough songs to be one.
@@ -2214,6 +2228,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               );
             },
           ),
+          GetsBar(gets: _gets, onTap: () => _openGets()),
           DesktopPlayBar(
             player: widget.player,
             artUrlFor: _artUrlFor,
@@ -2443,6 +2458,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 );
               },
             ),
+            GetsBar(gets: _gets, onTap: () => _openGets()),
             MiniPlayerBar(
               player: widget.player,
               onTap: _openNowPlaying,
@@ -2517,6 +2533,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         releases: manifest.releases,
         artists: manifest.artists,
         plays: _playCounts,
+        onOpenGets: _openGets,
         onPlaylistTap: PlaylistScope.maybeOf(context) == null
             ? null
             : (p) => _nav.openPanel(
