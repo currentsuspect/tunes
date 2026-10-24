@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
+import '../../core/lyrics/adlibs.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/reading.dart';
 import '../../core/lyrics/voices.dart';
@@ -519,6 +520,76 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
 
   int? get _activeIndex => _follow.activeIndex;
 
+  /// A line played on repeat: from its first word to the end of its last,
+  /// for learning a verse or hearing a word again. [origin] is the stored
+  /// line, so a long line split in two loops whole.
+  ({Duration from, Duration to, int origin})? _loop;
+
+  /// Set once the loop has jumped back, until the playhead is inside it again:
+  /// the clock reports the old position for a frame or two after a seek.
+  bool _looped = false;
+
+  void _checkLoop() {
+    final loop = _loop;
+    if (loop == null) return;
+    final pos = _playhead.value;
+    if (_looped) {
+      if (pos < loop.to) _looped = false;
+      return;
+    }
+    if (pos >= loop.to || pos < loop.from - const Duration(seconds: 2)) {
+      _looped = true;
+      widget.player.seek(loop.from);
+    }
+  }
+
+  void _toggleLoop(int i) {
+    final lrc = _lrc;
+    if (lrc == null) return;
+    final origin = _origin[i];
+    if (_loop?.origin == origin) {
+      setState(() => _loop = null);
+      return;
+    }
+    final shown = [
+      for (var k = 0; k < lrc.lines.length; k++)
+        if (_origin[k] == origin) k,
+    ];
+    final first = lrc.lines[shown.first];
+    final lastIndex = shown.last;
+    final last = lrc.lines[lastIndex];
+    final from = first.words.isEmpty
+        ? first.timestamp
+        : first.words.map((w) => w.start).reduce((a, b) => a < b ? a : b);
+    final Duration to;
+    if (last.words.isNotEmpty) {
+      // A breath after the last word, so the loop does not clip it.
+      to =
+          lrc.wordEndOf(
+            lastIndex,
+            last.words.length - 1,
+            trackEnd: widget.player.duration,
+          ) +
+          const Duration(milliseconds: 250);
+    } else if (lastIndex + 1 < lrc.lines.length) {
+      to = lrc.lines[lastIndex + 1].timestamp;
+    } else {
+      to = last.timestamp + const Duration(seconds: 5);
+    }
+    // A little before the line, so its first word is heard whole.
+    final lead = from - const Duration(milliseconds: 150);
+    setState(() {
+      _loop = (
+        from: lead.isNegative ? Duration.zero : lead,
+        to: to,
+        origin: origin,
+      );
+      _looped = false;
+    });
+    widget.player.seek(_loop!.from);
+    if (!widget.player.playing) widget.player.play();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -530,6 +601,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
       clock: _playhead,
     );
     _follow.addListener(_onFollowUpdate);
+    _playhead.addListener(_checkLoop);
     _lineKeys = List.generate(_lrc?.lines.length ?? 0, (_) => GlobalKey());
     // Nothing else subscribes to the clock here: KaraokeLine takes it and
     // rebuilds itself through a ValueListenableBuilder, so the word sweep
@@ -565,7 +637,9 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     _source = widget.lyrics.trim().isEmpty
         ? null
         : LrcParser.parse(widget.lyrics);
-    final reading = _source == null ? null : splitForReading(_source!);
+    final reading = _source == null
+        ? null
+        : splitForReading(_source!, adlibsApart: true);
     _lrc = reading?.lrc;
     _origin = reading?.origin ?? const [];
     _voices = LyricVoices.resolve([
@@ -579,6 +653,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     // The controller listens to the clock, so it has to let go before the
     // clock is torn down.
     _follow.dispose();
+    _playhead.removeListener(_checkLoop);
     _playhead.dispose();
     super.dispose();
   }
@@ -698,6 +773,28 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     return Stack(
       children: [
         list,
+        if (_loop != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: Space.sm,
+            child: Center(
+              child: TextButton.icon(
+                onPressed: () => setState(() => _loop = null),
+                icon: const Icon(Icons.repeat_one_rounded, size: 16),
+                label: const Text('Looping this line · Stop'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AccentScope.of(context),
+                  backgroundColor: Tones.surfaceRaised,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Space.md,
+                    vertical: Space.sm,
+                  ),
+                  shape: const StadiumBorder(),
+                ),
+              ),
+            ),
+          ),
         if (!_follow.following && _follow.activeIndex != null)
           Positioned(
             left: 0,
@@ -725,6 +822,27 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  /// A line-timed line with its ad-libs on a smaller row beneath (see
+  /// adlibs.dart), on the side away from the lead.
+  static Widget _withAdlibs(String text, TextAlign align, double size) {
+    final split = splitAdlibText(text);
+    if (split == null) return Text(text, textAlign: align);
+    final end = align == TextAlign.end;
+    // Stretched, so the ad-lib row spans the line and can sit at its far side.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(split.main, textAlign: align),
+        Text(
+          split.adlibs,
+          textAlign: end ? TextAlign.start : TextAlign.end,
+          style: TextStyle(fontSize: size * 0.72, fontStyle: FontStyle.italic),
+        ),
       ],
     );
   }
@@ -832,6 +950,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                         lrc: lrc,
                         lineIndex: i,
                         playhead: _playhead,
+                        onWordTap: widget.player.seek,
                         trackEnd: widget.player.duration,
                         isActive: isActive,
                         isPast: isPast,
@@ -851,7 +970,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                           height: 1.25,
                         ),
                         textAlign: align,
-                        child: Text(voice.text, textAlign: align),
+                        child: _withAdlibs(voice.text, align, size),
                       ),
               ),
             ),
@@ -882,6 +1001,21 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                     duration: Duration(seconds: 1),
                   ),
                 );
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                _loop?.origin == _origin[i]
+                    ? Icons.stop_rounded
+                    : Icons.repeat_one_rounded,
+                size: 20,
+              ),
+              title: Text(
+                _loop?.origin == _origin[i] ? 'Stop looping' : 'Loop this line',
+              ),
+              onTap: () {
+                Navigator.of(sheet).pop();
+                _toggleLoop(i);
               },
             ),
             // A label inside a word-timed line would be swept as a word, so

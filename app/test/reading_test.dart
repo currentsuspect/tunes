@@ -29,6 +29,14 @@ void main() {
       expect(second, lessThan(const Duration(seconds: 10)));
     });
 
+    test('where ad-libs have their own row, they do not make a line long', () {
+      final lrc = LrcParser.parse(
+        '[00:00.00]Number two (Hahahaha), only speak in glory (Yeah)',
+      );
+      expect(splitForReading(lrc, adlibsApart: true).lrc.lines, hasLength(1));
+      expect(splitForReading(lrc).lrc.lines, hasLength(2));
+    });
+
     test('a word-timed half starts when its first word is sung', () {
       final r = splitForReading(
         LrcParser.parse(
