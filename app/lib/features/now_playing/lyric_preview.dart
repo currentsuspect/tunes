@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/reading.dart';
 import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
 import '../lyrics/lyric_follow.dart';
@@ -81,9 +82,11 @@ class _LyricPreviewState extends State<LyricPreview> {
     if (mounted) setState(() {});
   }
 
+  /// Long lines arrive already split in two (see reading.dart): a shrunk
+  /// line was unreadable at a glance, and that is all this preview gets.
   static Lrc? _parse(String? lyrics) {
     if (lyrics == null || lyrics.isEmpty) return null;
-    return LrcParser.parse(lyrics);
+    return splitForReading(LrcParser.parse(lyrics)).lrc;
   }
 
   @override
@@ -210,41 +213,47 @@ class _LyricPreviewState extends State<LyricPreview> {
     // it is the one that must never be truncated: an ellipsis here removes the
     // words the listener is looking at. Most lyric lines fit one line at this
     // size; the long ones wrap, and only a genuinely enormous line scales down.
+    //
+    // The width is pinned before the FittedBox: given unbounded width the text
+    // never wrapped at all, it laid out as one long line and was then shrunk
+    // to fit, which is how long lines came out unreadably small (24 Oct).
     return SizedBox(
       height: _kActiveLineHeight,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: ListenableBuilder(
-          listenable: widget.player,
-          builder: (context, _) {
-            final position = widget.player.position;
-            final parts = lyricWordParts(lrc, active);
-            final wordIndex = lyricActiveWordIndex(lrc, active, position);
-            final style = TypeScale.display.copyWith(
-              fontSize: 19,
-              height: 1.15,
-            );
-            final Widget line = (parts == null || wordIndex == null)
-                ? Text(
-                    LyricVoices.plain(lrc.lines[active].text),
-                    style: style,
-                    textAlign: TextAlign.start,
-                    maxLines: 2,
-                  )
-                : Text.rich(
-                    TextSpan(
-                      children: _wordSpans(parts, wordIndex),
+      child: LayoutBuilder(
+        builder: (context, box) => Align(
+          alignment: Alignment.centerLeft,
+          child: ListenableBuilder(
+            listenable: widget.player,
+            builder: (context, _) {
+              final position = widget.player.position;
+              final parts = lyricWordParts(lrc, active);
+              final wordIndex = lyricActiveWordIndex(lrc, active, position);
+              final style = TypeScale.display.copyWith(
+                fontSize: 19,
+                height: 1.15,
+              );
+              final Widget line = (parts == null || wordIndex == null)
+                  ? Text(
+                      LyricVoices.plain(lrc.lines[active].text),
                       style: style,
-                    ),
-                    textAlign: TextAlign.start,
-                    maxLines: 2,
-                  );
-            return FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: line,
-            );
-          },
+                      textAlign: TextAlign.start,
+                      maxLines: 2,
+                    )
+                  : Text.rich(
+                      TextSpan(
+                        children: _wordSpans(parts, wordIndex),
+                        style: style,
+                      ),
+                      textAlign: TextAlign.start,
+                      maxLines: 2,
+                    );
+              return FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: SizedBox(width: box.maxWidth, child: line),
+              );
+            },
+          ),
         ),
       ),
     );

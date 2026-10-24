@@ -250,17 +250,14 @@ void main() {
   });
 
   group('LyricPreview widget', () {
-    testWidgets('a long lyric line is not clipped to one ellipsised line', (
+    testWidgets('a long lyric line is split in two, at a readable size', (
       tester,
     ) async {
       // Real line-synced lyrics are routinely wider than a phone --
       // "Number two (Hahahaha), only speak in glory (Yeah)" is an ordinary
-      // line, not a pathological one. The preview used to give every row
-      // maxLines: 1 with an ellipsis, so the line being sung arrived cut off.
-      //
-      // Truncation is a paint-time property, so this asserts the mechanism
-      // that prevents it rather than rasterising: the active line may wrap,
-      // and every row can shrink to fit instead of clipping.
+      // line, not a pathological one. It used to arrive ellipsised, then
+      // shrunk to an unreadable size (the FittedBox gave the text unbounded
+      // width, so it never wrapped). It is now two lines of its own.
       const long =
           '[00:00.00]Number two (Hahahaha), only speak in glory (Yeah)\n'
           '[00:30.00]Leave your baggage at home (None of that deep shit)';
@@ -278,26 +275,23 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final active = tester.widget<Text>(
-        find.text('Number two (Hahahaha), only speak in glory (Yeah)'),
-      );
-      expect(
-        active.maxLines,
-        greaterThan(1),
-        reason: 'the line being sung must be allowed to wrap',
-      );
-      expect(
-        active.overflow,
-        isNot(TextOverflow.ellipsis),
-        reason: 'the line being sung must never be ellipsised',
-      );
-      expect(
+      final active = tester.widget<Text>(find.text('Number two (Hahahaha),'));
+      expect(active.maxLines, greaterThan(1));
+      expect(active.overflow, isNot(TextOverflow.ellipsis));
+      // The rest of the line is next, not squeezed into the same row.
+      expect(find.text('only speak in glory (Yeah)'), findsOneWidget);
+      // Drawn at its own size: the FittedBox above it does not scale it down.
+      final fitted = tester.getSize(
         find.ancestor(
-          of: find.text('Number two (Hahahaha), only speak in glory (Yeah)'),
+          of: find.text('Number two (Hahahaha),'),
           matching: find.byType(FittedBox),
         ),
-        findsOneWidget,
-        reason: 'an over-long line shrinks to fit rather than clipping',
+      );
+      final text = tester.getSize(find.text('Number two (Hahahaha),'));
+      expect(text.width, lessThanOrEqualTo(fitted.width + 0.5));
+      expect(
+        tester.getRect(find.text('Number two (Hahahaha),')).height,
+        greaterThan(18),
       );
     });
 

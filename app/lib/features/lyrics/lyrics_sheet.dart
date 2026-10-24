@@ -5,6 +5,7 @@ import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/reading.dart';
 import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/tunes_menu.dart';
@@ -497,7 +498,13 @@ class _View extends StatefulWidget {
 }
 
 class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
+  /// The lines as shown: long ones split in two (see reading.dart).
   Lrc? _lrc;
+
+  /// The lines as stored, and which of them each shown line came from. A
+  /// voice label is written to the stored line, never to half of one.
+  Lrc? _source;
+  List<int> _origin = const [];
   // Who is singing each timed line, which decides the side it sits on.
   List<LyricVoice> _voices = const [];
   // Drives the within-word sweep. Only the active line listens to it, so the
@@ -555,7 +562,12 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   }
 
   void _parse() {
-    _lrc = widget.lyrics.trim().isEmpty ? null : LrcParser.parse(widget.lyrics);
+    _source = widget.lyrics.trim().isEmpty
+        ? null
+        : LrcParser.parse(widget.lyrics);
+    final reading = _source == null ? null : splitForReading(_source!);
+    _lrc = reading?.lrc;
+    _origin = reading?.origin ?? const [];
     _voices = LyricVoices.resolve([
       for (final l in _lrc?.lines ?? const <LrcLine>[]) l.text,
     ], artists: widget.artists);
@@ -884,7 +896,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                   title: const Text('Sing from the left'),
                   onTap: () {
                     Navigator.of(sheet).pop();
-                    widget.onLineVoice(lrc, i, 1);
+                    widget.onLineVoice(_source!, _origin[i], 1);
                   },
                 ),
               if (voice.side != LyricSide.right)
@@ -896,7 +908,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                   title: const Text('Sing from the right'),
                   onTap: () {
                     Navigator.of(sheet).pop();
-                    widget.onLineVoice(lrc, i, 2);
+                    widget.onLineVoice(_source!, _origin[i], 2);
                   },
                 ),
             ],

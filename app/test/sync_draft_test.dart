@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunes/core/lyrics/lrc_parser.dart';
 import 'package:tunes/core/lyrics/sync_draft.dart';
 
 Duration at(num seconds) => Duration(milliseconds: (seconds * 1000).round());
@@ -223,6 +224,39 @@ void main() {
       expect(d.lastMarkedWord(0), 2);
       d.wordStarts[0][2] = null;
       expect(d.lastMarkedWord(0), 0);
+    });
+  });
+
+  group('word ends', () {
+    test('a marked end is written, to the millisecond, and read back', () {
+      final d = SyncDraft(['hold on']);
+      d.lineStarts[0] = const Duration(milliseconds: 1000);
+      d.wordStarts[0][0] = const Duration(milliseconds: 1000);
+      d.wordEnds[0][0] = const Duration(milliseconds: 1487);
+      d.wordStarts[0][1] = const Duration(milliseconds: 2100);
+      final lrc = d.toLrc();
+      expect(lrc, '[00:01.00]<00:01.00>hold<00:01.487> <00:02.10>on');
+      final back = LrcParser.parse(lrc).lines.single.words;
+      expect(back.first.end, const Duration(milliseconds: 1487));
+      expect(back.last.end, isNull);
+    });
+
+    test('an end before its own start is dropped, not written', () {
+      final d = SyncDraft(['a b']);
+      d.lineStarts[0] = const Duration(seconds: 1);
+      d.wordStarts[0][0] = const Duration(seconds: 1);
+      d.wordEnds[0][0] = const Duration(milliseconds: 900);
+      d.wordStarts[0][1] = const Duration(seconds: 2);
+      expect(d.toLrc(), isNot(contains('00:00.90')));
+    });
+
+    test('shifting everything moves the ends with the starts', () {
+      final d = SyncDraft(['a']);
+      d.lineStarts[0] = const Duration(seconds: 1);
+      d.wordStarts[0][0] = const Duration(seconds: 1);
+      d.wordEnds[0][0] = const Duration(milliseconds: 1500);
+      d.shiftAll(const Duration(milliseconds: 100));
+      expect(d.wordEnds[0][0], const Duration(milliseconds: 1600));
     });
   });
 }
