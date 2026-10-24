@@ -358,6 +358,11 @@ describe("getting a song", () => {
     expect(g.cancel(b.id)).toBe(true);
     expect([pos(a.id), pos(c.id)]).toEqual([1, 2]);
     expect(g.cancel(b.id)).toBe(false);
+    // Taken out, not failed: a cleared line is not a list of failures.
+    expect(g.list().find((j) => j.id === b.id)?.state).toBe("cancelled");
+    // And asking again starts a new get rather than handing back the old one.
+    expect(g.get({ title: "CAROUSEL", artist: "Travis Scott" }).id).not.toBe(b.id);
+    await g.flushed();
   });
 
   it("waits for Soulseek to log in rather than failing a resumed get", async () => {

@@ -42,6 +42,7 @@ String? getNote(GetJob? j) {
     GetState.done => 'in your library',
     GetState.failed => "that copy didn't work",
     GetState.notFound => 'nobody has it right now',
+    GetState.cancelled => 'taken out of the line',
   };
 }
 

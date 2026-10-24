@@ -67,7 +67,7 @@ class GetsController extends ChangeNotifier {
           album: job.album,
           release: job.release,
           by: job.by,
-          state: GetState.failed,
+          state: GetState.cancelled,
         ),
       ]);
       // Out of the line, so not a failure to show either.
