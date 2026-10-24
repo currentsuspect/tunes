@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/lyrics/adlib_kinds.dart';
 import '../../core/lyrics/adlib_motion.dart';
-import '../../core/lyrics/adlibs.dart';
-import '../../core/lyrics/word_fx.dart';
 import '../../core/lyrics/word_fx_motion.dart';
 import 'adlib_style.dart';
 import 'word_fx_view.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/lyric_fx.dart';
 import '../../core/lyrics/word_motion.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/cover_tint.dart' show AccentScope;
@@ -36,7 +35,11 @@ class KaraokeLine extends StatelessWidget {
     this.wrapAlignment = WrapAlignment.start,
     this.onWordTap,
     this.fxSeed,
+    this.fixAt,
   });
+
+  /// The Lyric Center's fix for word [i] of this line, if any (lyric_fx).
+  final FxFix? Function(int i)? fixAt;
 
   /// Turns on the picture-word effects (word_fx.dart) for this line, seeded
   /// so the same line always picks the same effect. Null: no effects.
@@ -92,6 +95,7 @@ class KaraokeLine extends StatelessWidget {
       // Still static (no playhead), just in tappable words.
       return _rows(
         line,
+        resolveLineFx([for (final w in line.words) w.text], fixAt: fixAt),
         (i, kind, last) => GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => tap(line.words[i].start),
@@ -112,18 +116,25 @@ class KaraokeLine extends StatelessWidget {
       valueListenable: playhead,
       builder: (context, position, _) {
         final style = base.copyWith(fontWeight: FontWeight.w600);
-        final fx = _lineFx(line);
-        return _rows(line, (i, kind, last) {
+        final lfx = resolveLineFx(
+          [for (final w in line.words) w.text],
+          seed: fxSeed,
+          fixAt: fixAt,
+        );
+        final fx = lfx.picture;
+        return _rows(line, lfx, (i, kind, last) {
           final start = line.words[i].start;
           final end = lrc.wordEndOf(lineIndex, i, trackEnd: trackEnd);
+          // A fix moves when the effect comes, never the word's own sweep.
+          final shift = lfx.shiftOf(i);
           if (fx != null && i == fx.index) {
             return _tappable(
               i,
               WordFxBox(
                 look: wordFxLook(
                   fx.fx,
-                  start: start,
-                  end: end,
+                  start: start + shift,
+                  end: end + shift,
                   position: position,
                 ),
                 child: _Word(
@@ -144,7 +155,12 @@ class KaraokeLine extends StatelessWidget {
               kind,
               kind == null
                   ? null
-                  : adlibLook(kind, start: start, end: end, position: position),
+                  : adlibLook(
+                      kind,
+                      start: start + shift,
+                      end: end + shift,
+                      position: position,
+                    ),
               _Word(
                 // The trailing space belongs to the word so wrapping breaks
                 // in the right places; a separate spacing gap would let a
@@ -165,22 +181,6 @@ class KaraokeLine extends StatelessWidget {
 }
 
 extension on KaraokeLine {
-  /// The one picture word on this line among its main words (ad-libs have
-  /// their own looks), by its index in the line's words.
-  ({int index, WordFx fx})? _lineFx(LrcLine line) {
-    final seed = this.fxSeed;
-    if (seed == null) return null;
-    final tokens = [for (final w in line.words) w.text];
-    if (wholeLineAdlib(tokens) != null) return null;
-    final mask = adlibMask(tokens);
-    final main = [
-      for (var i = 0; i < tokens.length; i++)
-        if (!mask[i]) i,
-    ];
-    final hit = lineWordFx([for (final i in main) tokens[i]], seed);
-    return hit == null ? null : (index: main[hit.index], fx: hit.fx);
-  }
-
   /// The main words on one row and the ad-libs, smaller, on a row of their
   /// own beneath (see adlibs.dart). A line with no ad-libs is one row.
   ///
@@ -188,27 +188,29 @@ extension on KaraokeLine {
   /// word. "[?]" placeholders are not shown at all.
   Widget _rows(
     LrcLine line,
+    LineFx lfx,
     Widget Function(int i, AdlibKind? kind, bool last) word,
   ) {
     final tokens = [for (final w in line.words) w.text];
     // A line that is nothing but an ad-lib is one, all of it.
-    final whole = wholeLineAdlib(tokens);
-    if (whole != null) {
+    if (lfx.whole) {
+      final all = [
+        for (var i = 0; i < tokens.length; i++)
+          if (!isPlaceholder(tokens[i])) i,
+      ];
       return Wrap(
         alignment: wrapAlignment,
         runSpacing: 2,
         children: [
-          for (final i in whole.words)
-            if (!isPlaceholder(tokens[i]))
-              word(i, whole.kind, i == whole.words.last),
+          for (final i in all)
+            word(i, lfx.kinds[i] ?? AdlibKind.plain, i == all.last),
         ],
       );
     }
-    final mask = adlibMask(tokens);
-    final kindOf = <int, AdlibKind>{
-      for (final g in adlibGroups(tokens, mask))
-        for (final i in g.words) i: g.kind,
-    };
+    final mask = [
+      for (var i = 0; i < tokens.length; i++) lfx.kinds.containsKey(i),
+    ];
+    final kindOf = lfx.kinds;
     final shown = [
       for (var i = 0; i < tokens.length; i++)
         if (!isPlaceholder(tokens[i])) i,

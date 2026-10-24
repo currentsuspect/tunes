@@ -20,13 +20,18 @@ import 'voices.dart';
 const int kReadingLineChars = 42;
 
 class ReadingLrc {
-  const ReadingLrc(this.lrc, this.origin);
+  const ReadingLrc(this.lrc, this.origin, [this.wordOffset = const []]);
 
   /// The lines as shown.
   final Lrc lrc;
 
   /// For each shown line, the index of the stored line it came from.
   final List<int> origin;
+
+  /// For each shown line, how many of the stored line's words come before
+  /// its first: 0, or the first half's length for a second half. With
+  /// [origin], a shown word's place in the stored lyric.
+  final List<int> wordOffset;
 }
 
 /// [adlibsApart]: the screen shows ad-libs on a row of their own (the
@@ -39,18 +44,25 @@ ReadingLrc splitForReading(
 }) {
   final lines = <LrcLine>[];
   final origin = <int>[];
+  final offset = <int>[];
   for (var i = 0; i < lrc.lines.length; i++) {
     final line = lrc.lines[i];
     final next = i + 1 < lrc.lines.length ? lrc.lines[i + 1].timestamp : null;
     final halves = _split(line, next, maxChars, adlibsApart);
+    var before = 0;
     for (final h in halves) {
       lines.add(h);
       origin.add(i);
+      offset.add(before);
+      before += h.hasWordTiming
+          ? h.words.length
+          : h.text.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).length;
     }
   }
   return ReadingLrc(
     Lrc(metadata: lrc.metadata, lines: lines, untimed: lrc.untimed),
     origin,
+    offset,
   );
 }
 

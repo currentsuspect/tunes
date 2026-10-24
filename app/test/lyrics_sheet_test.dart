@@ -409,6 +409,40 @@ void main() {
       },
     );
   });
+
+  testWidgets('the Lyric Center fixes an ad-lib and saves it into the lyric', (
+    tester,
+  ) async {
+    const lyrics =
+        '[00:58.96]Put money on this whip (Woo), this Urus go 200 (Skrrt)\n'
+        '[01:02.83]Said I done bought the Benz';
+    String? saved;
+    await _pump(
+      tester,
+      lyrics: lyrics,
+      onSave: (_, text) async => saved = text,
+    );
+    await tester.longPress(find.textContaining('Put money'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lyric Center'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ChoiceChip),
+        matching: find.text('(Skrrt)'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Boom'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('−250'));
+    await tester.pumpAndSettle();
+    expect(find.text('−250 ms'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(saved, startsWith('[tunesfx:0.10=boom@-250]\n'));
+    expect(saved, endsWith(lyrics), reason: 'the words are untouched');
+  });
 }
 
 /// A player whose current track can be moved, as playing on does.

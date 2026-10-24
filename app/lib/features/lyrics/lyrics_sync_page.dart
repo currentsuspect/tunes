@@ -85,8 +85,13 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 
   /// Seeds the draft from whatever is already stored, so re-opening the editor
   /// resumes a sync rather than starting over.
+  /// Metadata the lyric came with (the Lyric Center's fixes among it), kept
+  /// for the save.
+  Map<String, String> _metadata = const {};
+
   SyncDraft _draftFrom(String lyrics) {
     final lrc = LrcParser.parse(lyrics);
+    _metadata = lrc.metadata;
     final source = <String>[...lrc.lines.map((l) => l.text), ...lrc.untimed];
     final draft = SyncDraft(source);
     for (var i = 0; i < lrc.lines.length; i++) {
@@ -445,7 +450,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      await widget.onSave(_draft.toLrc());
+      await widget.onSave(_draft.toLrc(metadata: _metadata));
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);

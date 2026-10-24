@@ -154,7 +154,7 @@ class SyncDraft {
   /// Timing runs top-down, so untimed lines are always a suffix. They are
   /// written as plain text after the timed ones rather than dropped: a save
   /// must never lose words the user typed, even if the sync is unfinished.
-  String toLrc() {
+  String toLrc({Map<String, String> metadata = const {}}) {
     final timed = <LrcLine>[];
     final leftover = <String>[];
     for (var i = 0; i < lines.length; i++) {
@@ -197,7 +197,9 @@ class SyncDraft {
         ),
       );
     }
-    final body = LrcParser.format(Lrc(lines: timed));
+    // Metadata rides along: the Lyric Center's fixes live there, and a
+    // re-timed save must not drop them.
+    final body = LrcParser.format(Lrc(metadata: metadata, lines: timed));
     if (leftover.isEmpty) return body;
     return body.isEmpty ? leftover.join('\n') : '$body\n${leftover.join('\n')}';
   }
