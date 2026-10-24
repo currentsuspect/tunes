@@ -1,3 +1,4 @@
+import '../song/about_nav.dart';
 import '../../core/platform/device.dart';
 
 import 'package:flutter/material.dart';
@@ -328,6 +329,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                         case 'queue':
                                           _openQueue(context);
                                           break;
+                                        case 'about':
+                                          AboutNav.maybeOf(context)
+                                              ?.openSong(current);
+                                          break;
                                         case 'artist':
                                           // The same opener the sleeve uses.
                                           // This was a second copy of the same
@@ -382,6 +387,12 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       }
                                     },
                                     itemBuilder: (context) => [
+                                      if (AboutNav.maybeOf(context) != null)
+                                        tunesMenuItem(
+                                          'about',
+                                          Icons.info_outline_rounded,
+                                          'About this song',
+                                        ),
                                       tunesMenuItem(
                                         'queue',
                                         Icons.queue_music_rounded,

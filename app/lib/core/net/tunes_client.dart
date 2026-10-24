@@ -6,6 +6,7 @@ import 'dart:isolate';
 import '../../domain/discography.dart';
 import '../sync/sync_models.dart';
 import 'update_check.dart';
+import '../../domain/about.dart';
 import '../../domain/manifest.dart';
 import '../../domain/soulseek.dart';
 
@@ -701,6 +702,80 @@ class TunesClient {
       return [
         for (final t in j['tracks'] as List<dynamic>? ?? const [])
           TracklistEntry.fromJson(t as Map<String, dynamic>),
+      ];
+    } on TunesFetchException {
+      return null;
+    }
+  }
+
+  /// What Genius knows about a song (tunesd about.ts), with its album's
+  /// write-up. Null when the box cannot say; the page simply leaves those
+  /// sections out.
+  Future<({SongAbout? song, AlbumAbout? album})?> aboutSong(String sha) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/about/song?sha=$sha',
+        timeout: const Duration(seconds: 15),
+      );
+      final s = j['song'] as Map<String, dynamic>?;
+      final a = j['album'] as Map<String, dynamic>?;
+      return (
+        song: s == null ? null : SongAbout.fromJson(s),
+        album: a == null ? null : AlbumAbout.fromJson(a),
+      );
+    } on TunesFetchException {
+      return null;
+    }
+  }
+
+  Future<AlbumAbout?> aboutAlbum(String releaseId) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/about/album?release=${Uri.encodeQueryComponent(releaseId)}',
+        timeout: const Duration(seconds: 15),
+      );
+      final a = j['album'] as Map<String, dynamic>?;
+      return a == null ? null : AlbumAbout.fromJson(a);
+    } on TunesFetchException {
+      return null;
+    }
+  }
+
+  Future<({ArtistAbout? artist, List<Collaborator> people})?> aboutArtist(
+    String name,
+  ) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/about/artist?name=${Uri.encodeQueryComponent(name)}',
+        timeout: const Duration(seconds: 20),
+      );
+      final a = j['artist'] as Map<String, dynamic>?;
+      return (
+        artist: a == null ? null : ArtistAbout.fromJson(a),
+        people: [
+          for (final p in (j['people'] as List<dynamic>? ?? const []))
+            Collaborator.fromJson(p as Map<String, dynamic>),
+        ],
+      );
+    } on TunesFetchException {
+      return null;
+    }
+  }
+
+  /// The songs a person made that the library holds, and how.
+  Future<List<Work>?> aboutPerson(String name) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/about/person?name=${Uri.encodeQueryComponent(name)}',
+        timeout: const Duration(seconds: 15),
+      );
+      return [
+        for (final w in (j['work'] as List<dynamic>? ?? const []))
+          Work.fromJson(w as Map<String, dynamic>),
       ];
     } on TunesFetchException {
       return null;
