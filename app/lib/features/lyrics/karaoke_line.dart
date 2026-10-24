@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import '../../core/lyrics/adlib_kinds.dart';
 import '../../core/lyrics/adlib_motion.dart';
 import '../../core/lyrics/adlibs.dart';
+import '../../core/lyrics/word_fx.dart';
+import '../../core/lyrics/word_fx_motion.dart';
 import 'adlib_style.dart';
+import 'word_fx_view.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/word_motion.dart';
 import '../../core/theme/tokens.dart';
@@ -32,7 +35,12 @@ class KaraokeLine extends StatelessWidget {
     this.textAlign = TextAlign.start,
     this.wrapAlignment = WrapAlignment.start,
     this.onWordTap,
+    this.fxSeed,
   });
+
+  /// Turns on the picture-word effects (word_fx.dart) for this line, seeded
+  /// so the same line always picks the same effect. Null: no effects.
+  final int? fxSeed;
 
   /// Tapping a word jumps to it: the time the word starts, to the
   /// millisecond. Null leaves the line to its own tap (jump to the line).
@@ -104,9 +112,32 @@ class KaraokeLine extends StatelessWidget {
       valueListenable: playhead,
       builder: (context, position, _) {
         final style = base.copyWith(fontWeight: FontWeight.w600);
+        final fx = _lineFx(line);
         return _rows(line, (i, kind, last) {
           final start = line.words[i].start;
           final end = lrc.wordEndOf(lineIndex, i, trackEnd: trackEnd);
+          if (fx != null && i == fx.index) {
+            return _tappable(
+              i,
+              WordFxBox(
+                look: wordFxLook(
+                  fx.fx,
+                  start: start,
+                  end: end,
+                  position: position,
+                ),
+                child: _Word(
+                  text: last ? line.words[i].text : '${line.words[i].text} ',
+                  style: style,
+                  motion: wordMotion(
+                    start: start,
+                    end: end,
+                    position: position,
+                  ),
+                ),
+              ),
+            );
+          }
           return _tappable(
             i,
             _fx(
@@ -134,6 +165,22 @@ class KaraokeLine extends StatelessWidget {
 }
 
 extension on KaraokeLine {
+  /// The one picture word on this line among its main words (ad-libs have
+  /// their own looks), by its index in the line's words.
+  ({int index, WordFx fx})? _lineFx(LrcLine line) {
+    final seed = this.fxSeed;
+    if (seed == null) return null;
+    final tokens = [for (final w in line.words) w.text];
+    if (wholeLineAdlib(tokens) != null) return null;
+    final mask = adlibMask(tokens);
+    final main = [
+      for (var i = 0; i < tokens.length; i++)
+        if (!mask[i]) i,
+    ];
+    final hit = lineWordFx([for (final i in main) tokens[i]], seed);
+    return hit == null ? null : (index: main[hit.index], fx: hit.fx);
+  }
+
   /// The main words on one row and the ad-libs, smaller, on a row of their
   /// own beneath (see adlibs.dart). A line with no ad-libs is one row.
   ///

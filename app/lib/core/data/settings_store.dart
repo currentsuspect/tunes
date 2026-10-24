@@ -38,6 +38,7 @@ class SettingsStore extends ChangeNotifier {
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _lyricSize = 'lyrics.size';
   static const _showLyrics = 'lyrics.show';
+  static const _wordEffects = 'lyrics.wordEffects';
   static const _radioReach = 'radio.reach';
   static const _radioMode = 'radio.mode';
   static const _eqActive = 'eq.active';
@@ -317,6 +318,10 @@ class SettingsStore extends ChangeNotifier {
   /// menu item away when off, and a song with none never shows an empty space.
   bool get showLyrics => _bool(_showLyrics, fallback: true);
   Future<void> setShowLyrics(bool v) => _put(_showLyrics, '$v');
+
+  /// Picture words (ice, smoke, money, high) moving as they are sung.
+  bool get wordEffects => _bool(_wordEffects, fallback: true);
+  Future<void> setWordEffects(bool v) => _put(_wordEffects, '$v');
 
   Future<void> setLyricSize(int v) => _put(_lyricSize, '${v.clamp(0, 2)}');
 

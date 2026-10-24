@@ -517,6 +517,15 @@ class _SettingsPageState extends State<SettingsPage> {
                           value: s.showLyrics,
                           onChanged: s.setShowLyrics,
                         ),
+                        _SwitchTile(
+                          title: 'Words that move',
+                          detail:
+                              'Picture words come alive as they are sung: '
+                              'ice frosts over, smoke drifts, money flashes '
+                              'green, high floats up. One word a line.',
+                          value: s.wordEffects,
+                          onChanged: s.setWordEffects,
+                        ),
                         _ChoiceTile(
                           title: 'Text size',
                           choices: ['Small', 'Medium', 'Large'],
