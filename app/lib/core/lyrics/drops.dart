@@ -129,6 +129,105 @@ const _reveal = Duration(milliseconds: 180);
 const _stagger = Duration(milliseconds: 50);
 const _ramp = Duration(milliseconds: 400);
 
+/// Words too slight to carry a moment.
+const _filler = {
+  'the',
+  'and',
+  'with',
+  'you',
+  'your',
+  'for',
+  'that',
+  'this',
+  'but',
+  'are',
+  'was',
+  'from',
+  'they',
+  'them',
+  'she',
+  'her',
+  'his',
+  'him',
+  'its',
+  "it's",
+  'not',
+  'all',
+  'just',
+  'got',
+  'get',
+  'can',
+  'yeah',
+  'like',
+  'when',
+  'what',
+  'then',
+  'than',
+  'have',
+  'into',
+  'on',
+  'off',
+  "you're",
+  "i'm",
+  "don't",
+  "can't",
+  "won't",
+  "that's",
+  "we're",
+  "they're",
+  "i've",
+  "i'll",
+};
+
+/// The word of the lyric a drop with no ad-lib grows: the first of a line
+/// that lands on the 808 (it starts within 0.4 s of the hit), else the last
+/// sung before it. Short words ("a", "the", "I") give way to the next real
+/// one; brackets and punctuation come off. [start] is the break's start.
+({int line, Duration at, String text, AdlibKind kind})? lineWord(
+  List<LrcLine> lines,
+  Duration start,
+  Duration hit,
+) {
+  const near = Duration(milliseconds: 400);
+  int? at;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].timestamp <= hit + near) at = i;
+  }
+  if (at == null) return null;
+  final l = lines[at];
+  final lands = (l.timestamp - hit).abs() <= near;
+  final tokens = l.text
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty)
+      .toList();
+  final mask = adlibMask(tokens);
+  final main = [
+    for (var i = 0; i < tokens.length; i++)
+      if (!mask[i] && !isPlaceholder(tokens[i])) i,
+  ];
+  if (main.isEmpty) return null;
+  String clean(String w) => w.replaceAll(
+    RegExp(r'^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$', unicode: true),
+    '',
+  );
+  final order = lands ? main : main.reversed.toList();
+  final pick = order.firstWhere((i) {
+    final w = clean(tokens[i]);
+    final key = w.toLowerCase().replaceAll('’', "'");
+    return w.runes.length >= 3 && !_filler.contains(key);
+  }, orElse: () => order.first);
+  final text = clean(tokens[pick]);
+  if (text.isEmpty) return null;
+  // When it is heard: its own time when the line is word-timed; else on the
+  // hit for a line landing there, or just before the hit for the last word.
+  final timed = l.words.length == tokens.length ? l.words[pick].start : null;
+  var from =
+      timed ?? (lands ? hit - _bloom : hit - const Duration(milliseconds: 600));
+  if (from < start) from = start;
+  if (from > hit) from = hit - _bloom;
+  return (line: at, at: from, text: text, kind: AdlibKind.plain);
+}
+
 /// The moments in a song, from its [lines] (as shown) and [beats].
 /// [shiftOf] moves an ad-lib by a Lyric Center fix (line, first word).
 List<DropMoment> resolveMoments(
@@ -230,14 +329,12 @@ List<DropMoment> resolveMoments(
     if (inside.isNotEmpty) {
       out.add(grow(inside.last, inside.last.at, hit));
     } else if (impactAt.contains(hit)) {
-      out.add(
-        DropMoment(
-          kind: DropKind.impact,
-          from: hit,
-          hit: hit,
-          to: hit + const Duration(milliseconds: 1400),
-        ),
-      );
+      // No ad-lib to give the moment to: a word of the lyric takes it, not
+      // a blank sheet (owner, 24 Oct: the impact's dissolve-to-nothing read
+      // as the lyrics vanishing).
+      if (lineWord(lines, start, hit) case final w?) {
+        out.add(grow(w, w.at, hit));
+      }
     }
   }
   // A drop on its own: an ad-lib right on it blooms and shrinks back.
