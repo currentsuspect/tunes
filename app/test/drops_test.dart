@@ -94,6 +94,30 @@ void main() {
     expect(beat.first.steps, [ms(1360), ms(1700), ms(2000)]);
   });
 
+  test('a section label left in a line never grows', () {
+    final lines = LrcParser.parse(
+      '[00:10.00] (Chorus: Fimiguerrero)\n[00:14.00] words (Segue)\n'
+      '[00:18.00] more',
+    ).lines;
+    final m = resolveMoments(lines, BeatMap(drops: [ms(10100), ms(17800)]));
+    expect(m.where((m) => m.kind == DropKind.grow), isEmpty);
+  });
+
+  test('impacts only where breaks are rare: the three longest, or none', () {
+    final lines = LrcParser.parse('[00:01.00] one').lines;
+    List<(Duration, Duration)> breaks(int n) => [
+      for (var i = 0; i < n; i++)
+        (ms(10000 * (i + 1)), ms(10000 * (i + 1) + 2000 + i * 100)),
+    ];
+    int impacts(int n) => resolveMoments(
+      lines,
+      BeatMap(breaks: breaks(n)),
+    ).where((m) => m.kind == DropKind.impact).length;
+    expect(impacts(2), 2);
+    expect(impacts(5), 3);
+    expect(impacts(16), 0);
+  });
+
   test('a drop with no ad-lib on it is left alone', () {
     expect(moments.any((m) => m.hit == ms(74700)), isFalse);
   });

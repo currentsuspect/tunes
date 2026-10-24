@@ -108,6 +108,13 @@ class DropMoment {
 
 const _bloom = Duration(milliseconds: 250);
 
+/// A section label, not a sung ad-lib.
+final _label = RegExp(
+  r'^(verse|chorus|pre-chorus|post-chorus|hook|intro|outro|bridge|segue|'
+  r'refrain|interlude|skit|instrumental|break)\b',
+  caseSensitive: false,
+);
+
 /// How long a grow takes to peak, unless the 808 lands a little later.
 const _grow = Duration(milliseconds: 400);
 
@@ -158,7 +165,9 @@ List<DropMoment> resolveMoments(
           .replaceAll(RegExp(r'[()\[\]]'), '')
           .replaceAll(RegExp(r'[,.;:!?]+$'), '')
           .trim();
-      if (text.isEmpty) continue;
+      // A section label left in a line ("[Chorus: Fimiguerrero]",
+      // "(Segue)") is not sung: nothing to grow.
+      if (text.isEmpty || _label.hasMatch(text)) continue;
       adlibs.add((
         line: i,
         at: timed + (shiftOf?.call(i, g.words.first) ?? Duration.zero),
@@ -202,6 +211,16 @@ List<DropMoment> resolveMoments(
 
   final out = <DropMoment>[];
   final used = <Duration>{};
+  // Impacts only where breaks are rare enough to land: a beat that drops
+  // the 808 every few bars (JID's "Hereditary" has 16) gets none, and
+  // otherwise the three longest breaks.
+  final impactAt = beats.breaks.length > 6
+      ? <Duration>{}
+      : ((List.of(beats.breaks)
+                  ..sort((x, y) => (y.$2 - y.$1).compareTo(x.$2 - x.$1)))
+                .take(3)
+                .map((b) => b.$2))
+            .toSet();
   // A break: the last ad-lib sung while the 808 is out grows from there.
   for (final (start, hit) in beats.breaks) {
     used.add(hit);
@@ -210,7 +229,7 @@ List<DropMoment> resolveMoments(
     );
     if (inside.isNotEmpty) {
       out.add(grow(inside.last, inside.last.at, hit));
-    } else {
+    } else if (impactAt.contains(hit)) {
       out.add(
         DropMoment(
           kind: DropKind.impact,
