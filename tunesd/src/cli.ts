@@ -1702,6 +1702,13 @@ async function main(): Promise<void> {
       process.on("SIGINT", () => shutdown("SIGINT"));
       process.on("SIGTERM", () => shutdown("SIGTERM"));
       log.info({ event: "TUNESD_START", channels: channels.map((c) => c.id) });
+      // A promise that fails with nobody waiting on it (a fire-and-forget
+      // pass, a timer) would end the process under Node's default: everyone's
+      // queued gets and every in-memory watermark with it, for an error that
+      // concerned one background task. Said loudly, and the daemon carries on.
+      process.on("unhandledRejection", (reason) => {
+        log.error({ event: "UNHANDLED_REJECTION", err: String(reason).slice(0, 300) });
+      });
 
       // App updates. Null without a token, and the server simply reports "no
       // update" — a daemon that only serves music is unaffected.

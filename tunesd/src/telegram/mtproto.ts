@@ -58,7 +58,13 @@ export function mapMtprotoError(e: unknown): Error {
   if (/AUTH_BYTES_INVALID|provided authorization is invalid/i.test(msg)) {
     return new RetryableError(msg, 60_000);
   }
-  return new PermanentError(msg);
+  // Anything else unknown waits a minute and is tried again. Fatal used to
+  // be the default, and every crash in three weeks (7 by 24 Oct) was an
+  // error that turned out to be passing; systemd brought the daemon back in
+  // seconds anyway, minus everything it held in memory. The errors that
+  // really mean stop (the session revoked, a channel gone) are named above
+  // and still stop it. The minute is the pacing: never a hot retry.
+  return new RetryableError(`unrecognised: ${msg}`, 60_000);
 }
 
 interface MtprotoCfg {

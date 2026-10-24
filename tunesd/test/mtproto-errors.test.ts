@@ -17,4 +17,10 @@ describe("mapMtprotoError", () => {
   it.each(["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "USER_DEACTIVATED"])("stops on %s", (msg) => {
     expect(mapMtprotoError(new Error(msg))).toBeInstanceOf(PermanentError);
   });
+
+  it("waits on an error it has never seen rather than stopping", () => {
+    const e = mapMtprotoError(new Error("SOMETHING_NEW_FROM_TELEGRAM"));
+    expect(e).toBeInstanceOf(RetryableError);
+    expect((e as RetryableError).retryAfterMs).toBe(60_000);
+  });
 });
