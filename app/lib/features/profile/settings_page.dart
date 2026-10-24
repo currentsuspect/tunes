@@ -457,9 +457,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       ],
                     ),
 
-                    // Notes in the shade are Android's; the desktop app has
-                    // no shade to put them in.
-                    if (Platform.isAndroid)
+                    // The phone's shade, or the computer's notifications
+                    // (Linux, notify-send).
+                    if (Platform.isAndroid || Platform.isLinux)
                       _Group(
                         title: 'Tell me when',
                         children: [
