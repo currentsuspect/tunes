@@ -1343,11 +1343,33 @@ async function main(): Promise<void> {
       );
     };
 
-    // In-memory publish watermarks: rows newer than rowsSince, manifest when
-    // its integrity moves. A restart re-sends the full set once, which is
-    // hundreds of writes rarely -- against hundreds every five minutes
-    // before, which tripped D1's free write cap.
+    // Publish watermarks: rows newer than rowsSince, manifest when its
+    // integrity moves. rowsSince is kept on disk: kept in memory, every
+    // restart re-sent all ~2,600 rows, and a day of restarts and retries went
+    // over D1's free write cap (24 Oct). Once a week the full set goes
+    // anyway, so a row the edge lost comes back; rows it has cost nothing
+    // (the edge ignores them).
+    const watermarkFile = join(env.dataDir, "publish-watermark.json");
+    const FULL_EVERY_MS = 7 * 24 * 3600_000;
     let rowsSince: string | null = null;
+    let fullSentAt = 0;
+    try {
+      const saved = JSON.parse(await readFile(watermarkFile, "utf8")) as { rowsSince?: string; fullSentAt?: number };
+      if (typeof saved.fullSentAt === "number" && Date.now() - saved.fullSentAt < FULL_EVERY_MS) {
+        rowsSince = typeof saved.rowsSince === "string" ? saved.rowsSince : null;
+        fullSentAt = saved.fullSentAt;
+      }
+    } catch {
+      // None yet, or unreadable: send the full set once.
+    }
+    const saveWatermark = async () => {
+      try {
+        await writeFile(`${watermarkFile}.tmp`, JSON.stringify({ rowsSince, fullSentAt }));
+        await rename(`${watermarkFile}.tmp`, watermarkFile);
+      } catch (e) {
+        log.warn({ event: "WATERMARK_SAVE_FAILED", err: String(e).slice(0, 160) });
+      }
+    };
     let lastIntegrity: string | null = null;
 
     const channelIds = channels.map((c) => String(c.id));
@@ -1356,6 +1378,7 @@ async function main(): Promise<void> {
       try {
         const manifest = await manifestBuilder();
         const integrity = (manifest as { integrity?: unknown }).integrity ?? null;
+        if (rowsSince !== null && Date.now() - fullSentAt >= FULL_EVERY_MS) rowsSince = null;
         const { rows, watermark } = selectNewRows(state.sightingsFor(channelIds), rowsSince);
         const manifestChanged = typeof integrity === "string" && integrity !== lastIntegrity;
         if (rows.length === 0 && !manifestChanged) return;
@@ -1367,7 +1390,11 @@ async function main(): Promise<void> {
           log,
         });
         if (done !== null) {
+          const wasFull = rowsSince === null;
+          const moved = watermark !== rowsSince;
           rowsSince = watermark;
+          if (wasFull) fullSentAt = Date.now();
+          if (moved || wasFull) await saveWatermark();
           if (manifestChanged && typeof integrity === "string") lastIntegrity = integrity;
         }
       } catch (e) {
