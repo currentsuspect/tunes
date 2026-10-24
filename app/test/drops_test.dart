@@ -112,7 +112,7 @@ void main() {
     int impacts(int n) => resolveMoments(
       lines,
       BeatMap(breaks: breaks(n)),
-    ).where((m) => m.kind == DropKind.impact).length;
+    ).where((m) => m.kind == DropKind.grow).length;
     expect(impacts(2), 2);
     expect(impacts(5), 3);
     expect(impacts(16), 0);
@@ -128,17 +128,40 @@ void main() {
     expect(dropFrame(moments, ms(155500)).dim, greaterThan(0.8));
   });
 
-  test('a break with no ad-lib in it is an impact', () {
-    final lines = LrcParser.parse('[00:10.00] one\n[00:14.00] two').lines;
+  test('a break with no ad-lib grows a word of the lyric, never a blank', () {
+    // A line landing on the 808: its first word takes the moment.
+    final lands = LrcParser.parse('[00:10.00] one\n[00:14.00] Money talks')
+        .lines;
     final m = resolveMoments(
-      lines,
+      lands,
       BeatMap(breaks: [(ms(9000), ms(14000))], drops: [ms(14000)]),
     );
-    expect(m.single.kind, DropKind.impact);
-    expect(dropFrame(m, ms(14150)).dim, 1);
-    final f = dropFrame(m, ms(14150));
-    expect(f.dimFor(0, ms(14200 + 300)), 0);
-    expect(f.dimFor(2, ms(14200 + 100)), greaterThan(0.5));
+    expect(m.single.kind, DropKind.grow);
+    expect(m.single.text, 'Money');
+    // The sheet is never wiped: lines stay faintly there under the word.
+    for (var t = m.single.from; t < m.single.to; t += ms(50)) {
+      expect(dropFrame(m, t).dim, lessThan(1), reason: '$t');
+    }
+    // Else the last real word sung before it, short and filler words passed.
+    final before = LrcParser.parse(
+      "[01:05.16] Bitch, don't get hit with the b-\n[01:09.00] next",
+    ).lines;
+    final w = resolveMoments(
+      before,
+      BeatMap(breaks: [(ms(63080), ms(67660))], drops: [ms(67660)]),
+    );
+    expect(w.single.text, 'hit');
+    // A curly apostrophe is still a contraction.
+    final curly = LrcParser.parse(
+      '[00:10.00] you’re irreplaceable\n[00:14.00] next',
+    ).lines;
+    expect(
+      resolveMoments(
+        curly,
+        BeatMap(breaks: [(ms(11000), ms(13000))], drops: [ms(13000)]),
+      ).single.text,
+      'irreplaceable',
+    );
   });
 
   test('a Lyric Center fix moves the ad-lib', () {
