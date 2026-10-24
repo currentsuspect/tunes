@@ -70,6 +70,9 @@ enum GetState {
   done,
   failed,
   notFound,
+
+  /// Taken out of the line on purpose; not a failure.
+  cancelled,
 }
 
 /// A get under way or finished, as the box reports it.
@@ -109,7 +112,8 @@ class GetJob {
   bool get finished =>
       state == GetState.done ||
       state == GetState.failed ||
-      state == GetState.notFound;
+      state == GetState.notFound ||
+      state == GetState.cancelled;
 
   /// Same song, whichever job asked for it.
   String get songKey => keyOf(artist, title);

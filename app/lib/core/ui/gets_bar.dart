@@ -157,6 +157,7 @@ String stateLabel(GetJob j) => switch (j.state) {
   GetState.done => 'in your library',
   GetState.failed => "didn't work",
   GetState.notFound => 'nobody has it',
+  GetState.cancelled => 'cancelled',
 };
 
 /// The day's gets on the box, everyone's, newest first, kept fresh while

@@ -260,7 +260,15 @@ export function queryVariants(q: string): string[] {
   return [...new Set(out)].filter((v) => v.length >= 4).slice(0, 4);
 }
 
-export type JobState = "queued" | "searching" | "downloading" | "checking" | "done" | "failed" | "notFound";
+export type JobState =
+  | "queued"
+  | "searching"
+  | "downloading"
+  | "checking"
+  | "done"
+  | "failed"
+  | "notFound"
+  | "cancelled";
 
 export interface GetJob {
   id: string;
@@ -478,7 +486,9 @@ export class Getter {
   cancel(id: string): boolean {
     const j = this.jobs.find((x) => x.id === id);
     if (!j || j.state !== "queued") return false;
-    j.state = "failed";
+    // Its own state: saved as "failed", a line cleared on purpose read as 21
+    // failures (24 Oct). An older app reads an unknown state as failed.
+    j.state = "cancelled";
     this.requests.delete(id);
     this.persist();
     return true;
@@ -490,7 +500,7 @@ export class Getter {
       (j) =>
         norm(j.artist) === norm(req.artist) &&
         norm(j.title) === norm(req.title) &&
-        !["failed", "notFound"].includes(j.state),
+        !["failed", "notFound", "cancelled"].includes(j.state),
     );
     if (same) return same;
     const job: GetJob = {
