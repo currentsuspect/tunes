@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'core/platform/mpris.dart';
 import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
 import 'core/audio/stream_relay.dart';
@@ -832,6 +833,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// the screens show, which can be another device's music.
   TunePlayer get _local => widget.localPlayer ?? widget.player;
 
+  MprisBridge? _mpris;
+
   /// Navigation history and the one-instance-per-identity pane registry.
   /// Panels are destinations rendered by this shell, not pushed routes:
   /// history may name an identity any number of times, the registry holds
@@ -980,6 +983,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _local.addListener(_trackRecents);
     _local.addListener(_feedRadio);
     widget.player.onQueueEnded = _pickRadio;
+    // The desktop's media keys, bar and headphones (Linux only): what the
+    // play bar shows, including a song playing on another device.
+    _mpris = MprisBridge.start(
+      widget.player,
+      artPathFor: (sha) {
+        final saved = widget.artStore.pathFor(sha);
+        return saved != null && File(saved).existsSync() ? saved : null;
+      },
+    );
     // Recents used to live only in memory, so closing the app forgot what you
     // had been listening to. They come from the recorded history now.
     widget.history.addListener(_onHistoryChanged);
@@ -1027,6 +1039,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _local.removeListener(_trackRecents);
     _refreshTimer?.cancel();
     _local.removeListener(_feedRadio);
+    _mpris?.stop();
     widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
     _nav.removeListener(_onNavChanged);
