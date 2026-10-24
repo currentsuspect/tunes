@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNumberFromTag, newestRelease } from "../src/updates.js";
+import { APK, buildNumberFromTag, LINUX, newestRelease } from "../src/updates.js";
 
 /**
  * Choosing which release to offer.
@@ -114,5 +114,34 @@ describe("newestRelease", () => {
     // to take the music server down with it.
     expect(newestRelease(null)).toBeNull();
     expect(newestRelease({ nope: true })).toBeNull();
+  });
+});
+
+describe("the computer's update (Linux bundle)", () => {
+  const linux = (size = 2000) => ({
+    name: "tunes-linux-x64.tar.gz",
+    url: "https://api.github.com/asset/2",
+    size,
+  });
+
+  it("is the tarball of the newest release that has one", () => {
+    // build-9's Linux build failed: it is still the phone's update, and the
+    // computer stays on build-8's bundle rather than being offered nothing.
+    const releases = [
+      { tag_name: "build-9", assets: [apk()] },
+      { tag_name: "build-8", assets: [apk(), linux(5)] },
+    ];
+    expect(newestRelease(releases, LINUX)?.info).toMatchObject({ build: 8, size: 5 });
+    expect(newestRelease(releases, APK)?.info.build).toBe(9);
+  });
+
+  it("never takes the APK for the computer, or the tarball for the phone", () => {
+    expect(newestRelease([{ tag_name: "build-3", assets: [apk()] }], LINUX)).toBeNull();
+    expect(newestRelease([{ tag_name: "build-3", assets: [linux()] }])).toBeNull();
+  });
+
+  it("is cached under its own name", () => {
+    expect(LINUX.file(3030)).toBe("tunes-linux-3030.tar.gz");
+    expect(APK.file(3030)).toBe("tunes-3030.apk");
   });
 });

@@ -39,7 +39,7 @@ import { coalesce, playableOnly, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { ClipMaker } from "./clip.js";
 import { analyzeBeats, BeatStore } from "./beats.js";
-import { UpdateFeed } from "./updates.js";
+import { LINUX, UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
 import { MtprotoClient } from "./telegram/mtproto.js";
@@ -1753,13 +1753,25 @@ async function main(): Promise<void> {
             log,
           )
         : null;
+      // The computer's build, from the same releases (updates.ts LINUX).
+      const linuxUpdates = env.updateToken
+        ? new UpdateFeed(
+            env.updateRepo,
+            env.updateToken,
+            join(env.dataDir, "updates"),
+            log,
+            fetch,
+            LINUX,
+          )
+        : null;
       if (updates) {
         // Not awaited: the library must not wait on GitHub to start serving.
         void updates.poll();
-        const updateTimer = setInterval(
-          () => void updates.poll(),
-          env.updatePollMs,
-        );
+        void linuxUpdates?.poll();
+        const updateTimer = setInterval(() => {
+          void updates.poll();
+          void linuxUpdates?.poll();
+        }, env.updatePollMs);
         // Otherwise the interval keeps the process alive through a shutdown
         // that has already finished everything else.
         updateTimer.unref();
@@ -1844,7 +1856,8 @@ async function main(): Promise<void> {
         // A listener's lyrics go to the edge soon, not at the next scan.
         () => publishSoon.request(),
         getter,
-        new ClipMaker(join(env.dataDir, "tmp-clips"))
+        new ClipMaker(join(env.dataDir, "tmp-clips")),
+        linuxUpdates
       );
       await server.start();
       // Lyrics are asked for on their own beat as well as after each scan: a

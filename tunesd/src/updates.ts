@@ -33,6 +33,32 @@ export interface UpdateInfo {
   publishedAt: string | null;
 }
 
+/**
+ * Which file of a release an update is: the phone's APK, or the computer's
+ * Linux bundle (a tarball CI attaches to the same release, 24 Oct). Each is
+ * its own feed, so a release whose Linux build failed is still the phone's
+ * update and the computer simply stays on the one before.
+ */
+export interface UpdateKind {
+  /** For logs. */
+  name: string;
+  matches: (assetName: string) => boolean;
+  /** The cached file's name for a build. */
+  file: (build: number) => string;
+}
+
+export const APK: UpdateKind = {
+  name: "apk",
+  matches: (n) => n.endsWith(".apk"),
+  file: (b) => `tunes-${b}.apk`,
+};
+
+export const LINUX: UpdateKind = {
+  name: "linux",
+  matches: (n) => n === "tunes-linux-x64.tar.gz",
+  file: (b) => `tunes-linux-${b}.tar.gz`,
+};
+
 /** Parsed from a `build-<n>` tag. Null for anything else, so hand-made tags are ignored rather than crashing the poll. */
 export function buildNumberFromTag(tag: string): number | null {
   const m = /^build-(\d+)$/.exec(tag.trim());
@@ -51,6 +77,7 @@ export function buildNumberFromTag(tag: string): number | null {
  */
 export function newestRelease(
   releases: unknown,
+  kind: UpdateKind = APK,
 ): { info: UpdateInfo; assetUrl: string } | null {
   if (!Array.isArray(releases)) return null;
   let best: { info: UpdateInfo; assetUrl: string } | null = null;
@@ -63,7 +90,7 @@ export function newestRelease(
     const assets = Array.isArray(r["assets"]) ? r["assets"] : [];
     const apk = assets.find((a) => {
       const asset = a as Record<string, unknown>;
-      return typeof asset["name"] === "string" && asset["name"].endsWith(".apk");
+      return typeof asset["name"] === "string" && kind.matches(asset["name"]);
     }) as Record<string, unknown> | undefined;
     if (!apk) continue;
     const url = typeof apk["url"] === "string" ? apk["url"] : null;
@@ -96,6 +123,7 @@ export class UpdateFeed {
     private readonly cacheDir: string,
     private readonly log: Log,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly kind: UpdateKind = APK,
   ) {}
 
   /** What to tell a phone, or null when there is nothing cached yet. */
@@ -103,7 +131,8 @@ export class UpdateFeed {
     return this.current;
   }
 
-  /** The cached APK, or null when it has not been downloaded. */
+  /** The cached file (APK or Linux bundle), or null when it has not been
+   * downloaded. */
   apk(): string | null {
     return this.apkPath;
   }
@@ -135,16 +164,16 @@ export class UpdateFeed {
         this.log.warn({ event: "UPDATE_POLL_HTTP", status: res.status });
         return;
       }
-      const found = newestRelease(await res.json());
+      const found = newestRelease(await res.json(), this.kind);
       if (!found) return;
       if (this.current && found.info.build <= this.current.build) return;
 
-      const path = join(this.cacheDir, `tunes-${found.info.build}.apk`);
+      const path = join(this.cacheDir, this.kind.file(found.info.build));
       await this.download(found.assetUrl, path);
       const previous = this.apkPath;
       this.current = found.info;
       this.apkPath = path;
-      this.log.info({ event: "UPDATE_READY", build: found.info.build });
+      this.log.info({ event: "UPDATE_READY", kind: this.kind.name, build: found.info.build });
       // Only after the new one is in place, so a failed download never leaves
       // the daemon advertising an update it cannot serve.
       if (previous && previous !== path) {

@@ -326,7 +326,14 @@ class TunesClient {
   Future<AvailableUpdate?> fetchUpdate() async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
-      final req = await client.getUrl(Uri.parse('$baseUrl/update'));
+      // A computer asks about its own build (the Linux bundle).
+      final req = await client.getUrl(
+        Uri.parse(
+          Platform.isLinux
+              ? '$baseUrl/update?platform=linux'
+              : '$baseUrl/update',
+        ),
+      );
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) return null;
       final body = await res.transform(utf8.decoder).join();
@@ -345,7 +352,8 @@ class TunesClient {
   /// survivable now the APK is ~28 MB rather than ~104 MB, and it is what makes
   /// a failed update harmless -- there is no partial file to resume from and no
   /// way to splice two builds together.
-  String get updateApkUrl => '$baseUrl/update/apk';
+  String get updateApkUrl =>
+      Platform.isLinux ? '$baseUrl/update/linux' : '$baseUrl/update/apk';
 
   /// POSTs JSON to an auth endpoint and returns the status alongside the
   /// decoded body.

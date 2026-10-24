@@ -30,6 +30,7 @@ void main() {
     buildNumber: '2410',
     installer: i ?? _Installer(),
     supported: true,
+    computer: false,
   );
 
   test('"not now" hides the note on Home, but the update stays', () async {
@@ -82,5 +83,31 @@ void main() {
     await u.check();
     expect(u.available, isNull);
     expect(u.checkedAt, isNull);
+  });
+
+  test('a computer is offered its build with nothing to allow first', () async {
+    final u = UpdateController(
+      client: _Box(3031),
+      buildNumber: '3030',
+      installer: _Installer(),
+      supported: true,
+      computer: true,
+    );
+    await u.check();
+    expect(u.available?.build, 3031);
+    expect(u.needsPermission, isFalse);
+  });
+
+  test('a copy that cannot replace itself is offered nothing', () async {
+    // Run from a build folder, or one it cannot write beside.
+    final u = UpdateController(
+      client: _Box(3031),
+      buildNumber: '3030',
+      installer: _Installer()..allowed = false,
+      supported: true,
+      computer: true,
+    );
+    await u.check();
+    expect(u.available, isNull);
   });
 }

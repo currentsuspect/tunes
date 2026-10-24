@@ -219,21 +219,42 @@ jobs:
         run: dart run build_runner build --delete-conflicting-outputs
         working-directory: app
 
-      # Release bundle for the box. No install flow: the daemon serves the
-      # phone APK via /update/apk, and shipping a Linux tarball there is a
-      # product decision, not a CI default — artifact only.
+      # The computer's build. Numbered like the APK, so the box's /update
+      # ?platform=linux and the app compare the same way; a tarball because
+      # artifacts are zips, which drop the executable bit.
       - name: Release Linux bundle builds
         working-directory: app
         run: |
           flutter build linux --release \
-            --dart-define=TUNESD_URL=http://192.168.100.6:4780 \
+            --dart-define=TUNESD_URL=https://tunes.aestra.studio \
             --dart-define=GIT_COMMIT=${{ github.sha }} \
-            --dart-define=BUILD_NUMBER=${{ github.run_number }} \
+            --dart-define=BUILD_NUMBER=$((${{ github.run_number }} + 3000)) \
             --dart-define=CHANNEL=dev
+          tar -C build/linux/x64/release -czf tunes-linux-x64.tar.gz bundle
 
       - name: Upload Linux bundle
         uses: actions/upload-artifact@v4
         with:
           name: tunes-linux
-          path: app/build/linux/x64/release/bundle
+          path: app/tunes-linux-x64.tar.gz
           retention-days: 30
+
+  # Puts the computer's build on the release the app job made, where the box
+  # picks it up (tunesd updates.ts LINUX) and computers update from it.
+  publish-linux:
+    needs: [app, app-linux]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tunes-linux
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build=$((${{ github.run_number }} + 3000))
+          gh release upload "build-${build}" tunes-linux-x64.tar.gz \
+            --repo ${{ github.repository }} --clobber
