@@ -4,9 +4,10 @@
 /// lyric as [tunesbeat:drop=…;break=…;pulse=…;quiet=…] (ms). From that:
 ///
 ///   grow    an ad-lib on a drop, or sung while the 808 is out (a break),
-///           grows until it crowds every other line out; when the 808 lands
-///           it shrinks back in steps, one per hit, and the lines come back,
-///           the one being sung first.
+///           grows until it crowds every other line out, then shrinks back
+///           in steps (on the 808's hits when they fall in time) and the
+///           lines come back, the one being sung first. About a second, never
+///           more than 1.5: it is the word's moment, over once it is said.
 ///   impact  a break with no ad-lib: as the 808 returns the whole sheet
 ///           dissolves, the line being sung lands alone, the rest pop back.
 ///   hush    the music goes quiet, so the words do too.
@@ -100,11 +101,23 @@ class DropMoment {
   final String text;
   final AdlibKind adlib;
 
-  /// The 808 hits it shrinks back on, the first being [hit] (grow).
+  /// The steps it shrinks back on, the first being [hit]: the 808's hits
+  /// when they fall in time (grow).
   final List<Duration> steps;
 }
 
 const _bloom = Duration(milliseconds: 250);
+
+/// How long a grow takes to peak, unless the 808 lands a little later.
+const _grow = Duration(milliseconds: 400);
+
+/// The latest the 808 may land and still be the peak.
+const _peakBy = Duration(milliseconds: 800);
+
+/// When the word is back to its own size, from the moment's start; with
+/// the lines' return after it, a grow lasts at most ~1.4 s (owner, 24 Oct:
+/// "about 1 second, maximum 1.5").
+const _done = Duration(milliseconds: 1200);
 const _reveal = Duration(milliseconds: 180);
 const _stagger = Duration(milliseconds: 50);
 const _ramp = Duration(milliseconds: 400);
@@ -155,21 +168,36 @@ List<DropMoment> resolveMoments(
     }
   }
 
-  List<Duration> stepsFrom(Duration hit) {
-    final s = [
+  /// A grow starting at [from]: it peaks on [hit] if the 808 lands soon
+  /// enough, else after [_grow], and shrinks back in three steps by
+  /// from + [_done], on the 808's hits when two fall in that window.
+  DropMoment grow(
+    ({int line, Duration at, String text, AdlibKind kind}) a,
+    Duration from,
+    Duration hit,
+  ) {
+    final peak =
+        hit >= from + const Duration(milliseconds: 150) && hit <= from + _peakBy
+        ? hit
+        : from + _grow;
+    final end = from + _done;
+    final hits = [
       for (final p in beats.pulse)
-        if (p >= hit - const Duration(milliseconds: 80) &&
-            p <= hit + const Duration(seconds: 4))
-          p,
+        if (p > peak + const Duration(milliseconds: 150) && p <= end) p,
     ];
-    if (s.isEmpty || (s.first - hit).abs() > const Duration(milliseconds: 80)) {
-      s.insert(0, hit);
-    }
-    // At least three steps, so it reads as shrinking rather than snapping.
-    while (s.length < 3) {
-      s.add(s.last + const Duration(milliseconds: 500));
-    }
-    return s.take(4).toList();
+    final steps = hits.length >= 2
+        ? [peak, hits[0], hits[1]]
+        : [peak, peak + (end - peak) ~/ 2, end];
+    return DropMoment(
+      kind: DropKind.grow,
+      from: from,
+      hit: peak,
+      to: steps.last + _reveal,
+      line: a.line,
+      text: a.text,
+      adlib: a.kind,
+      steps: steps,
+    );
   }
 
   final out = <DropMoment>[];
@@ -181,20 +209,7 @@ List<DropMoment> resolveMoments(
       (a) => a.at >= start && a.at <= hit - const Duration(milliseconds: 150),
     );
     if (inside.isNotEmpty) {
-      final a = inside.last;
-      final steps = stepsFrom(hit);
-      out.add(
-        DropMoment(
-          kind: DropKind.grow,
-          from: a.at,
-          hit: hit,
-          to: steps.last + _reveal,
-          line: a.line,
-          text: a.text,
-          adlib: a.kind,
-          steps: steps,
-        ),
-      );
+      out.add(grow(inside.last, inside.last.at, hit));
     } else {
       out.add(
         DropMoment(
@@ -215,20 +230,7 @@ List<DropMoment> resolveMoments(
           a.at <= d + const Duration(milliseconds: 250),
     );
     if (near.isEmpty) continue;
-    final a = near.first;
-    final steps = stepsFrom(d);
-    out.add(
-      DropMoment(
-        kind: DropKind.grow,
-        from: d - _bloom,
-        hit: d,
-        to: steps.last + _reveal,
-        line: a.line,
-        text: a.text,
-        adlib: a.kind,
-        steps: steps,
-      ),
-    );
+    out.add(grow(near.first, d - _bloom, d));
   }
   for (final (a, b) in beats.quiet) {
     out.add(DropMoment(kind: DropKind.hush, from: a, hit: a, to: b));

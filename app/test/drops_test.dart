@@ -53,8 +53,9 @@ void main() {
       // Heard at the line's end, while the 808 is still out.
       expect(m.from, greaterThan(ms(65160)));
       expect(m.from, lessThan(ms(67660)));
-      // Shrinks back on the 808's hits after it returns.
-      expect(m.steps, [ms(67610), ms(68950), ms(71170)]);
+      // Peaks as the 808 returns, back to its size well before the next
+      // hit: the word's moment, not the 808's.
+      expect(m.steps, [ms(67660), ms(67895), ms(68130)]);
     },
   );
 
@@ -66,18 +67,31 @@ void main() {
     final full = dropFrame(moments, m.hit - ms(5));
     expect(full.grow, greaterThan(0.95));
     expect(full.dim, greaterThan(0.8));
-    // Each hit takes it down a step, with a squash as it lands.
-    final s1 = dropFrame(moments, ms(67610 + 300));
-    final s2 = dropFrame(moments, ms(68950 + 300));
+    // Each step takes it down a third, with a squash as it lands.
+    final s1 = dropFrame(moments, ms(67660 + 200));
+    final s2 = dropFrame(moments, ms(67895 + 200));
     expect(s1.grow, closeTo(2 / 3, 0.01));
     expect(s2.grow, closeTo(1 / 3, 0.01));
-    expect(dropFrame(moments, ms(68950 + 10)).punch, greaterThan(0.8));
+    expect(dropFrame(moments, ms(67895 + 10)).punch, greaterThan(0.8));
     // The line being sung is back before the ones around it.
     final back = dropFrame(moments, ms(67700));
     expect(back.dimFor(0, ms(67660 + 300)), 0);
     expect(back.dimFor(3, ms(67660 + 300)), greaterThan(0));
-    // And then it is over.
-    expect(dropFrame(moments, ms(71170 + 400)).isNone, isTrue);
+    // And then it is over: a second and a half at most.
+    expect(dropFrame(moments, m.from + ms(1500)).isNone, isTrue);
+  });
+
+  test('no grow lasts more than 1.5 s, whatever the 808 does', () {
+    for (final m in moments.where((m) => m.kind == DropKind.grow)) {
+      expect(m.to - m.from, lessThanOrEqualTo(ms(1500)), reason: m.text);
+      expect(m.to - m.from, greaterThanOrEqualTo(ms(900)), reason: m.text);
+    }
+    // Hits that fall in time are the steps.
+    final beat = resolveMoments(
+      lrc.lines,
+      BeatMap.parse('drop=1360;pulse=1360,1700,2000,2300'),
+    );
+    expect(beat.first.steps, [ms(1360), ms(1700), ms(2000)]);
   });
 
   test('a drop with no ad-lib on it is left alone', () {
@@ -110,8 +124,11 @@ void main() {
       shiftOf: (line, word) =>
           lrc.lines[line].text.contains("don't get hit") ? ms(-1000) : ms(0),
     );
-    final a = moments.firstWhere((m) => m.hit == ms(67660));
-    final b = moved.firstWhere((m) => m.hit == ms(67660));
+    bool ah(DropMoment m) => m.text == 'ah' && m.from > ms(63000);
+    final a = moments.firstWhere(ah);
+    final b = moved.firstWhere(ah);
     expect(b.from, a.from - ms(1000));
+    // Too early for the 808 to be its peak now, so it peaks on its own.
+    expect(b.hit, b.from + ms(400));
   });
 }
