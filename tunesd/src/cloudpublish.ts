@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import type { Log } from "./logger.js";
 
 export interface PublishRow {
@@ -74,16 +75,23 @@ export async function publishCloud(opts: {
         return null;
       }
     }
-    const res = await fetchFn(url.replace(/\/internal\/publish$/, "/internal/manifest"), {
-      method: "PUT",
-      headers: {
-        ...auth,
-        "content-type": "application/json; charset=utf-8",
-        "content-length": String(Buffer.byteLength(manifestText)),
-      },
-      body: manifestText,
-      signal: timeout(),
-    });
+    // Gzipped: 16 MB of JSON, mostly lyrics, is ~5 MB so, and it went up
+    // ~500 times a day (24 Oct). The edge keeps and serves it gzipped.
+    const manifestUrl = url.replace(/\/internal\/publish$/, "/internal/manifest");
+    const gz = gzipSync(manifestText, { level: 6 });
+    const put = (body: Uint8Array | string, gzipped: boolean) =>
+      fetchFn(manifestUrl, {
+        method: "PUT",
+        headers: {
+          ...auth,
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(typeof body === "string" ? Buffer.byteLength(body) : body.byteLength),
+          ...(gzipped ? { "x-tunes-encoding": "gzip" } : {}),
+        },
+        body: body as BodyInit,
+        signal: timeout(),
+      });
+    let res = await put(gz, true);
     if (res.status === 404) {
       // An edge from before the raw route: the old combined publish.
       return await combined(opts, manifestText);
@@ -92,7 +100,19 @@ export async function publishCloud(opts: {
       log.warn({ event: "PUBLISH_REJECTED", status: res.status, part: "manifest" });
       return null;
     }
-    log.info({ event: "PUBLISH_DONE", rows: rows.length, manifestBytes: manifestText.length });
+    // An edge from before gzip stored those bytes as JSON: send it plain at
+    // once, so no phone is handed gzip it was not told about.
+    const said = (await res.json().catch(() => ({}))) as { encoding?: string };
+    let sent = gz.byteLength;
+    if (said.encoding !== "gzip") {
+      res = await put(manifestText, false);
+      if (!res.ok) {
+        log.warn({ event: "PUBLISH_REJECTED", status: res.status, part: "manifest" });
+        return null;
+      }
+      sent = Buffer.byteLength(manifestText);
+    }
+    log.info({ event: "PUBLISH_DONE", rows: rows.length, manifestBytes: manifestText.length, sentBytes: sent });
     return { rows: rows.length, manifestBytes: manifestText.length };
   } catch (e) {
     log.warn({ event: "PUBLISH_FAILED", err: String(e).slice(0, 200) });

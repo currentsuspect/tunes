@@ -26,6 +26,7 @@ import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
 import { handleMedia, stripSignature } from "./media.js";
 import { handleSync } from "./sync.js";
 import { handleArtGet, handleArtPut, handleAudioPut, handlePublish,
+  handleManifestGet,
   handleManifestPut, handleTrackGet } from "./publish.js";
 import {
   accountById,
@@ -271,15 +272,8 @@ export default {
     const rejected = await handleMedia(req, env, nowSec);
     if (rejected) return rejected;
     if (url.pathname === "/manifest" && req.method === "GET" && env.CACHE) {
-      const obj = await env.CACHE.get("manifest.json");
-      if (obj) {
-        return new Response(obj.body, {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "cache-control": "public, max-age=60",
-          },
-        });
-      }
+      const served = await handleManifestGet(req, env);
+      if (served) return served;
     }
 
     // ---- GET /art/:sha -----------------------------------------------------

@@ -137,12 +137,51 @@ export async function handleManifestPut(req: Request, env: PublishEnv): Promise<
   if (length > MAX_MANIFEST_BYTES) return error(413);
   const cache = env.CACHE;
   if (!cache || !req.body) return error(500);
-  await cache.put("manifest.json", req.body, {
+  // The box sends it gzipped (16 MB of JSON is ~5 MB so): kept that way and
+  // served that way (handleManifestGet). Said in a header of our own rather
+  // than Content-Encoding, which something on the way may undo. The other
+  // copy is removed so a stale one is never served instead.
+  const gzipped = req.headers.get("x-tunes-encoding") === "gzip";
+  await cache.put(gzipped ? MANIFEST_GZ : MANIFEST, req.body, {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
   });
-  return new Response(JSON.stringify({ ok: true, manifestBytes: length }), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
+  await cache.delete?.(gzipped ? MANIFEST : MANIFEST_GZ);
+  return new Response(
+    JSON.stringify({ ok: true, manifestBytes: length, encoding: gzipped ? "gzip" : "identity" }),
+    { headers: { "content-type": "application/json; charset=utf-8" } },
+  );
+}
+
+const MANIFEST = "manifest.json";
+const MANIFEST_GZ = "manifest.json.gz";
+
+/**
+ * GET /manifest from R2: the gzipped copy as it is to a client that takes
+ * gzip (every Tunes app does), unpacked here for one that does not; the
+ * plain copy from a box that has not started gzipping. Null when there is
+ * neither, so the request goes on to origin.
+ */
+export async function handleManifestGet(req: Request, env: PublishEnv): Promise<Response | null> {
+  const cache = env.CACHE;
+  if (!cache) return null;
+  const headers = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "public, max-age=60",
+    vary: "accept-encoding",
+  };
+  const gz = await cache.get(MANIFEST_GZ);
+  if (gz) {
+    if (/\bgzip\b/.test(req.headers.get("accept-encoding") ?? "")) {
+      return new Response(gz.body, {
+        headers: { ...headers, "content-encoding": "gzip" },
+        // Already compressed: the runtime must not compress it again.
+        encodeBody: "manual",
+      } as ResponseInit);
+    }
+    return new Response(gz.body.pipeThrough(new DecompressionStream("gzip")), { headers });
+  }
+  const plain = await cache.get(MANIFEST);
+  return plain ? new Response(plain.body, { headers }) : null;
 }
 
 /** Cover bytes named by magic, not by the uploader's label. */
