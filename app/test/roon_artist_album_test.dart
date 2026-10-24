@@ -207,9 +207,20 @@ void main() {
     );
     expect(find.textContaining('better known as Yeat'), findsOneWidget);
     expect(find.textContaining('Kranky Kranky'), findsOneWidget);
-    expect(find.text('The people around Yeat'), findsOneWidget);
-    await tester.tap(find.text('BNYX®'));
+    // Approved v2 order: top songs, discography, collabs, then the bio.
+    double y(String t) => tester.getTopLeft(find.text(t).first).dy;
+    expect(find.text('Top songs'), findsOneWidget);
+    expect(find.text('Discography'), findsOneWidget);
+    expect(find.text('Collabs'), findsOneWidget);
+    expect(find.text('About Yeat'), findsOneWidget);
+    expect(y('Top songs'), lessThan(y('Discography')));
+    expect(y('Discography'), lessThan(y('Collabs')));
+    expect(y('Collabs'), lessThan(y('About Yeat')));
+    // Both editions held are one album, the other named under it.
+    expect(find.text('Albums · 1'), findsOneWidget);
+    expect(find.textContaining('also Deluxe'), findsOneWidget);
+    // A producer from the credits opens their page.
+    await tester.tap(find.text('BNYX®  2'));
     expect(opened.last, 'BNYX®');
-    expect(find.text('songs you have'), findsOneWidget);
   });
 }

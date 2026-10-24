@@ -485,6 +485,12 @@ export class ManifestServer {
           }
           const by = askerName(req.headers.authorization);
           if (url.pathname === "/soulseek/complete") {
+            // { release } fills in a held album; { artist, album } gets one
+            // the library has none of (the artist page's "Get it").
+            if (typeof parsed.artist === "string" && typeof parsed.album === "string") {
+              const jobs = await getter.completeByName(parsed.artist, parsed.album, by).catch(() => []);
+              return json(200, { jobs });
+            }
             const id = typeof parsed.release === "string" ? parsed.release : "";
             return json(200, { jobs: await getter.complete(id, by).catch(() => []) });
           }

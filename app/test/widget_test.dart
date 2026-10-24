@@ -119,6 +119,11 @@ class _FakeClient implements TunesClient {
   ) async => null;
   @override
   Future<List<Work>?> aboutPerson(String name) async => null;
+  @override
+  Future<List<GetJob>> soulseekCompleteAlbum(
+    String artist,
+    String album,
+  ) async => const [];
 
   _FakeClient(
     this.result, {
@@ -1081,19 +1086,18 @@ void main() {
     await tester.tap(find.text('Don Toliver').last);
     await tester.pumpAndSettle();
 
-    // The facts line carries how much of the catalogue is held.
-    expect(find.textContaining('1 of 3 in your library'), findsOneWidget);
-    // Part-owned records and wholly missing ones are told apart.
-    expect(find.text('FINISH THESE'), findsOneWidget);
-    expect(find.text('NOT YET YOURS'), findsOneWidget);
-    expect(find.text('1 of 19  ·  18 to go'), findsOneWidget);
+    // The band's facts line carries how much of the catalogue is held.
+    expect(find.textContaining('1 of 3 records'), findsOneWidget);
+    // Held records show how much of them (v2 discography, 24 Oct); wholly
+    // missing ones are there too, dashed, to get.
+    expect(find.text('1 / 19'), findsOneWidget);
     expect(find.text('OCTANE'), findsOneWidget);
     expect(find.text('Love Sick'), findsOneWidget);
-    // And the songs you own come before any of it. Each label appears twice:
-    // once on its jump chip, once as the section heading, which is the later.
-    final songs = tester.getTopLeft(find.text('Songs you have').last).dy;
-    final missing = tester.getTopLeft(find.text('Not in your library').last).dy;
-    expect(songs, lessThan(missing));
+    expect(find.textContaining('· not yet'), findsNWidgets(2));
+    // And the songs you own come before any of it.
+    final songs = tester.getTopLeft(find.text('Top songs')).dy;
+    final records = tester.getTopLeft(find.text('Discography')).dy;
+    expect(songs, lessThan(records));
   });
 
   testWidgets('home surfaces a part-owned album and released-this-year', (
@@ -1249,7 +1253,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ArtistPage), findsOneWidget);
-    expect(find.text('Songs you have'), findsOneWidget);
+    expect(find.text('Top songs'), findsOneWidget);
     expect(find.text('Shuffle'), findsOneWidget);
     expect(find.text('Vax'), findsWidgets); // page title
   });
@@ -1300,9 +1304,11 @@ void main() {
 
     // The dock is on screen now, so the card can sit below the fold of a
     // short test surface, as it would on a small phone: scroll to it first.
-    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    // The record's tile in the discography: the album's name also sits
+    // under its song in Top songs, above it.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
     expect(find.byType(AlbumPage), findsOneWidget);
 
@@ -1326,9 +1332,11 @@ void main() {
     await tester.pumpAndSettle();
     // The dock is on screen now, so the card can sit below the fold of a
     // short test surface, as it would on a small phone: scroll to it first.
-    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    // The record's tile in the discography: the album's name also sits
+    // under its song in Top songs, above it.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
     // The album's artist link revisits the artist: a navigation event that
     // repositions, not a duplicate pane.
@@ -1415,9 +1423,11 @@ void main() {
 
     // The dock is on screen now, so the card can sit below the fold of a
     // short test surface, as it would on a small phone: scroll to it first.
-    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    // The record's tile in the discography: the album's name also sits
+    // under its song in Top songs, above it.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
 
     expect(find.byType(AlbumPage), findsOneWidget);
@@ -2180,9 +2190,11 @@ void main() {
     await tester.pumpAndSettle();
     // The dock is on screen now, so the card can sit below the fold of a
     // short test surface, as it would on a small phone: scroll to it first.
-    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').first);
+    // The record's tile in the discography: the album's name also sits
+    // under its song in Top songs, above it.
+    await tester.ensureVisible(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ESCAPE PLAN / MAFIA').first);
+    await tester.tap(find.text('ESCAPE PLAN / MAFIA').last);
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.text('MAFIA').first);

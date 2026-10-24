@@ -156,6 +156,18 @@ class GetsController extends ChangeNotifier {
     }
   }
 
+  /// Gets a whole album the library has none of (the artist page's Get it).
+  Future<int> completeAlbum(String artist, String album) async {
+    _askToNotify();
+    try {
+      final jobs = await client.soulseekCompleteAlbum(artist, album);
+      _take(jobs);
+      return jobs.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   void _take(List<GetJob> jobs) {
     final landed = <GetJob>[];
     var changed = false;
