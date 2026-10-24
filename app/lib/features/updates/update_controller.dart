@@ -18,14 +18,20 @@ class UpdateController extends ChangeNotifier {
     required this.buildNumber,
     required this.installer,
     bool? supported,
-  }) : supported = supported ?? Platform.isAndroid;
+    bool? computer,
+  }) : computer = computer ?? Platform.isLinux,
+       supported = supported ?? (Platform.isAndroid || Platform.isLinux);
+
+  /// Updating a computer's Linux bundle rather than a phone's APK. Settable
+  /// so the phone's path is tested on the computer the suite runs on.
+  final bool computer;
 
   final TunesClient client;
   final String buildNumber;
   final UpdateInstaller installer;
 
-  /// APK self-update is Android-only. The Linux bundle comes from CI
-  /// artifacts, and an APK button there would be a dead end.
+  /// Android installs the APK; a computer swaps in the Linux bundle and
+  /// restarts (UpdateInstaller). Nothing else updates itself.
   final bool supported;
 
   AvailableUpdate? _available;
@@ -73,7 +79,13 @@ class UpdateController extends ChangeNotifier {
         // Asked before offering the download rather than after: on Android
         // 8+ the permission is grantable only from Settings, and finding
         // that out after 100 MB is the wrong order.
-        _needsPermission = !await installer.canInstall();
+        // A computer has no permission to ask for: a copy that cannot
+        // replace itself (run from a build folder) is not offered one.
+        if (computer && !await installer.canInstall()) {
+          _available = null;
+        } else {
+          _needsPermission = !computer && !await installer.canInstall();
+        }
       } else {
         _available = null;
       }

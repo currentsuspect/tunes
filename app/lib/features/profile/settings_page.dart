@@ -1146,7 +1146,10 @@ class _Updates extends StatelessWidget {
             ? '${(total * progress / 1048576).round()} of '
                   '${(total / 1048576).round()} MB'
             : '${(progress * 100).round()}%',
-        detail: 'Keep listening. Android asks you to confirm when it is done.',
+        detail: Platform.isLinux
+            ? 'Keep listening. Tunes restarts on the new build when it is '
+                  'done.'
+            : 'Keep listening. Android asks you to confirm when it is done.',
         progress: progress,
       );
     } else if (update != null) {

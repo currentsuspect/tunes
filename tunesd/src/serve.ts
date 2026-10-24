@@ -89,7 +89,10 @@ export class ManifestServer {
     private readonly getter: Getter | null = null,
     /// Cuts shareable moments of a song (clip.ts), or null: POST /clip then
     /// answers 503.
-    private readonly clips: ClipMaker | null = null
+    private readonly clips: ClipMaker | null = null,
+    /// The computer's updates (the Linux bundle), or null: /update?platform=
+    /// linux then answers 204 and /update/linux 404.
+    private readonly linuxUpdates: UpdateFeed | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -125,8 +128,10 @@ export class ManifestServer {
         // behind without a GitHub account. 204 when there is nothing to
         // report — no token configured, or the first poll has not landed —
         // which the app reads as "no update" rather than as an error.
+        // ?platform=linux asks about the computer's build instead.
         if (url.pathname === "/update") {
-          const info = this.updates?.latest() ?? null;
+          const feed = url.searchParams.get("platform") === "linux" ? this.linuxUpdates : this.updates;
+          const info = feed?.latest() ?? null;
           if (!info) {
             res.writeHead(204);
             res.end();
@@ -139,8 +144,9 @@ export class ManifestServer {
 
         // The APK itself. Range-served like audio, so a download resumes
         // rather than restarting -- these are 100 MB over a phone connection.
-        if (url.pathname === "/update/apk") {
-          const path = this.updates?.apk() ?? null;
+        if (url.pathname === "/update/apk" || url.pathname === "/update/linux") {
+          const feed = url.pathname === "/update/linux" ? this.linuxUpdates : this.updates;
+          const path = feed?.apk() ?? null;
           if (!path) {
             res.writeHead(404, { "content-type": "text/plain" });
             res.end("no update");
