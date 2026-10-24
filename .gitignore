@@ -19,3 +19,11 @@ app/.dart_tool/
 tools/dist/
 # wrangler local state (local D1 sqlite, dev cache)
 .wrangler/
+
+# The app signing key lives in the TUNES_KEYSTORE secret, never in git.
+app/android/app/tunes-debug.keystore
+*.keystore
+*.jks
+.env*
+!.env.example
+.wrangler/

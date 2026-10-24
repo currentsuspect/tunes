@@ -113,7 +113,10 @@ jobs:
       # also the build that gets sideloaded and judged, so it has to be the
       # one CI produces. Signed with the committed debug keystore (see
       # android/app/build.gradle.kts), so it installs over previous builds.
-      # The build number is the run number plus 2000. Local release builds made
+      # The build number is the run number plus 3000: the repo was recreated
+      # public on 2026-10-24 and its run numbers began again at 1, while the
+      # last private build was 2468.
+      # Before that it was the run number plus 2000. Local release builds made
       # on 2026-10-05 were numbered 913-917, above the run number at the time
       # (337); the app only offers an update when the release number is higher
       # than its own, so without the offset those phones would never be offered
@@ -126,6 +129,20 @@ jobs:
       # app was the same version as the one it replaced, and on a test phone the
       # system installer said "App installed" while the package stayed put. It
       # now rises with the build number, so every update is a real upgrade.
+      # The signing key, from a secret. A fork's pull request has no secrets
+      # and builds with the stock debug key; main must never publish one, or
+      # no phone could install it as an update.
+      - name: Signing key
+        env:
+          TUNES_KEYSTORE: ${{ secrets.TUNES_KEYSTORE }}
+        run: |
+          if [ -n "$TUNES_KEYSTORE" ]; then
+            echo "$TUNES_KEYSTORE" | base64 -d > app/android/app/tunes-debug.keystore
+          elif [ "${{ github.event_name }}" = push ]; then
+            echo "TUNES_KEYSTORE secret missing: refusing to build a release phones cannot install" >&2
+            exit 1
+          fi
+
       - name: Release APK builds
         working-directory: app
         run: |
@@ -133,8 +150,8 @@ jobs:
             --target-platform android-arm64 \
             --dart-define=TUNESD_URL=https://tunes.aestra.studio \
             --dart-define=GIT_COMMIT=${{ github.sha }} \
-            --dart-define=BUILD_NUMBER=$((${{ github.run_number }} + 2000)) \
-            --build-number=$((${{ github.run_number }} + 2000)) \
+            --dart-define=BUILD_NUMBER=$((${{ github.run_number }} + 3000)) \
+            --build-number=$((${{ github.run_number }} + 3000)) \
             --dart-define=CHANNEL=dev
 
       - name: Upload release APK
@@ -169,7 +186,7 @@ jobs:
         working-directory: app
         run: |
           set -euo pipefail
-          build=$((${{ github.run_number }} + 2000))
+          build=$((${{ github.run_number }} + 3000))
           gh release create "build-${build}" \
             build/app/outputs/flutter-apk/app-release.apk \
             --title "Build ${build}" \

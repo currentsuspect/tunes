@@ -240,8 +240,10 @@ slowness — do not tune CI down to match the laptop.
 - Debug APK from CI; `tools/deploy.sh` downloads newest success → `adb install -r` →
   launch. Wireless pairing: `~/dev/platform-tools/platform-tools/adb` (system adb lacks
   mdns auto-connect; port changes each session).
-- Debug keystore: shared committed keystore (Faye pattern) — all CI runners sign
-  identically. Release signing lives in Actions secrets.
+- Signing key: `app/android/app/tunes-debug.keystore`, the key every installed
+  Tunes is signed with. Never committed (the repo is public since 2026-10-24):
+  CI writes it from the `TUNES_KEYSTORE` secret, a dev box keeps a local copy.
+  Without it Gradle signs with Android's stock debug key (installs fresh only).
 - Channels: dev → beta → stable. Tags on `main` only, annotated, `v0.x.y`.
 - Changelog per release: what changed, why it matters, whether anything needs
   attention. Raw commit logs are not a changelog.

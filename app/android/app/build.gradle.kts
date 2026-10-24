@@ -10,11 +10,19 @@ android {
     ndkVersion = flutter.ndkVersion
 
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("tunes-debug.keystore")
-            storePassword = "android"
-            keyAlias = "tunes-debug"
-            keyPassword = "android"
+        // The key every installed Tunes was signed with. It is not in the
+        // repo: CI writes it from the TUNES_KEYSTORE secret and a dev box keeps
+        // its own copy here (gitignored). Without it the build falls back to
+        // Android's stock debug key, which installs fresh but never as an
+        // update over a phone's Tunes.
+        val tunesKey = file("tunes-debug.keystore")
+        if (tunesKey.exists()) {
+            getByName("debug") {
+                storeFile = tunesKey
+                storePassword = "android"
+                keyAlias = "tunes-debug"
+                keyPassword = "android"
+            }
         }
     }
 
