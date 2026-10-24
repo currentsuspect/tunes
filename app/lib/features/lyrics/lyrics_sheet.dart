@@ -1303,9 +1303,15 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                   // A line hugging one edge reads as a reply only if it does not
                   // run all the way across to the other.
                   constraints: BoxConstraints(
+                    // Held to a reading width on a wide window too, so an
+                    // ad-lib at a line's end stays by its words instead of
+                    // at the far edge of the pane.
                     maxWidth: voice.side == LyricSide.center
-                        ? double.infinity
-                        : MediaQuery.of(context).size.width * 0.82,
+                        ? 640
+                        : math.min(
+                            MediaQuery.of(context).size.width * 0.82,
+                            560,
+                          ),
                   ),
                   child: line.hasWordTiming
                       // Word-synced: sweep the highlight across the word being sung.

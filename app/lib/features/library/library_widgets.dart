@@ -84,81 +84,119 @@ class TrackRow extends StatelessWidget {
                       onEdit: onEdit!,
                     )
                   : null,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: Space.sm,
-                  horizontal: Space.xs,
-                ),
-                child: Row(
-                  children: [
-                    ArtThumb(
-                      sha: track.artSha,
-                      artUrlFor: artUrlFor,
-                      title: track.title,
-                      artist: track.artistDisplay,
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final columns = box.maxWidth >= 760;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: Space.sm,
+                      horizontal: Space.xs,
                     ),
-                    // Whenever this is the song that is on, moving while it plays
-                    // and standing still while it is paused.
-                    if (active) ...[
-                      const SizedBox(width: Space.sm),
-                      PlayingBars(playing: player.playing),
-                    ],
-                    const SizedBox(width: Space.md),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            track.title,
-                            style: TypeScale.title.copyWith(color: titleColor),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                    child: Row(
+                      children: [
+                        ArtThumb(
+                          sha: track.artSha,
+                          artUrlFor: artUrlFor,
+                          title: track.title,
+                          artist: track.artistDisplay,
+                        ),
+                        // Whenever this is the song that is on, moving while it plays
+                        // and standing still while it is paused.
+                        if (active) ...[
+                          const SizedBox(width: Space.sm),
+                          PlayingBars(playing: player.playing),
+                        ],
+                        const SizedBox(width: Space.md),
+                        Expanded(
+                          flex: 5,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                track.title,
+                                style: TypeScale.title.copyWith(
+                                  color: titleColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                columns
+                                    ? track.artistDisplay
+                                    : track.artistAlbumLine,
+                                style: TypeScale.body,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            track.artistAlbumLine,
-                            style: TypeScale.body,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        ),
+                        // A computer's window has room for the album and year
+                        // as columns of their own, where the eye can run down
+                        // them, rather than one squeezed line under the title.
+                        if (columns) ...[
+                          const SizedBox(width: Space.md),
+                          Expanded(
+                            flex: 4,
+                            child: Text(
+                              track.album,
+                              style: TypeScale.body,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          SizedBox(
+                            width: 56,
+                            child: Text(
+                              (track.year ?? '').length >= 4
+                                  ? track.year!.substring(0, 4)
+                                  : '',
+                              style: TypeScale.caption.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
-                      ),
+                        // The title is the thing you read. A fixed-width quality
+                        // badge here squeezed it down to about six characters
+                        // ("SMUC…", "2SEAT…"); the full quality breakdown already
+                        // lives in Now Playing's info panel, where detail belongs.
+                        const SizedBox(width: Space.sm),
+                        // A mark, not a control. Every row already carries a
+                        // download button; a second tap target on each one would
+                        // make the list harder to scroll than it is to read.
+                        // Liking happens in the player and the long-press menu.
+                        if (LikesScope.maybeOf(context)?.isLiked(track.sha) ??
+                            false) ...[
+                          Icon(
+                            Icons.favorite_rounded,
+                            size: 14,
+                            color: Tones.primary,
+                          ),
+                          const SizedBox(width: Space.sm),
+                        ],
+                        Text(
+                          track.durationLabel,
+                          style: TypeScale.caption.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        DownloadButton(
+                          sha: track.sha,
+                          title: track.title,
+                          store: store,
+                          offline: offline,
+                          fallbackActive: downloading,
+                          onDownload: onDownload,
+                        ),
+                      ],
                     ),
-                    // The title is the thing you read. A fixed-width quality
-                    // badge here squeezed it down to about six characters
-                    // ("SMUC…", "2SEAT…"); the full quality breakdown already
-                    // lives in Now Playing's info panel, where detail belongs.
-                    const SizedBox(width: Space.sm),
-                    // A mark, not a control. Every row already carries a
-                    // download button; a second tap target on each one would
-                    // make the list harder to scroll than it is to read.
-                    // Liking happens in the player and the long-press menu.
-                    if (LikesScope.maybeOf(context)?.isLiked(track.sha) ??
-                        false) ...[
-                      Icon(
-                        Icons.favorite_rounded,
-                        size: 14,
-                        color: Tones.primary,
-                      ),
-                      const SizedBox(width: Space.sm),
-                    ],
-                    Text(
-                      track.durationLabel,
-                      style: TypeScale.caption.copyWith(
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    DownloadButton(
-                      sha: track.sha,
-                      title: track.title,
-                      store: store,
-                      offline: offline,
-                      fallbackActive: downloading,
-                      onDownload: onDownload,
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ),

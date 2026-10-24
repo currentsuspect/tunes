@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../core/platform/device.dart';
 
 import 'dart:io';
@@ -330,536 +332,555 @@ class _SettingsPageState extends State<SettingsPage> {
             Expanded(
               child: ListenableBuilder(
                 listenable: s,
-                builder: (context, _) => ListView(
-                  padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl),
-                  children: [
-                    Text(
-                      'Settings',
-                      style: TypeScale.display.copyWith(fontSize: 34),
-                    ),
-                    SizedBox(height: Space.lg),
-                    _Profile(
-                      name: s.displayName,
-                      path: s.avatarPath,
-                      controller: _name,
-                      onAvatar: _editAvatar,
-                      onName: s.setDisplayName,
-                    ),
-                    SizedBox(height: Space.sm),
-                    _ListeningCard(
-                      history: widget.history,
-                      library: widget.library,
-                      artUrlFor: widget.artUrlFor,
-                      links: widget.listeningLinks,
-                    ),
-                    if (widget.updates case final u?)
-                      ListenableBuilder(
-                        listenable: u,
-                        builder: (context, _) => _Updates(
-                          updates: u,
-                          buildNumber: widget.buildNumber,
-                          channel: widget.channel,
-                          noteOnHome: s.updateNoteOnHome,
-                          onNoteOnHome: s.setUpdateNoteOnHome,
-                          onUpdate: widget.onUpdate ?? () {},
-                          onWhatsNew: widget.onWhatsNew,
-                        ),
-                      ),
-                    _Group(
-                      title: 'Look',
+                // Held to a reading width on a wide window: a settings row
+                // stretched across a desktop reads as a banner.
+                builder: (context, _) => LayoutBuilder(
+                  builder: (context, box) {
+                    final side = math.max(Space.lg, (box.maxWidth - 760) / 2);
+                    return ListView(
+                      padding: EdgeInsets.fromLTRB(side, 0, side, Space.xl),
                       children: [
-                        _ThemePicker(
-                          choice: s.themeChoice,
-                          brightness: s.themeBrightness,
-                          onChoice: s.setThemeChoice,
+                        Text(
+                          'Settings',
+                          style: TypeScale.display.copyWith(fontSize: 34),
                         ),
-                        if (s.themeChoice == 'auto') ...[
-                          _LinkTile(
-                            title: 'Noir from ${_clock(s.autoNightMinutes)}',
-                            detail: 'When Auto turns to Noir for the night.',
-                            onTap: () => _pickTime(
-                              context,
-                              s.autoNightMinutes,
-                              s.setAutoNightMinutes,
+                        SizedBox(height: Space.lg),
+                        _Profile(
+                          name: s.displayName,
+                          path: s.avatarPath,
+                          controller: _name,
+                          onAvatar: _editAvatar,
+                          onName: s.setDisplayName,
+                        ),
+                        SizedBox(height: Space.sm),
+                        _ListeningCard(
+                          history: widget.history,
+                          library: widget.library,
+                          artUrlFor: widget.artUrlFor,
+                          links: widget.listeningLinks,
+                        ),
+                        if (widget.updates case final u?)
+                          ListenableBuilder(
+                            listenable: u,
+                            builder: (context, _) => _Updates(
+                              updates: u,
+                              buildNumber: widget.buildNumber,
+                              channel: widget.channel,
+                              noteOnHome: s.updateNoteOnHome,
+                              onNoteOnHome: s.setUpdateNoteOnHome,
+                              onUpdate: widget.onUpdate ?? () {},
+                              onWhatsNew: widget.onWhatsNew,
                             ),
                           ),
-                          _LinkTile(
-                            title: 'Crayon from ${_clock(s.autoDayMinutes)}',
-                            detail: 'When it comes back for the day.',
-                            onTap: () => _pickTime(
-                              context,
-                              s.autoDayMinutes,
-                              s.setAutoDayMinutes,
+                        _Group(
+                          title: 'Look',
+                          children: [
+                            _ThemePicker(
+                              choice: s.themeChoice,
+                              brightness: s.themeBrightness,
+                              onChoice: s.setThemeChoice,
                             ),
-                          ),
-                        ],
-                        _ChoiceTile(
-                          title: 'Light or dark',
-                          choices: const ['Phone', 'Dark', 'Light'],
-                          selected: s.themeBrightness,
-                          onChanged: s.setThemeBrightness,
-                        ),
-                      ],
-                    ),
-
-                    _Group(
-                      title: 'Listening',
-                      children: [
-                        _LinkTile(
-                          title: 'Headphone EQ: ${s.eqProfile?.name ?? 'Off'}',
-                          detail:
-                              'Tune how your headphones sound, for everything '
-                              'that plays here.',
-                          onTap: () => showEqSheet(context, s),
-                        ),
-                        _SwitchTile(
-                          title: 'Gapless playback',
-                          detail:
-                              'No silence between songs. It only works when two '
-                              'files share a format.',
-                          value: s.gapless,
-                          onChanged: (v) async {
-                            await s.setGapless(v);
-                            await widget.player.setGapless(v);
-                          },
-                        ),
-                        _SwitchTile(
-                          title: 'Keep playing with radio',
-                          detail:
-                              'When the queue ends, pick what follows from your '
-                              'own listening, on ${Device.thisOne}. Added after the '
-                              'queue, never mixed into it.',
-                          value: s.radioAutoplay,
-                          onChanged: s.setRadioAutoplay,
-                        ),
-                        _ChoiceTile(
-                          title: 'Double-tap a cover',
-                          choices: ['Like', 'Download'],
-                          selected: s.doubleTapDownloads ? 1 : 0,
-                          onChanged: (i) => s.setDoubleTapDownloads(i == 1),
-                        ),
-                        _SwitchTile(
-                          title: 'Stop when the app closes',
-                          detail:
-                              'Off, the music carries on after you swipe the app '
-                              'away, with no controls on screen to stop it.',
-                          value: s.stopOnClose,
-                          onChanged: s.setStopOnClose,
-                        ),
-                        _SwitchTile(
-                          title: 'Turning artwork',
-                          detail:
-                              'The sleeve turns slowly while a song plays. The '
-                              'only thing in the app that moves all the time.',
-                          value: s.animatedArtwork,
-                          onChanged: s.setAnimatedArtwork,
-                        ),
-                      ],
-                    ),
-
-                    // The phone's shade, or the computer's notifications
-                    // (Linux, notify-send).
-                    if (Platform.isAndroid || Platform.isLinux)
-                      _Group(
-                        title: 'Tell me when',
-                        children: [
-                          _SwitchTile(
-                            title: 'A song I asked for lands',
-                            detail: 'With Play right there.',
-                            value: s.noteMine,
-                            onChanged: s.setNoteMine,
-                          ),
-                          _SwitchTile(
-                            title: 'Someone else gets songs',
-                            detail: 'One note per batch, not per song.',
-                            value: s.noteOthers,
-                            onChanged: s.setNoteOthers,
-                          ),
-                          _SwitchTile(
-                            title: 'A new Tunes is ready',
-                            detail: 'Once per version.',
-                            value: s.noteUpdate,
-                            onChanged: s.setNoteUpdate,
-                          ),
-                        ],
-                      ),
-
-                    _Group(
-                      title: 'Storage',
-                      children: [
-                        _ChoiceTile(
-                          title: 'Keep songs you hear',
-                          choices: [
-                            for (final gb in SettingsStore.cacheSizesGb)
-                              '$gb GB',
-                          ],
-                          selected: s.cacheSize,
-                          onChanged: s.setCacheSize,
-                        ),
-                        _ChoiceTile(
-                          title: 'Fetch the next song early',
-                          choices: const ['Off', 'Wi-Fi', 'Always'],
-                          selected: s.prefetchNext,
-                          onChanged: s.setPrefetchNext,
-                        ),
-                      ],
-                    ),
-
-                    _Group(
-                      title: 'Lyrics',
-                      children: [
-                        _SwitchTile(
-                          title: 'Show lyrics on Now Playing',
-                          detail:
-                              'Off, Now Playing is only the player. Songs '
-                              'with no lyrics never show a gap either way. '
-                              'Lyrics stay one tap away in the menu.',
-                          value: s.showLyrics,
-                          onChanged: s.setShowLyrics,
-                        ),
-                        _SwitchTile(
-                          title: 'Words that move',
-                          detail:
-                              'Picture words come alive as they are sung: '
-                              'ice frosts over, smoke drifts, money flashes '
-                              'green, high floats up. One word a line.',
-                          value: s.wordEffects,
-                          onChanged: s.setWordEffects,
-                        ),
-                        _SwitchTile(
-                          title: 'Drop moments',
-                          detail:
-                              'When the 808 drops out and slams back, the '
-                              'ad-lib on it grows over every line, then '
-                              'shrinks back with the beat.',
-                          value: s.dropMoments,
-                          onChanged: s.setDropMoments,
-                        ),
-                        _ChoiceTile(
-                          title: 'Text size',
-                          choices: ['Small', 'Medium', 'Large'],
-                          selected: s.lyricSize,
-                          onChanged: s.setLyricSize,
-                        ),
-                        _StepperTile(
-                          title: 'Tap timing',
-                          detail:
-                              'When you sync lyrics by tapping, marks land '
-                              '${(s.lyricsTapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s '
-                              'before the tap, to allow for your reaction.',
-                          onMinus: () => _nudgeOffset(-50),
-                          onPlus: () => _nudgeOffset(50),
-                        ),
-                      ],
-                    ),
-
-                    _Group(
-                      title: 'Space used',
-                      children: [
-                        _StorageBar(
-                          downloads: _usage?.downloadBytes ?? 0,
-                          covers: _covers?.bytes ?? 0,
-                          library: _usage?.manifestBytes ?? 0,
-                          loaded: _usage != null,
-                        ),
-                        _ValueTile(
-                          dot: Tones.held,
-                          label: 'Songs on ${Device.thisOne}',
-                          value: _usage == null
-                              ? '—'
-                              : '${_usage!.downloadCount} · '
-                                    '${formatBytes(_usage!.downloadBytes)}',
-                        ),
-                        _ValueTile(
-                          dot: Tones.primary,
-                          label: 'Saved covers',
-                          value: _covers == null
-                              ? '—'
-                              : '${_covers!.count} · '
-                                    '${formatBytes(_covers!.bytes)}',
-                        ),
-                        _ValueTile(
-                          dot: Tones.textMuted,
-                          label: 'Library copy',
-                          value: _usage == null
-                              ? '—'
-                              : formatBytes(_usage!.manifestBytes),
-                        ),
-                        if (_usage != null && _usage!.missingDownloads > 0)
-                          _ValueTile(
-                            label: 'Gone missing',
-                            value:
-                                '${_usage!.missingDownloads} '
-                                '${_usage!.missingDownloads == 1 ? 'file' : 'files'}',
-                            valueColor: Tones.warn,
-                          ),
-                        if (art != null)
-                          _LinkTile(
-                            title: 'Clear saved covers',
-                            detail:
-                                'Covers are saved the first time they are seen, so '
-                                'the library looks the same offline. They download '
-                                'again when you next connect.',
-                            onTap: () async {
-                              await art.clear();
-                              await _measure();
-                            },
-                          ),
-                        _LinkTile(
-                          title: 'Remove all downloads',
-                          detail:
-                              'Takes every song off ${Device.thisOne}. Your library and '
-                              'everything on the box is untouched.',
-                          destructive: true,
-                          onTap: _usage == null || _usage!.downloadCount == 0
-                              ? null
-                              : () => _confirm(
-                                  title: 'Remove all downloads?',
-                                  body:
-                                      'Every downloaded song is removed from this '
-                                      '${Device.noun}. You can download them again.',
-                                  action: 'Remove',
-                                  run: () async {
-                                    for (final sha in widget.store.shas) {
-                                      await widget.store.remove(sha);
-                                    }
-                                    await _measure();
-                                  },
-                                ),
-                        ),
-                      ],
-                    ),
-
-                    _Group(
-                      title: 'Your music box',
-                      children: [
-                        _ValueTile(
-                          dot: widget.offline ? Tones.warn : Tones.held,
-                          label: widget.offline
-                              ? 'Cannot reach it right now'
-                              : 'Connected',
-                          value: '${widget.trackCount} songs',
-                        ),
-                        _LinkTile(
-                          title: 'Server address',
-                          detail: widget.endpoint,
-                          onTap: _editServer,
-                        ),
-                        _LinkTile(
-                          title: 'Sync the whole library',
-                          detail:
-                              'Ask the box for everything again, not just what '
-                              'changed. Nothing on ${Device.thisOne} is lost.',
-                          onTap: () async {
-                            widget.onResync();
-                            NavScope.of(context).back();
-                          },
-                        ),
-                      ],
-                    ),
-
-                    if (widget.accountSync != null)
-                      ListenableBuilder(
-                        listenable: widget.accountSync!,
-                        builder: (context, _) {
-                          final sync = widget.accountSync!;
-                          final at = sync.lastSyncedAt;
-                          return _Group(
-                            title: 'Across your devices',
-                            children: [
-                              _ValueTile(
-                                dot: sync.reachable ? Tones.held : Tones.warn,
-                                label: sync.syncing
-                                    ? 'Syncing…'
-                                    : sync.reachable
-                                    ? 'In step'
-                                    : 'Waiting for a connection',
-                                value: at == null ? '' : _ago(at),
-                              ),
-                              _SwitchTile(
-                                title: 'Share what I listen to',
+                            if (s.themeChoice == 'auto') ...[
+                              _LinkTile(
+                                title:
+                                    'Noir from ${_clock(s.autoNightMinutes)}',
                                 detail:
-                                    'On, your plays on one device shape '
-                                    'recommendations on all of them. Off, '
-                                    'this device keeps its own taste, like a '
-                                    'TV and a phone that recommend different '
-                                    'things.',
-                                value: widget.settings.syncHistory,
-                                onChanged: (v) =>
-                                    widget.settings.setSyncHistory(v),
+                                    'When Auto turns to Noir for the night.',
+                                onTap: () => _pickTime(
+                                  context,
+                                  s.autoNightMinutes,
+                                  s.setAutoNightMinutes,
+                                ),
                               ),
                               _LinkTile(
-                                title: 'Sync now',
-                                detail:
-                                    'Likes, playlists, corrected titles and '
-                                    'where you are in the music follow your '
-                                    'account to every device you sign in on.',
-                                onTap: sync.syncing ? null : sync.run,
+                                title:
+                                    'Crayon from ${_clock(s.autoDayMinutes)}',
+                                detail: 'When it comes back for the day.',
+                                onTap: () => _pickTime(
+                                  context,
+                                  s.autoDayMinutes,
+                                  s.setAutoDayMinutes,
+                                ),
                               ),
                             ],
-                          );
-                        },
-                      ),
-
-                    _Group(
-                      title: Device.titleThis,
-                      children: [
-                        _ValueTile(
-                          dot: _deviceId == null ? Tones.warn : Tones.held,
-                          label: _deviceId == null
-                              ? 'Not signed in'
-                              : 'Signed in',
-                          value: '',
-                        ),
-                        _LinkTile(
-                          title: _enrolling
-                              ? 'Signing in...'
-                              : _deviceId == null
-                              ? 'Enter an invite code'
-                              : 'Sign in again with a new code',
-                          detail: _deviceId == null
-                              ? 'Without this, the box will not send music to '
-                                    '${Device.thisOne}. Songs already downloaded keep '
-                                    'playing.'
-                              : 'Replaces the key on ${Device.thisOne}. The old one '
-                                    'stops working.',
-                          onTap: _enrolling ? null : _enrolDevice,
-                        ),
-                      ],
-                    ),
-
-                    _Group(
-                      title: 'Privacy',
-                      children: [
-                        _LinkTile(
-                          title: 'Clear listening history',
-                          detail:
-                              'Removes every play and skip the app recorded. On '
-                              'repeat, Listen again and your mixes go quiet '
-                              'until you listen again. Your music is not '
-                              'touched.',
-                          destructive: true,
-                          onTap: () => _confirm(
-                            title: 'Clear listening history?',
-                            body:
-                                'Everything the app learned about what you '
-                                'listen to is discarded. It starts learning '
-                                'again from your next play. No files are '
-                                'removed.',
-                            action: 'Clear',
-                            run: widget.history.clear,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    if (widget.onWhatsNew != null)
-                      _Group(
-                        title: 'About',
-                        children: [
-                          _LinkTile(
-                            title: 'What\'s new',
-                            detail:
-                                '$kWhatsNewTitle: everything new in this '
-                                'release.',
-                            onTap: widget.onWhatsNew,
-                          ),
-                        ],
-                      ),
-
-                    SizedBox(height: Space.xl),
-                    Center(
-                      child: GestureDetector(
-                        // Seven taps, the old way in. Nothing here is dangerous
-                        // enough to hide behind a password and nothing is
-                        // useful enough to put in front of everyone.
-                        onTap: () {
-                          _versionTaps += 1;
-                          if (_versionTaps >= 7 && !_developer) {
-                            setState(() => _developer = true);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Developer section shown'),
-                              ),
-                            );
-                          }
-                        },
-                        child: Column(
-                          children: [
-                            Text(
-                              'tunes',
-                              style: TypeScale.wordmark.copyWith(fontSize: 30),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'A music player for our music.',
-                              style: TypeScale.note.copyWith(
-                                fontSize: 14,
-                                color: Tones.textMuted,
-                              ),
-                            ),
-                            SizedBox(height: Space.sm),
-                            Text(
-                              '${widget.channel}  ·  '
-                              '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit}  ·  '
-                              'build ${widget.buildNumber}',
-                              style: TypeScale.mono,
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'Made by Aestra Studios',
-                              style: TypeScale.mono,
+                            _ChoiceTile(
+                              title: 'Light or dark',
+                              choices: const ['Phone', 'Dark', 'Light'],
+                              selected: s.themeBrightness,
+                              onChanged: s.setThemeBrightness,
                             ),
                           ],
                         ),
-                      ),
-                    ),
 
-                    if (_developer)
-                      _Group(
-                        title: 'Developer',
-                        children: [
-                          _ValueTile(label: 'Endpoint', value: widget.endpoint),
-                          _ValueTile(
-                            label: 'Support dir',
-                            value: widget.supportDir?.path ?? 'unknown',
+                        _Group(
+                          title: 'Listening',
+                          children: [
+                            _LinkTile(
+                              title:
+                                  'Headphone EQ: ${s.eqProfile?.name ?? 'Off'}',
+                              detail:
+                                  'Tune how your headphones sound, for everything '
+                                  'that plays here.',
+                              onTap: () => showEqSheet(context, s),
+                            ),
+                            _SwitchTile(
+                              title: 'Gapless playback',
+                              detail:
+                                  'No silence between songs. It only works when two '
+                                  'files share a format.',
+                              value: s.gapless,
+                              onChanged: (v) async {
+                                await s.setGapless(v);
+                                await widget.player.setGapless(v);
+                              },
+                            ),
+                            _SwitchTile(
+                              title: 'Keep playing with radio',
+                              detail:
+                                  'When the queue ends, pick what follows from your '
+                                  'own listening, on ${Device.thisOne}. Added after the '
+                                  'queue, never mixed into it.',
+                              value: s.radioAutoplay,
+                              onChanged: s.setRadioAutoplay,
+                            ),
+                            _ChoiceTile(
+                              title: 'Double-tap a cover',
+                              choices: ['Like', 'Download'],
+                              selected: s.doubleTapDownloads ? 1 : 0,
+                              onChanged: (i) => s.setDoubleTapDownloads(i == 1),
+                            ),
+                            _SwitchTile(
+                              title: 'Stop when the app closes',
+                              detail:
+                                  'Off, the music carries on after you swipe the app '
+                                  'away, with no controls on screen to stop it.',
+                              value: s.stopOnClose,
+                              onChanged: s.setStopOnClose,
+                            ),
+                            _SwitchTile(
+                              title: 'Turning artwork',
+                              detail:
+                                  'The sleeve turns slowly while a song plays. The '
+                                  'only thing in the app that moves all the time.',
+                              value: s.animatedArtwork,
+                              onChanged: s.setAnimatedArtwork,
+                            ),
+                          ],
+                        ),
+
+                        // The phone's shade, or the computer's notifications
+                        // (Linux, notify-send).
+                        if (Platform.isAndroid || Platform.isLinux)
+                          _Group(
+                            title: 'Tell me when',
+                            children: [
+                              _SwitchTile(
+                                title: 'A song I asked for lands',
+                                detail: 'With Play right there.',
+                                value: s.noteMine,
+                                onChanged: s.setNoteMine,
+                              ),
+                              _SwitchTile(
+                                title: 'Someone else gets songs',
+                                detail: 'One note per batch, not per song.',
+                                value: s.noteOthers,
+                                onChanged: s.setNoteOthers,
+                              ),
+                              _SwitchTile(
+                                title: 'A new Tunes is ready',
+                                detail: 'Once per version.',
+                                value: s.noteUpdate,
+                                onChanged: s.setNoteUpdate,
+                              ),
+                            ],
                           ),
-                          _ValueTile(label: 'Commit', value: widget.commit),
-                          _ValueTile(
-                            label: 'Images in memory',
-                            value: _usage == null
-                                ? '—'
-                                : '${_usage!.imageCount} · '
-                                      '${formatBytes(_usage!.imageBytes)}',
-                          ),
-                          _ValueTile(
-                            label: 'Log file',
-                            value: _usage == null
-                                ? '—'
-                                : (DiagLog.path == null
-                                      ? 'not initialised'
-                                      : formatBytes(_usage!.logBytes)),
-                          ),
-                          _LinkTile(
-                            title: 'Free image memory',
-                            detail:
-                                'Drops decoded covers. They are decoded again as '
-                                'you scroll.',
-                            onTap: () async {
-                              PaintingBinding.instance.imageCache.clear();
-                              PaintingBinding.instance.imageCache
-                                  .clearLiveImages();
-                              await _measure();
+
+                        _Group(
+                          title: 'Storage',
+                          children: [
+                            _ChoiceTile(
+                              title: 'Keep songs you hear',
+                              choices: [
+                                for (final gb in SettingsStore.cacheSizesGb)
+                                  '$gb GB',
+                              ],
+                              selected: s.cacheSize,
+                              onChanged: s.setCacheSize,
+                            ),
+                            _ChoiceTile(
+                              title: 'Fetch the next song early',
+                              choices: const ['Off', 'Wi-Fi', 'Always'],
+                              selected: s.prefetchNext,
+                              onChanged: s.setPrefetchNext,
+                            ),
+                          ],
+                        ),
+
+                        _Group(
+                          title: 'Lyrics',
+                          children: [
+                            _SwitchTile(
+                              title: 'Show lyrics on Now Playing',
+                              detail:
+                                  'Off, Now Playing is only the player. Songs '
+                                  'with no lyrics never show a gap either way. '
+                                  'Lyrics stay one tap away in the menu.',
+                              value: s.showLyrics,
+                              onChanged: s.setShowLyrics,
+                            ),
+                            _SwitchTile(
+                              title: 'Words that move',
+                              detail:
+                                  'Picture words come alive as they are sung: '
+                                  'ice frosts over, smoke drifts, money flashes '
+                                  'green, high floats up. One word a line.',
+                              value: s.wordEffects,
+                              onChanged: s.setWordEffects,
+                            ),
+                            _SwitchTile(
+                              title: 'Drop moments',
+                              detail:
+                                  'When the 808 drops out and slams back, the '
+                                  'ad-lib on it grows over every line, then '
+                                  'shrinks back with the beat.',
+                              value: s.dropMoments,
+                              onChanged: s.setDropMoments,
+                            ),
+                            _ChoiceTile(
+                              title: 'Text size',
+                              choices: ['Small', 'Medium', 'Large'],
+                              selected: s.lyricSize,
+                              onChanged: s.setLyricSize,
+                            ),
+                            _StepperTile(
+                              title: 'Tap timing',
+                              detail:
+                                  'When you sync lyrics by tapping, marks land '
+                                  '${(s.lyricsTapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s '
+                                  'before the tap, to allow for your reaction.',
+                              onMinus: () => _nudgeOffset(-50),
+                              onPlus: () => _nudgeOffset(50),
+                            ),
+                          ],
+                        ),
+
+                        _Group(
+                          title: 'Space used',
+                          children: [
+                            _StorageBar(
+                              downloads: _usage?.downloadBytes ?? 0,
+                              covers: _covers?.bytes ?? 0,
+                              library: _usage?.manifestBytes ?? 0,
+                              loaded: _usage != null,
+                            ),
+                            _ValueTile(
+                              dot: Tones.held,
+                              label: 'Songs on ${Device.thisOne}',
+                              value: _usage == null
+                                  ? '—'
+                                  : '${_usage!.downloadCount} · '
+                                        '${formatBytes(_usage!.downloadBytes)}',
+                            ),
+                            _ValueTile(
+                              dot: Tones.primary,
+                              label: 'Saved covers',
+                              value: _covers == null
+                                  ? '—'
+                                  : '${_covers!.count} · '
+                                        '${formatBytes(_covers!.bytes)}',
+                            ),
+                            _ValueTile(
+                              dot: Tones.textMuted,
+                              label: 'Library copy',
+                              value: _usage == null
+                                  ? '—'
+                                  : formatBytes(_usage!.manifestBytes),
+                            ),
+                            if (_usage != null && _usage!.missingDownloads > 0)
+                              _ValueTile(
+                                label: 'Gone missing',
+                                value:
+                                    '${_usage!.missingDownloads} '
+                                    '${_usage!.missingDownloads == 1 ? 'file' : 'files'}',
+                                valueColor: Tones.warn,
+                              ),
+                            if (art != null)
+                              _LinkTile(
+                                title: 'Clear saved covers',
+                                detail:
+                                    'Covers are saved the first time they are seen, so '
+                                    'the library looks the same offline. They download '
+                                    'again when you next connect.',
+                                onTap: () async {
+                                  await art.clear();
+                                  await _measure();
+                                },
+                              ),
+                            _LinkTile(
+                              title: 'Remove all downloads',
+                              detail:
+                                  'Takes every song off ${Device.thisOne}. Your library and '
+                                  'everything on the box is untouched.',
+                              destructive: true,
+                              onTap:
+                                  _usage == null || _usage!.downloadCount == 0
+                                  ? null
+                                  : () => _confirm(
+                                      title: 'Remove all downloads?',
+                                      body:
+                                          'Every downloaded song is removed from this '
+                                          '${Device.noun}. You can download them again.',
+                                      action: 'Remove',
+                                      run: () async {
+                                        for (final sha in widget.store.shas) {
+                                          await widget.store.remove(sha);
+                                        }
+                                        await _measure();
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
+
+                        _Group(
+                          title: 'Your music box',
+                          children: [
+                            _ValueTile(
+                              dot: widget.offline ? Tones.warn : Tones.held,
+                              label: widget.offline
+                                  ? 'Cannot reach it right now'
+                                  : 'Connected',
+                              value: '${widget.trackCount} songs',
+                            ),
+                            _LinkTile(
+                              title: 'Server address',
+                              detail: widget.endpoint,
+                              onTap: _editServer,
+                            ),
+                            _LinkTile(
+                              title: 'Sync the whole library',
+                              detail:
+                                  'Ask the box for everything again, not just what '
+                                  'changed. Nothing on ${Device.thisOne} is lost.',
+                              onTap: () async {
+                                widget.onResync();
+                                NavScope.of(context).back();
+                              },
+                            ),
+                          ],
+                        ),
+
+                        if (widget.accountSync != null)
+                          ListenableBuilder(
+                            listenable: widget.accountSync!,
+                            builder: (context, _) {
+                              final sync = widget.accountSync!;
+                              final at = sync.lastSyncedAt;
+                              return _Group(
+                                title: 'Across your devices',
+                                children: [
+                                  _ValueTile(
+                                    dot: sync.reachable
+                                        ? Tones.held
+                                        : Tones.warn,
+                                    label: sync.syncing
+                                        ? 'Syncing…'
+                                        : sync.reachable
+                                        ? 'In step'
+                                        : 'Waiting for a connection',
+                                    value: at == null ? '' : _ago(at),
+                                  ),
+                                  _SwitchTile(
+                                    title: 'Share what I listen to',
+                                    detail:
+                                        'On, your plays on one device shape '
+                                        'recommendations on all of them. Off, '
+                                        'this device keeps its own taste, like a '
+                                        'TV and a phone that recommend different '
+                                        'things.',
+                                    value: widget.settings.syncHistory,
+                                    onChanged: (v) =>
+                                        widget.settings.setSyncHistory(v),
+                                  ),
+                                  _LinkTile(
+                                    title: 'Sync now',
+                                    detail:
+                                        'Likes, playlists, corrected titles and '
+                                        'where you are in the music follow your '
+                                        'account to every device you sign in on.',
+                                    onTap: sync.syncing ? null : sync.run,
+                                  ),
+                                ],
+                              );
                             },
                           ),
-                          _LinkTile(
-                            title: 'Re-measure storage',
-                            detail: 'Walks the download index again.',
-                            onTap: _measure,
+
+                        _Group(
+                          title: Device.titleThis,
+                          children: [
+                            _ValueTile(
+                              dot: _deviceId == null ? Tones.warn : Tones.held,
+                              label: _deviceId == null
+                                  ? 'Not signed in'
+                                  : 'Signed in',
+                              value: '',
+                            ),
+                            _LinkTile(
+                              title: _enrolling
+                                  ? 'Signing in...'
+                                  : _deviceId == null
+                                  ? 'Enter an invite code'
+                                  : 'Sign in again with a new code',
+                              detail: _deviceId == null
+                                  ? 'Without this, the box will not send music to '
+                                        '${Device.thisOne}. Songs already downloaded keep '
+                                        'playing.'
+                                  : 'Replaces the key on ${Device.thisOne}. The old one '
+                                        'stops working.',
+                              onTap: _enrolling ? null : _enrolDevice,
+                            ),
+                          ],
+                        ),
+
+                        _Group(
+                          title: 'Privacy',
+                          children: [
+                            _LinkTile(
+                              title: 'Clear listening history',
+                              detail:
+                                  'Removes every play and skip the app recorded. On '
+                                  'repeat, Listen again and your mixes go quiet '
+                                  'until you listen again. Your music is not '
+                                  'touched.',
+                              destructive: true,
+                              onTap: () => _confirm(
+                                title: 'Clear listening history?',
+                                body:
+                                    'Everything the app learned about what you '
+                                    'listen to is discarded. It starts learning '
+                                    'again from your next play. No files are '
+                                    'removed.',
+                                action: 'Clear',
+                                run: widget.history.clear,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        if (widget.onWhatsNew != null)
+                          _Group(
+                            title: 'About',
+                            children: [
+                              _LinkTile(
+                                title: 'What\'s new',
+                                detail:
+                                    '$kWhatsNewTitle: everything new in this '
+                                    'release.',
+                                onTap: widget.onWhatsNew,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                  ],
+
+                        SizedBox(height: Space.xl),
+                        Center(
+                          child: GestureDetector(
+                            // Seven taps, the old way in. Nothing here is dangerous
+                            // enough to hide behind a password and nothing is
+                            // useful enough to put in front of everyone.
+                            onTap: () {
+                              _versionTaps += 1;
+                              if (_versionTaps >= 7 && !_developer) {
+                                setState(() => _developer = true);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Developer section shown'),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Column(
+                              children: [
+                                Text(
+                                  'tunes',
+                                  style: TypeScale.wordmark.copyWith(
+                                    fontSize: 30,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'A music player for our music.',
+                                  style: TypeScale.note.copyWith(
+                                    fontSize: 14,
+                                    color: Tones.textMuted,
+                                  ),
+                                ),
+                                SizedBox(height: Space.sm),
+                                Text(
+                                  '${widget.channel}  ·  '
+                                  '${widget.commit.length > 7 ? widget.commit.substring(0, 7) : widget.commit}  ·  '
+                                  'build ${widget.buildNumber}',
+                                  style: TypeScale.mono,
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Made by Aestra Studios',
+                                  style: TypeScale.mono,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        if (_developer)
+                          _Group(
+                            title: 'Developer',
+                            children: [
+                              _ValueTile(
+                                label: 'Endpoint',
+                                value: widget.endpoint,
+                              ),
+                              _ValueTile(
+                                label: 'Support dir',
+                                value: widget.supportDir?.path ?? 'unknown',
+                              ),
+                              _ValueTile(label: 'Commit', value: widget.commit),
+                              _ValueTile(
+                                label: 'Images in memory',
+                                value: _usage == null
+                                    ? '—'
+                                    : '${_usage!.imageCount} · '
+                                          '${formatBytes(_usage!.imageBytes)}',
+                              ),
+                              _ValueTile(
+                                label: 'Log file',
+                                value: _usage == null
+                                    ? '—'
+                                    : (DiagLog.path == null
+                                          ? 'not initialised'
+                                          : formatBytes(_usage!.logBytes)),
+                              ),
+                              _LinkTile(
+                                title: 'Free image memory',
+                                detail:
+                                    'Drops decoded covers. They are decoded again as '
+                                    'you scroll.',
+                                onTap: () async {
+                                  PaintingBinding.instance.imageCache.clear();
+                                  PaintingBinding.instance.imageCache
+                                      .clearLiveImages();
+                                  await _measure();
+                                },
+                              ),
+                              _LinkTile(
+                                title: 'Re-measure storage',
+                                detail: 'Walks the download index again.',
+                                onTap: _measure,
+                              ),
+                            ],
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),

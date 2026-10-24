@@ -640,14 +640,21 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 ),
                                 child: Column(
                                   children: [
-                                    Container(
-                                      width: 36,
-                                      height: 4,
-                                      decoration: BoxDecoration(
-                                        color: Tones.hairline,
-                                        borderRadius: BorderRadius.circular(2),
+                                    // A handle to pull on a phone; a
+                                    // computer just has the words to click.
+                                    if (!isWideWindow(
+                                      MediaQuery.sizeOf(context),
+                                    ))
+                                      Container(
+                                        width: 36,
+                                        height: 4,
+                                        decoration: BoxDecoration(
+                                          color: Tones.hairline,
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
+                                        ),
                                       ),
-                                    ),
                                     const SizedBox(height: Space.xs),
                                     Text(
                                       'About this track',
@@ -1341,7 +1348,13 @@ class _SleepOrSource extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sleep = SleepScope.maybeOf(context);
-    if (sleep == null || !sleep.active) return source;
+    if (sleep == null || !sleep.active) {
+      // On a wide window the play bar below already says where the sound
+      // is; twice on one screen is once too many.
+      return isWideWindow(MediaQuery.sizeOf(context))
+          ? const SizedBox.shrink()
+          : source;
+    }
     final crayon = Looks.current.kind == LookKind.crayon;
     final left = sleep.remaining;
     final text = switch (sleep.mode) {
