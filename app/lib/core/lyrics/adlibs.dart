@@ -4,6 +4,8 @@
 /// what is shouted around it. Display only; the text is never changed.
 library;
 
+import 'adlib_kinds.dart' show isPlaceholder;
+
 /// Which of [tokens] (words, in order) sit inside brackets. A line wholly in
 /// brackets is a backing line, handled by the voices instead, so it has no
 /// ad-libs here: every entry false.
@@ -11,8 +13,10 @@ List<bool> adlibMask(List<String> tokens) {
   final mask = <bool>[];
   var depth = 0;
   for (final t in tokens) {
-    final opens = '('.allMatches(t).length;
-    final closes = ')'.allMatches(t).length;
+    // Square brackets inside a line are ad-libs too ("[Yeah]"); a whole
+    // line in them is a section header, which never reaches here.
+    final opens = RegExp(r'[(\[]').allMatches(t).length;
+    final closes = RegExp(r'[)\]]').allMatches(t).length;
     // A word that opens a bracket is inside it; one that closes it still is.
     final inside = depth > 0 || opens > 0;
     mask.add(inside);
@@ -26,7 +30,11 @@ List<bool> adlibMask(List<String> tokens) {
 
 /// [text] as its main words and its ad-libs, or null when it has none.
 ({String main, String adlibs})? splitAdlibText(String text) {
-  final tokens = text.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  // "[?]" is a lyric site's "could not make this out": nothing to show.
+  final tokens = text
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty && !isPlaceholder(t))
+      .toList();
   final mask = adlibMask(tokens);
   if (!mask.contains(true)) return null;
   final main = [
@@ -37,7 +45,11 @@ List<bool> adlibMask(List<String> tokens) {
   // ("Number two (Hahahaha), only…"), not to the ad-lib.
   final adlibs = [
     for (var i = 0; i < tokens.length; i++)
-      if (mask[i]) tokens[i].replaceAll(RegExp(r'\)[,.;:!?]+$'), ')'),
+      if (mask[i])
+        tokens[i]
+            .replaceAll(RegExp(r'[)\]][,.;:!?]+$'), ')')
+            .replaceAll('[', '(')
+            .replaceAll(']', ')'),
   ].join(' ');
   return (main: main, adlibs: adlibs);
 }
