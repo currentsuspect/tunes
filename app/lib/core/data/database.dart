@@ -149,6 +149,10 @@ class Tracks extends Table {
   TextColumn get lyrics => text().nullable()();
   TextColumn get lyricsSource => text().nullable()();
 
+  /// The box's stamp of [lyrics] (v14): which words these are, so a lean
+  /// manifest's changed ones are all that is fetched.
+  TextColumn get lyricsRev => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {sha};
 }
@@ -255,7 +259,7 @@ class TunesDatabase extends _$TunesDatabase {
     : super(NativeDatabase.createInBackground(file));
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -344,6 +348,11 @@ class TunesDatabase extends _$TunesDatabase {
         // v12 -> v13: clean artist genres. One column with a default, so
         // existing rows read as "no genres" until the next sync.
         await m.addColumn(artists, artists.genresJson);
+      }
+      if (from < 14) {
+        // v13 -> v14: the lyrics' stamp. Empty on rows already here, so the
+        // first lean manifest fetches their words once and stamps them.
+        await m.addColumn(tracks, tracks.lyricsRev);
       }
     },
   );

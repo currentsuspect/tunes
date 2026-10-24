@@ -93,6 +93,9 @@ const API_PATHS = new Set([
   "/about/album",
   "/about/artist",
   "/about/person",
+  // The words of the songs whose lyrics changed, for devices on the lean
+  // manifest (tunesd serve.ts).
+  "/lyrics-for",
 ]);
 
 /**

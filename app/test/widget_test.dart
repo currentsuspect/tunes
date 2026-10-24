@@ -124,6 +124,10 @@ class _FakeClient implements TunesClient {
     String artist,
     String album,
   ) async => const [];
+  @override
+  Future<Map<String, ({String? text, String? source, String? rev})>?> lyricsFor(
+    List<String> shas,
+  ) async => null;
 
   _FakeClient(
     this.result, {

@@ -1816,6 +1816,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           // The first load happens before the manifest exists, so recents
           // cannot resolve their tracks until now.
           unawaited(_onHistoryChanged());
+          // A lean manifest left the words out: fetch the ones that changed.
+          if (raw.lean) unawaited(_fetchChangedLyrics(raw));
           synced = true;
         }
       } else if (fetchError != null && mounted) {
@@ -1911,6 +1913,44 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // An older daemon answers 404 here, and offline answers nothing. Both
       // mean "cannot say", so leave whatever we last knew on screen rather
       // than blanking a section that was correct a minute ago.
+    }
+  }
+
+  bool _fetchingLyrics = false;
+
+  /// The words of the songs whose lyrics changed since this phone last had
+  /// them, a hundred at a time, after a lean manifest (tunesd leanManifest).
+  /// The first one fetches every lyric once; after that only edits, new
+  /// lyrics and drop moments come down.
+  Future<void> _fetchChangedLyrics(TunesManifest lean) async {
+    if (_fetchingLyrics) return;
+    _fetchingLyrics = true;
+    try {
+      final stale = await widget.manifestStore.staleLyrics(lean);
+      var changed = 0;
+      for (var i = 0; i < stale.length; i += 100) {
+        final batch = stale.sublist(i, math.min(i + 100, stale.length));
+        final got = await widget.client.lyricsFor(batch);
+        if (got == null || !mounted) break;
+        for (final e in got.entries) {
+          await widget.manifestStore.setLyrics(
+            e.key,
+            text: e.value.text,
+            source: e.value.source,
+            rev: e.value.rev,
+          );
+          changed++;
+        }
+      }
+      if (changed > 0 && mounted) {
+        final fresh = await _manifestFromStore();
+        if (mounted) setState(() => _manifest = fresh);
+        unawaited(_refreshPlayerTracks());
+      }
+    } catch (e) {
+      DiagLog.log('lyrics fetch failed: $e');
+    } finally {
+      _fetchingLyrics = false;
     }
   }
 

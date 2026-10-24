@@ -50,6 +50,8 @@ export async function publishCloud(opts: {
   manifest: unknown;
   rows: PublishRow[];
   log: Log;
+  /** The manifest without lyrics' words, published beside the full one. */
+  lean?: unknown;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
 }): Promise<{ rows: number; manifestBytes: number } | null> {
@@ -79,8 +81,8 @@ export async function publishCloud(opts: {
     // ~500 times a day (24 Oct). The edge keeps and serves it gzipped.
     const manifestUrl = url.replace(/\/internal\/publish$/, "/internal/manifest");
     const gz = gzipSync(manifestText, { level: 6 });
-    const put = (body: Uint8Array | string, gzipped: boolean) =>
-      fetchFn(manifestUrl, {
+    const put = (body: Uint8Array | string, gzipped: boolean, lean = false) =>
+      fetchFn(lean ? `${manifestUrl}?lean=1` : manifestUrl, {
         method: "PUT",
         headers: {
           ...auth,
@@ -102,7 +104,7 @@ export async function publishCloud(opts: {
     }
     // An edge from before gzip stored those bytes as JSON: send it plain at
     // once, so no phone is handed gzip it was not told about.
-    const said = (await res.json().catch(() => ({}))) as { encoding?: string };
+    const said = (await res.json().catch(() => ({}))) as { encoding?: string; lean?: string };
     let sent = gz.byteLength;
     if (said.encoding !== "gzip") {
       res = await put(manifestText, false);
@@ -111,6 +113,14 @@ export async function publishCloud(opts: {
         return null;
       }
       sent = Buffer.byteLength(manifestText);
+    }
+    // And the lean copy, without the lyrics' words (manifest.ts
+    // leanManifest), for devices that fetch words by stamp. Only to an edge
+    // that says it keeps one apart: an older one would put it in the full
+    // manifest's place, and devices not yet updated would lose their lyrics.
+    if (opts.lean != null && said.lean === "supported") {
+      const leanRes = await put(gzipSync(JSON.stringify(opts.lean), { level: 6 }), true, true);
+      if (!leanRes.ok) log.warn({ event: "PUBLISH_REJECTED", status: leanRes.status, part: "lean" });
     }
     log.info({ event: "PUBLISH_DONE", rows: rows.length, manifestBytes: manifestText.length, sentBytes: sent });
     return { rows: rows.length, manifestBytes: manifestText.length };

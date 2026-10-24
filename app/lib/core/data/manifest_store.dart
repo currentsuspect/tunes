@@ -122,8 +122,15 @@ class ManifestStore {
                 // The words, shared by everyone through the daemon. They were
                 // read off the wire and then dropped here, so even a daemon
                 // that sent lyrics left every phone without them.
-                lyrics: Value(t.lyrics),
-                lyricsSource: Value(t.lyricsSource),
+                // A lean manifest carries no words: the ones stored stay,
+                // and those whose stamp moved are fetched (staleLyrics).
+                lyrics: manifest.lean ? const Value.absent() : Value(t.lyrics),
+                lyricsSource: manifest.lean
+                    ? const Value.absent()
+                    : Value(t.lyricsSource),
+                lyricsRev: manifest.lean
+                    ? const Value.absent()
+                    : Value(t.lyricsRev),
               ),
             );
         if (priorAdded == null && effectiveAddedAt != null) {
@@ -251,6 +258,38 @@ class ManifestStore {
     return _rowsToResolvedTracks([
       for (final r in rows) _db.tracks.map(r.data),
     ]);
+  }
+
+  /// The songs of a lean [manifest] whose stored words are not the ones it
+  /// stamps: new lyrics, changed ones, and ones taken away (no stamp now).
+  Future<List<String>> staleLyrics(TunesManifest manifest) async {
+    final rows = await _db
+        .customSelect('SELECT sha, lyrics_rev FROM tracks')
+        .get();
+    final stored = {
+      for (final r in rows)
+        r.read<String>('sha'): r.readNullable<String>('lyrics_rev'),
+    };
+    return [
+      for (final t in manifest.tracks)
+        if (stored.containsKey(t.sha) && stored[t.sha] != t.lyricsRev) t.sha,
+    ];
+  }
+
+  /// Stores a song's fetched words and their stamp.
+  Future<void> setLyrics(
+    String sha, {
+    required String? text,
+    required String? source,
+    required String? rev,
+  }) async {
+    await (_db.update(_db.tracks)..where((t) => t.sha.equals(sha))).write(
+      TracksCompanion(
+        lyrics: Value(text),
+        lyricsSource: Value(source),
+        lyricsRev: Value(rev),
+      ),
+    );
   }
 
   /// The lyrics the slim read left out, by song.

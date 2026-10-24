@@ -104,7 +104,9 @@ class TunesClient {
   Future<TunesManifest> fetchManifest({bool fromCacheOnFailure = true}) async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
-      final req = await client.getUrl(Uri.parse('$baseUrl/manifest'));
+      // Lean: without the lyrics' words, 0.7 MB instead of 5 (gzipped).
+      // A box or edge that does not know lean sends the full one.
+      final req = await client.getUrl(Uri.parse('$baseUrl/manifest?lean=1'));
       await _authorize(req);
       final res = await req.close().timeout(_timeout);
       if (res.statusCode != 200) {
@@ -794,6 +796,31 @@ class TunesClient {
         for (final w in (j['work'] as List<dynamic>? ?? const []))
           Work.fromJson(w as Map<String, dynamic>),
       ];
+    } on TunesFetchException {
+      return null;
+    }
+  }
+
+  /// The words of [shas] (up to 100), with their stamps, for a lean
+  /// manifest's changed lyrics. Null when the box cannot be asked.
+  Future<Map<String, ({String? text, String? source, String? rev})>?> lyricsFor(
+    List<String> shas,
+  ) async {
+    try {
+      final j = await _json(
+        'GET',
+        '/lyrics-for?shas=${shas.take(100).join(',')}',
+        timeout: const Duration(seconds: 30),
+      );
+      return {
+        for (final e
+            in (j['lyrics'] as Map<String, dynamic>? ?? const {}).entries)
+          e.key: (
+            text: (e.value as Map<String, dynamic>)['text'] as String?,
+            source: e.value['source'] as String?,
+            rev: e.value['rev'] as String?,
+          ),
+      };
     } on TunesFetchException {
       return null;
     }

@@ -471,4 +471,87 @@ void main() {
       expect(slim.single.lyrics, 'mine');
     });
   });
+
+  group('the lean manifest (lyrics by stamp, 24 Oct)', () {
+    ManifestTrack withWords(String sha, String? words, String? rev) =>
+        ManifestTrack(
+          sha: sha,
+          size: 1000,
+          codec: 'flac',
+          sampleRate: 44100,
+          channels: 2,
+          bitrate: 950000,
+          durationMs: 120000,
+          title: 'Track $sha',
+          artist: 'Artist A',
+          album: 'Album A',
+          year: '2024',
+          artSha: null,
+          releaseId: 'release-1',
+          trackNumber: 1,
+          discNumber: null,
+          lyrics: words,
+          lyricsSource: words == null ? null : 'lrclib',
+          lyricsRev: rev,
+        );
+
+    test(
+      'keeps the words it has, and asks only for the ones that moved',
+      () async {
+        final db = _newDb();
+        addTearDown(db.close);
+        final store = ManifestStore(db);
+        await store.apply(
+          _manifest(
+            tracks: [
+              withWords('a', 'la la', 'r1'),
+              withWords('b', 'lo lo', 'r2'),
+              withWords('c', null, null),
+            ],
+          ),
+        );
+        // Lean: no words; b's changed, c gained some, a's are as they were.
+        final lean = TunesManifest(
+          tracks: [
+            withWords('a', null, 'r1'),
+            withWords('b', null, 'r2b'),
+            withWords('c', null, 'r3'),
+          ],
+          releases: const [],
+          lean: true,
+        );
+        await store.apply(lean);
+        final kept = await store.lyricsBySha();
+        expect(kept['a']?.$1, 'la la');
+        expect(kept['b']?.$1, 'lo lo', reason: 'kept until the new ones come');
+        expect(await store.staleLyrics(lean), ['b', 'c']);
+
+        await store.setLyrics('b', text: 'LO LO', source: 'user', rev: 'r2b');
+        await store.setLyrics('c', text: 'new', source: 'lrclib', rev: 'r3');
+        expect(await store.staleLyrics(lean), isEmpty);
+        expect((await store.lyricsBySha())['b'], ('LO LO', 'user'));
+      },
+    );
+
+    test('lyrics taken away go too', () async {
+      final db = _newDb();
+      addTearDown(db.close);
+      final store = ManifestStore(db);
+      await store.apply(_manifest(tracks: [withWords('a', 'la la', 'r1')]));
+      final lean = TunesManifest(
+        tracks: [withWords('a', null, null)],
+        releases: const [],
+        lean: true,
+      );
+      await store.apply(lean);
+      expect(await store.staleLyrics(lean), ['a']);
+      await store.setLyrics('a', text: null, source: null, rev: null);
+      expect((await store.lyricsBySha())['a'], isNull);
+    });
+
+    test('the manifest says whether it is lean', () {
+      expect(TunesManifest.fromJson({'tracks': [], 'lean': true}).lean, isTrue);
+      expect(TunesManifest.fromJson({'tracks': []}).lean, isFalse);
+    });
+  });
 }

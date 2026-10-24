@@ -8,7 +8,7 @@ import type { OnDemandFetcher } from "./ondemand.js";
 import { kMaxCardBytes, parseSpan, type ClipMaker } from "./clip.js";
 import type { Getter, GetRequest } from "./getter.js";
 import type { ManifestV3 } from "./manifest.js";
-import { releaseArtKey } from "./manifest.js";
+import { leanManifest, releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
 import type { AboutService } from "./about.js";
 import { kMaxLyricChars, type LyricStore } from "./lyricstore.js";
@@ -121,10 +121,31 @@ export class ManifestServer {
     const server = createServer(async (req, res) => {
       try {
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+        // ?lean=1: without the lyrics' words (leanManifest); the device
+        // fetches the ones whose stamp changed from /lyrics-for.
         if (url.pathname === "/manifest") {
           const manifest = await this.getManifest();
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify(manifest));
+          res.end(JSON.stringify(url.searchParams.get("lean") === "1" ? leanManifest(manifest) : manifest));
+          return;
+        }
+
+        // The words of up to 100 songs: GET /lyrics-for?shas=<sha>,<sha>...
+        // Answered from the manifest, so they match its stamps.
+        if (url.pathname === "/lyrics-for") {
+          const shas = (url.searchParams.get("shas") ?? "")
+            .split(",")
+            .filter((x) => /^[0-9a-f]{64}$/.test(x))
+            .slice(0, 100);
+          const want = new Set(shas);
+          const manifest = await this.getManifest();
+          const lyrics: Record<string, { text: string | null; source: string | null; rev: string | null }> = {};
+          for (const t of manifest.tracks) {
+            if (!want.has(t.sha)) continue;
+            lyrics[t.sha] = { text: t.lyrics, source: t.lyricsSource, rev: t.lyricsRev ?? null };
+          }
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ lyrics }));
           return;
         }
 
