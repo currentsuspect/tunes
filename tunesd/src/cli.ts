@@ -22,7 +22,7 @@ import type { EnrichAttempt, EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
-import { buildManifest, isCategoryRelease, isPlaylistAlbum, normalize, PLAYLIST_ALBUM_MAX, releaseArtKey } from "./manifest.js";
+import { albumEditionBase, buildManifest, isCategoryRelease, isPlaylistAlbum, normalize, PLAYLIST_ALBUM_MAX, releaseArtKey } from "./manifest.js";
 import type { ManifestV3, ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
@@ -630,9 +630,18 @@ async function main(): Promise<void> {
           const candidates = await deezer.searchAlbumCandidates(artist, album);
           // Both names must match: a cover is a claim about which record this
           // is, and the wrong one is worse than none.
-          const match = candidates.find(
+          let match = candidates.find(
             (c) => sameArtistName(c.artist, artist) && normName(c.title) === normName(album)
           );
+          // A deluxe or expanded edition Deezer only knows by its plain name
+          // ("ADL (Deluxe)" is "ADL" there) takes that cover, matched just as
+          // strictly against the plain name.
+          const base = albumEditionBase(album);
+          if (match == null && base !== album.trim()) {
+            match = (await deezer.searchAlbumCandidates(artist, base)).find(
+              (c) => sameArtistName(c.artist, artist) && normName(c.title) === normName(base)
+            );
+          }
           if (match?.coverUrl == null) {
             releaseArtMisses.set(key, new Date().toISOString());
             releaseArtChanged = true;
