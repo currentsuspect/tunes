@@ -667,11 +667,93 @@ async function main(): Promise<void> {
       // before the release-ordering loop so its long rate-limit sleeps cannot
       // starve the artist list.
       await backfillArtistPhotos();
-      // Songs per album tag, for the playlist-rip check below.
+      // Songs per album tag, for the playlist-rip check below. Every song the
+      // box knows, archived ones too: counting only the local cache would
+      // call a compilation held whole a lone rip.
       const albumTagCounts = new Map<string, number>();
-      for (const obj of objects) {
-        const a = probeCache.get(obj.sha)?.tags.album?.trim();
+      for (const p of probeCache.values()) {
+        const a = p.tags.album?.trim();
         if (a) albumTagCounts.set(normalize(a), (albumTagCounts.get(normalize(a)) ?? 0) + 1);
+      }
+      // A lone song under a playlist's name ("Rap 2020", "...Collection
+      // CD1"): its tags are trusted for the song, not the record. Ask
+      // MusicBrainz which record it came out on; the manifest puts that
+      // record's name, year and cover over the playlist's (isPlaylistAlbum).
+      // True when the song was one and is now looked up.
+      const fixPlaylistRip = async (sha: string, probe: ProbeResult): Promise<boolean> => {
+        const tagAlbum = probe.tags.album?.trim() ?? "";
+        if (
+          probe.tags.title &&
+          probe.tags.artist &&
+          isPlaylistAlbum(tagAlbum) &&
+          (albumTagCounts.get(normalize(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX
+        ) {
+          const act = releaseArtistOf(probe.tags.albumArtist ?? null, probe.tags.artist.trim());
+          const first = await mb.firstAlbum(act || probe.tags.artist.trim(), probe.tags.title.trim());
+          if (first) {
+            // The record's sleeve: any edition's, then this edition's, then
+            // Deezer's for an album of exactly that name and artist (the
+            // Cover Art Archive has nothing for some, Death Race for Love
+            // among them).
+            let cover = (await mb.fetchGroupCover(first.groupId)) ?? (await mb.fetchCover(first.releaseId));
+            if (!cover) {
+              try {
+                const who = first.artist || act;
+                const dz = (await deezer.searchAlbumCandidates(who, first.title)).find(
+                  // Edition notes aside: Deezer lists it as "Death Race For
+                  // Love (Bonus Track Version)".
+                  (c) => sameArtistName(c.artist, who) && songTitleKey(c.title) === songTitleKey(first.title)
+                );
+                if (dz?.coverUrl) {
+                  const res = await fetch(dz.coverUrl, { signal: AbortSignal.timeout(20_000) });
+                  const bytes = res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+                  if (bytes && bytes.length >= 1000) cover = await storeCoverBytes(env.dataDir, bytes);
+                }
+              } catch {
+                // Deezer out of reach: the record's name still goes in; the
+                // cover is looked for again when the entry goes stale.
+              }
+            }
+            enrich.set(sha, {
+              sha: sha,
+              artist: first.artist || null,
+              album: first.title,
+              year: first.year,
+              artSha: cover?.sha ?? null,
+              releaseId: `mb:${first.releaseId}`,
+              releaseType: first.type,
+              trackNumber: null,
+              discNumber: null,
+              totalTracks: null,
+              membership: [],
+              source: "musicbrainz",
+              enrichedAt: new Date().toISOString(),
+            });
+            log.info({
+              event: "ENRICH_PLAYLIST_RIP",
+              sha: sha.slice(0, 8),
+              tagged: tagAlbum,
+              record: first.title,
+              cover: cover != null,
+            });
+            await persistEnrich();
+            await clearEnrichAttempt(sha);
+            return true;
+          }
+        }
+        return false;
+      };
+      // The same for songs whose file is only in the Telegram archive now:
+      // the lookup needs the tags, not the file, and the local store is a
+      // cache that keeps only the newest few gigabytes (Make Believe, from
+      // September, was never looked at).
+      const local = new Set(objects.map((o) => o.sha));
+      for (const [sha, p] of probeCache) {
+        if (local.has(sha)) continue;
+        if (enrich.get(sha)?.releaseId?.startsWith("mb:")) continue;
+        if (!isPlaylistAlbum(p.tags.album?.trim() ?? "")) continue;
+        if (!enrichRetryDue(enrichAttempts.get(sha), Date.now())) continue;
+        if (!(await fixPlaylistRip(sha, p))) await noteEnrichAttempt(sha);
       }
       for (const obj of objects) {
         const existing = enrich.get(obj.sha);
@@ -723,67 +805,7 @@ async function main(): Promise<void> {
         // CD1"): its tags are trusted for the song, not the record. Ask
         // MusicBrainz which record it came out on; the manifest puts that
         // record's name, year and cover over the playlist's (isPlaylistAlbum).
-        const tagAlbum = probe.tags.album?.trim() ?? "";
-        if (
-          tagged &&
-          probe.tags.title &&
-          probe.tags.artist &&
-          isPlaylistAlbum(tagAlbum) &&
-          (albumTagCounts.get(normalize(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX
-        ) {
-          const act = releaseArtistOf(probe.tags.albumArtist ?? null, probe.tags.artist.trim());
-          const first = await mb.firstAlbum(act || probe.tags.artist.trim(), probe.tags.title.trim());
-          if (first) {
-            // The record's sleeve: any edition's, then this edition's, then
-            // Deezer's for an album of exactly that name and artist (the
-            // Cover Art Archive has nothing for some, Death Race for Love
-            // among them).
-            let cover = (await mb.fetchGroupCover(first.groupId)) ?? (await mb.fetchCover(first.releaseId));
-            if (!cover) {
-              try {
-                const who = first.artist || act;
-                const dz = (await deezer.searchAlbumCandidates(who, first.title)).find(
-                  // Edition notes aside: Deezer lists it as "Death Race For
-                  // Love (Bonus Track Version)".
-                  (c) => sameArtistName(c.artist, who) && songTitleKey(c.title) === songTitleKey(first.title)
-                );
-                if (dz?.coverUrl) {
-                  const res = await fetch(dz.coverUrl, { signal: AbortSignal.timeout(20_000) });
-                  const bytes = res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
-                  if (bytes && bytes.length >= 1000) cover = await storeCoverBytes(env.dataDir, bytes);
-                }
-              } catch {
-                // Deezer out of reach: the record's name still goes in; the
-                // cover is looked for again when the entry goes stale.
-              }
-            }
-            enrich.set(obj.sha, {
-              sha: obj.sha,
-              artist: first.artist || null,
-              album: first.title,
-              year: first.year,
-              artSha: cover?.sha ?? null,
-              releaseId: `mb:${first.releaseId}`,
-              releaseType: first.type,
-              trackNumber: null,
-              discNumber: null,
-              totalTracks: null,
-              membership: [],
-              source: "musicbrainz",
-              enrichedAt: new Date().toISOString(),
-            });
-            log.info({
-              event: "ENRICH_PLAYLIST_RIP",
-              sha: obj.sha.slice(0, 8),
-              tagged: tagAlbum,
-              record: first.title,
-              cover: cover != null,
-            });
-            await persistEnrich();
-            await clearEnrichAttempt(obj.sha);
-            continue;
-          }
-        }
+        if (tagged && (await fixPlaylistRip(obj.sha, probe))) continue;
         if (tagged) {
           enrich.set(obj.sha, {
             sha: obj.sha,
