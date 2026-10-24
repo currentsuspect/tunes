@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widgets' type. Android 8+ draws it in Shantell Sans (values-v26),
+     the app's Crayon face; older ones keep the system font. -->
+<resources>
+    <style name="WidgetTitle">
+        <item name="android:textColor">#FF22201C</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="WidgetBody">
+        <item name="android:textColor">#FF6E675C</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+</resources>

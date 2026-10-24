@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Player, 4x2: the cover, the song, its progress and the three buttons. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_paper_bg"
+    android:orientation="horizontal"
+    android:padding="14dp">
+
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="0.42"
+        android:background="@drawable/widget_art_bg">
+        <ImageView
+            android:id="@+id/widget_art"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToOutline="true"
+            android:background="@drawable/widget_art_bg"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="14dp"
+        android:layout_weight="0.58"
+        android:orientation="vertical">
+
+        <TextView
+            style="@style/WidgetBody"
+            android:id="@+id/widget_kicker"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.06"
+            android:text="TUNES · PLAYING"
+            android:textSize="11sp" />
+        <TextView
+            style="@style/WidgetTitle"
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="19sp" />
+        <TextView
+            style="@style/WidgetBody"
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <ProgressBar
+            android:id="@+id/widget_progress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:max="1000"
+            android:progressDrawable="@drawable/widget_progress" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <ImageButton
+                android:id="@+id/widget_prev"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Previous"
+                android:src="@drawable/ic_widget_prev_ink" />
+            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <ImageButton
+                android:id="@+id/widget_play"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/widget_play_btn"
+                android:contentDescription="Play or pause"
+                android:src="@drawable/ic_widget_play_white" />
+            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <ImageButton
+                android:id="@+id/widget_next"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Next"
+                android:src="@drawable/ic_widget_next_ink" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

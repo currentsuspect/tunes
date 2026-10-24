@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'features/home_widgets/home_widgets.dart';
 import 'features/song/about_nav.dart';
 import 'features/song/person_page.dart';
 import 'features/song/song_page.dart';
@@ -840,6 +841,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   TunePlayer get _local => widget.localPlayer ?? widget.player;
 
   MprisBridge? _mpris;
+  HomeWidgetsBridge? _homeWidgets;
 
   /// Navigation history and the one-instance-per-identity pane registry.
   /// Panels are destinations rendered by this shell, not pushed routes:
@@ -991,6 +993,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.player.onQueueEnded = _pickRadio;
     // The desktop's media keys, bar and headphones (Linux only): what the
     // play bar shows, including a song playing on another device.
+    // Angel's home screen widgets (Android only).
+    _homeWidgets = HomeWidgetsBridge.start(
+      widget.player,
+      artPathFor: (sha) {
+        final saved = widget.artStore.pathFor(sha);
+        return saved != null && File(saved).existsSync() ? saved : null;
+      },
+    );
     _mpris = MprisBridge.start(
       widget.player,
       artPathFor: (sha) {
@@ -1046,6 +1056,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _refreshTimer?.cancel();
     _local.removeListener(_feedRadio);
     _mpris?.stop();
+    _homeWidgets?.stop();
     widget.player.onQueueEnded = null;
     widget.history.removeListener(_onHistoryChanged);
     _nav.removeListener(_onNavChanged);

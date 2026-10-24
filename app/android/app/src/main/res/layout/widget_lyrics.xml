@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lyrics, 4x2: the line being sung big, the ones either side small. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_ink_bg"
+    android:orientation="vertical"
+    android:paddingStart="18dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="12dp">
+
+    <TextView
+        style="@style/WidgetBody"
+        android:id="@+id/widget_line_prev"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FF8E879A"
+        android:textSize="14sp" />
+
+    <TextView
+        style="@style/WidgetTitle"
+        android:id="@+id/widget_line"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center_vertical"
+        android:maxLines="3"
+        android:textColor="#FFFFC93C"
+        android:textSize="24sp" />
+
+    <TextView
+        style="@style/WidgetBody"
+        android:id="@+id/widget_line_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FFB9B2C9"
+        android:textSize="14sp" />
+
+    <TextView
+        style="@style/WidgetBody"
+        android:id="@+id/widget_song"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="#FF8E879A"
+        android:textSize="11sp" />
+</LinearLayout>

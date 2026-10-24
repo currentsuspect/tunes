@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_player_description">The song playing, with play, pause and skip</string>
+    <string name="widget_lyrics_description">The lyric line being sung, as the song plays</string>
+    <string name="widget_mini_description">The song playing, and one button</string>
+</resources>

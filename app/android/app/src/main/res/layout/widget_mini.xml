@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Small, 2x2: the song and one button. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_yellow_bg"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <TextView
+        style="@style/WidgetTitle"
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="2"
+        android:textSize="17sp" />
+    <TextView
+        style="@style/WidgetBody"
+        android:id="@+id/widget_artist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FF22201C"
+        android:textSize="12sp" />
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+    <ImageButton
+        android:id="@+id/widget_play"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_gravity="end"
+        android:background="@drawable/widget_play_btn_paper"
+        android:contentDescription="Play or pause"
+        android:src="@drawable/ic_widget_play_ink" />
+</LinearLayout>

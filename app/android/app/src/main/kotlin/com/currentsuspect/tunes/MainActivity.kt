@@ -54,6 +54,20 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // What the home screen widgets show (TunesWidgets.kt), sent by the
+        // app's HomeWidgetsBridge when something on them changes.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/widgets")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "update" -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val report = call.arguments as? Map<String, Any?>
+                        if (report != null) TunesWidgets.publish(applicationContext, report)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // Whether any app is playing audio right now. Asked while this app is
         // paused because another one took the output for good, so it can wait
         // for that app to finish and carry on, instead of staying silent.
