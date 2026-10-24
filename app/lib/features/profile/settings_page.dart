@@ -526,6 +526,15 @@ class _SettingsPageState extends State<SettingsPage> {
                           value: s.wordEffects,
                           onChanged: s.setWordEffects,
                         ),
+                        _SwitchTile(
+                          title: 'Drop moments',
+                          detail:
+                              'When the 808 drops out and slams back, the '
+                              'ad-lib on it grows over every line, then '
+                              'shrinks back with the beat.',
+                          value: s.dropMoments,
+                          onChanged: s.setDropMoments,
+                        ),
                         _ChoiceTile(
                           title: 'Text size',
                           choices: ['Small', 'Medium', 'Large'],

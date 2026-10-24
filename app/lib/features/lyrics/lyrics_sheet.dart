@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/adlib_kinds.dart';
 import '../../core/lyrics/adlib_motion.dart';
+import '../../core/lyrics/drops.dart';
+import 'drop_word.dart';
 import '../../core/lyrics/word_fx.dart';
 import '../../core/lyrics/word_fx_motion.dart';
 import 'adlib_style.dart';
@@ -586,6 +589,31 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
 
   int? get _activeIndex => _follow.activeIndex;
 
+  /// The song's drop moments (drops.dart), and what they show right now.
+  /// Lines and the growing word listen to [_drop], which only changes
+  /// during a moment, so the list is left alone the rest of the time.
+  List<DropMoment> _moments = const [];
+  final ValueNotifier<DropFrame> _drop = ValueNotifier(DropFrame.none);
+  final GlobalKey _stackKey = GlobalKey();
+
+  void _tickDrop() {
+    final on = mounted && (SettingsScope.maybeOf(context)?.dropMoments ?? true);
+    _drop.value = !on || _moments.isEmpty
+        ? DropFrame.none
+        : dropFrame(_moments, _playhead.value);
+  }
+
+  /// Where shown line [i] sits on the sheet, for the word to rise from.
+  Offset? _lineCentre(int i) {
+    if (i < 0 || i >= _lineKeys.length) return null;
+    final line = _lineKeys[i].currentContext?.findRenderObject();
+    final stack = _stackKey.currentContext?.findRenderObject();
+    if (line is! RenderBox || stack is! RenderBox || !line.attached) {
+      return null;
+    }
+    return line.localToGlobal(line.size.center(Offset.zero), ancestor: stack);
+  }
+
   /// A line played on repeat: from its first word to the end of its last,
   /// for learning a verse or hearing a word again. [origin] is the stored
   /// line, so a long line split in two loops whole.
@@ -718,6 +746,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     );
     _follow.addListener(_onFollowUpdate);
     _playhead.addListener(_checkLoop);
+    _playhead.addListener(_tickDrop);
     _lineKeys = List.generate(_lrc?.lines.length ?? 0, (_) => GlobalKey());
     // Nothing else subscribes to the clock here: KaraokeLine takes it and
     // rebuilds itself through a ValueListenableBuilder, so the word sweep
@@ -762,6 +791,19 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     _voices = LyricVoices.resolve([
       for (final l in _lrc?.lines ?? const <LrcLine>[]) l.text,
     ], artists: widget.artists);
+    final fixes = _fixes;
+    _moments = _lrc == null
+        ? const []
+        : resolveMoments(
+            _lrc!.lines,
+            BeatMap.parse(_source?.metadata[BeatMap.key]),
+            // An ad-lib moved in the Lyric Center moves its moment too.
+            shiftOf: (i, w) {
+              final line = i < _origin.length ? _origin[i] : i;
+              final offset = i < _wordOffset.length ? _wordOffset[i] : 0;
+              return fixes.at(line, offset + w)?.shift ?? Duration.zero;
+            },
+          );
   }
 
   @override
@@ -771,7 +813,9 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     // clock is torn down.
     _follow.dispose();
     _playhead.removeListener(_checkLoop);
+    _playhead.removeListener(_tickDrop);
     _playhead.dispose();
+    _drop.dispose();
     super.dispose();
   }
 
@@ -878,9 +922,24 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     }
     // The no-timed-lines case is already handled above, against lrc.untimed
     // rather than a re-derived plain-text blob.
-    final list = NotificationListener<ScrollNotification>(
-      onNotification: _onScrollNotification,
-      child: _timedList(lrc),
+    // Blurred under a drop moment. Always wrapped, blur or not, so the list
+    // is never remounted (which would reset its scroll).
+    final list = ValueListenableBuilder<DropFrame>(
+      valueListenable: _drop,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onScrollNotification,
+        child: _timedList(lrc),
+      ),
+      builder: (context, f, child) => ImageFiltered(
+        enabled: f.blur > 0.05,
+        imageFilter: ImageFilter.blur(sigmaX: f.blur, sigmaY: f.blur),
+        child: child,
+      ),
+    );
+    final accent = AccentScope.of(context);
+    final dropBase = TypeScale.display.copyWith(
+      fontSize: _restingSize(context) * 1.22,
+      color: Tones.text,
     );
     // Paused by a manual scroll: offer an explicit way back. The pill
     // hides itself as soon as following resumes (new line, scroll-back,
@@ -888,8 +947,22 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     // list between a bare return and a Stack child would remount the
     // ListView and silently reset its scroll offset to zero.
     return Stack(
+      key: _stackKey,
       children: [
         list,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ValueListenableBuilder<DropFrame>(
+              valueListenable: _drop,
+              builder: (context, f, _) => DropWord(
+                frame: f,
+                from: f.moment == null ? null : _lineCentre(f.moment!.line),
+                base: dropBase,
+                accent: accent,
+              ),
+            ),
+          ),
+        ),
         if (_loop != null)
           Positioned(
             left: 0,
@@ -1205,71 +1278,82 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         // through, so it wraps the whole row rather than the text inside it.
         return KeyedSubtree(
           key: _lineKeys[i],
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => widget.player.seek(line.timestamp),
-            // Hold a line for what you can do with it: send it to someone, or
-            // say which side it is sung from.
-            onLongPress: () {
-              HapticFeedback.selectionClick();
-              _lineMenu(lrc, i, voice);
+          child: ValueListenableBuilder<DropFrame>(
+            valueListenable: _drop,
+            builder: (context, f, child) {
+              if (f.isNone) return Opacity(opacity: 1, child: child);
+              final d = f.dimFor(
+                activeIdx < 0 ? 0 : i - activeIdx,
+                _playhead.value,
+              );
+              return Opacity(opacity: (1 - d).clamp(0.0, 1.0), child: child);
             },
-            child: Align(
-              alignment: alignment,
-              child: ConstrainedBox(
-                // A line hugging one edge reads as a reply only if it does not
-                // run all the way across to the other.
-                constraints: BoxConstraints(
-                  maxWidth: voice.side == LyricSide.center
-                      ? double.infinity
-                      : MediaQuery.of(context).size.width * 0.82,
-                ),
-                child: line.hasWordTiming
-                    // Word-synced: sweep the highlight across the word being sung.
-                    ? KaraokeLine(
-                        lrc: lrc,
-                        lineIndex: i,
-                        playhead: _playhead,
-                        onWordTap: widget.player.seek,
-                        fxSeed: _fxSeedFor(context, i),
-                        fixAt: _fixAtFor(i),
-                        trackEnd: widget.player.duration,
-                        isActive: isActive,
-                        isPast: isPast,
-                        restOpacity: opacity,
-                        textAlign: align,
-                        wrapAlignment: wrap,
-                        style: TypeScale.display.copyWith(fontSize: size),
-                      )
-                    : AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 320),
-                        curve: Curves.easeOutCubic,
-                        style: TypeScale.display.copyWith(
-                          fontSize: size,
-                          color: Tones.text.withValues(
-                            alpha: opacity * (voice.backing ? 0.8 : 1),
-                          ),
-                          height: 1.25,
-                        ),
-                        textAlign: align,
-                        child: _withAdlibs(
-                          voice.text,
-                          align,
-                          size,
-                          fxSeed: isActive ? _fxSeedFor(context, i) : null,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => widget.player.seek(line.timestamp),
+              // Hold a line for what you can do with it: send it to someone, or
+              // say which side it is sung from.
+              onLongPress: () {
+                HapticFeedback.selectionClick();
+                _lineMenu(lrc, i, voice);
+              },
+              child: Align(
+                alignment: alignment,
+                child: ConstrainedBox(
+                  // A line hugging one edge reads as a reply only if it does not
+                  // run all the way across to the other.
+                  constraints: BoxConstraints(
+                    maxWidth: voice.side == LyricSide.center
+                        ? double.infinity
+                        : MediaQuery.of(context).size.width * 0.82,
+                  ),
+                  child: line.hasWordTiming
+                      // Word-synced: sweep the highlight across the word being sung.
+                      ? KaraokeLine(
+                          lrc: lrc,
+                          lineIndex: i,
+                          playhead: _playhead,
+                          onWordTap: widget.player.seek,
+                          fxSeed: _fxSeedFor(context, i),
                           fixAt: _fixAtFor(i),
-                          // Only the line being sung animates its ad-libs.
-                          live: isActive
-                              ? (
-                                  playhead: _playhead,
-                                  lineStart: line.timestamp,
-                                  nextStart: i + 1 < lrc.lines.length
-                                      ? lrc.lines[i + 1].timestamp
-                                      : null,
-                                )
-                              : null,
+                          trackEnd: widget.player.duration,
+                          isActive: isActive,
+                          isPast: isPast,
+                          restOpacity: opacity,
+                          textAlign: align,
+                          wrapAlignment: wrap,
+                          style: TypeScale.display.copyWith(fontSize: size),
+                        )
+                      : AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 320),
+                          curve: Curves.easeOutCubic,
+                          style: TypeScale.display.copyWith(
+                            fontSize: size,
+                            color: Tones.text.withValues(
+                              alpha: opacity * (voice.backing ? 0.8 : 1),
+                            ),
+                            height: 1.25,
+                          ),
+                          textAlign: align,
+                          child: _withAdlibs(
+                            voice.text,
+                            align,
+                            size,
+                            fxSeed: isActive ? _fxSeedFor(context, i) : null,
+                            fixAt: _fixAtFor(i),
+                            // Only the line being sung animates its ad-libs.
+                            live: isActive
+                                ? (
+                                    playhead: _playhead,
+                                    lineStart: line.timestamp,
+                                    nextStart: i + 1 < lrc.lines.length
+                                        ? lrc.lines[i + 1].timestamp
+                                        : null,
+                                  )
+                                : null,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),

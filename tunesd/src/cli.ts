@@ -38,6 +38,7 @@ import { AudioPusher } from "./audiopush.js";
 import { coalesce, playableOnly, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { ClipMaker } from "./clip.js";
+import { analyzeBeats, BeatStore } from "./beats.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
@@ -334,7 +335,8 @@ async function main(): Promise<void> {
     // about the artist, not the file.
     // Lyrics: found by the daemon, or typed by a listener, and served to every
     // phone through the manifest (see lyricstore.ts).
-    const lyricStore = await new LyricStore(join(env.dataDir, "lyrics.json")).load();
+    const beatStore = await new BeatStore(join(env.dataDir, "beats.json")).load();
+    const lyricStore = (await new LyricStore(join(env.dataDir, "lyrics.json")).load()).useBeats(beatStore);
     const lrclib = new LrclibClient();
     const lyricChain = new LyricChain(lrclib, new NeteaseClient(), new GeniusClient());
 
@@ -1670,6 +1672,31 @@ async function main(): Promise<void> {
         }
       } catch (e) {
         log.warn({ event: "LYRICS_PASS_FAILED", err: String(e).slice(0, 200) });
+      }
+      // Where each timed song hits (beats.ts), for the ones held here: ~2 s
+      // of ffmpeg each, a few at a time so a scan is never held up long.
+      try {
+        let read = 0;
+        let moments = 0;
+        for (const sha of lyricStore.needingBeats()) {
+          if (read >= 20) break;
+          if (!store.has(sha)) continue;
+          // A file ffmpeg cannot read is recorded as having no moments, so
+          // it is not tried again every pass.
+          const m = await analyzeBeats(store.pathOf(sha)).catch((e: unknown) => {
+            log.warn({ event: "BEATS_READ_FAILED", sha, err: String(e).slice(0, 200) });
+            return { drops: [], breaks: [], pulse: [], quiet: [] };
+          });
+          await beatStore.set(sha, m);
+          read++;
+          if (m.drops.length || m.breaks.length) moments++;
+        }
+        if (read > 0) {
+          log.info({ event: "BEATS_PASS", read, withMoments: moments });
+          publishSoon.request();
+        }
+      } catch (e) {
+        log.warn({ event: "BEATS_PASS_FAILED", err: String(e).slice(0, 200) });
       } finally {
         lyricPassRunning = false;
       }

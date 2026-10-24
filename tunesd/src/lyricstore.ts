@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { withBeats, type BeatStore } from "./beats.js";
 import type { ChainAnswer, FetchedSource, FoundLyrics, LyricTiming, Ours } from "./lyricsources.js";
 
 /**
@@ -81,22 +82,43 @@ export class LyricStore {
     return this.data.tracks[sha] ?? null;
   }
 
+  private beats: BeatStore | null = null;
+
+  /** Where each song hits (beats.ts): sent inside its lyric. */
+  useBeats(beats: BeatStore): this {
+    this.beats = beats;
+    return this;
+  }
+
   /** sha -> the words and where they came from, for the manifest. */
   forManifest(): Map<string, { lyrics: string; source: Exclude<LyricSource, "none"> }> {
     const out = new Map<string, { lyrics: string; source: Exclude<LyricSource, "none"> }>();
     for (const [sha, r] of Object.entries(this.data.tracks)) {
       if (r.text && r.source !== "none") {
-        out.set(sha, { lyrics: r.text, source: r.source });
+        out.set(sha, { lyrics: withBeats(r.text, this.beats?.get(sha) ?? null), source: r.source });
       }
     }
     return out;
   }
 
-  /** Shas whose words changed after [since], oldest first. */
+  /** Shas whose words changed after [since], oldest first; a song whose
+   * beats were worked out since counts, its lyric having changed with them. */
   changedSince(since: number): string[] {
-    return Object.entries(this.data.tracks)
+    const words = Object.entries(this.data.tracks)
       .filter(([, r]) => r.text !== null && Date.parse(r.updatedAt) > since)
       .sort((a, b) => a[1].updatedAt.localeCompare(b[1].updatedAt))
+      .map(([sha]) => sha);
+    const seen = new Set(words);
+    for (const sha of this.beats?.changedSince(since) ?? []) {
+      if (!seen.has(sha) && this.data.tracks[sha]?.text) words.push(sha);
+    }
+    return words;
+  }
+
+  /** Songs with timed lyrics whose beats are not worked out yet. */
+  needingBeats(): string[] {
+    return Object.entries(this.data.tracks)
+      .filter(([sha, r]) => r.text && /^\s*\[\d+:\d/m.test(r.text) && !this.beats?.has(sha))
       .map(([sha]) => sha);
   }
 
