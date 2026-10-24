@@ -1,3 +1,7 @@
+import '../song/about_widgets.dart';
+import '../song/about_nav.dart';
+import '../../domain/about.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/audio/tune_player.dart';
@@ -357,6 +361,30 @@ class AlbumPage extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: Space.md),
+                          // Other editions of this album held (ADL and ADL
+                          // (Deluxe)): one tap between them.
+                          if (_editions().isNotEmpty) ...[
+                            _Editions(
+                              current: release,
+                              others: _editions(),
+                              onOpen: (r) => NavScope.of(context).openPanel(
+                                TunesPanels.album(r.id),
+                                () => AlbumPage(
+                                  release: r,
+                                  manifest: manifest,
+                                  player: player,
+                                  store: store,
+                                  downloading: downloading,
+                                  onDownload: onDownload,
+                                  offline: offline,
+                                  artUrlFor: artUrlFor,
+                                  manifestStore: manifestStore,
+                                  queueStore: queueStore,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: Space.md),
+                          ],
                           const SizedBox(height: Space.lg),
                           _Tracklist(
                             release: release,
@@ -382,6 +410,7 @@ class AlbumPage extends StatelessWidget {
                                 ),
                             ],
                           ),
+                          if (!offline) _AlbumAbout(release: release),
                         ],
                       ),
                     ),
@@ -392,6 +421,177 @@ class AlbumPage extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// "ADL (Deluxe)" is ADL: the title without a trailing bracket.
+  static String _base(String title) => title
+      .replaceAll(RegExp(r'\s*[(\[][^)\]]*[)\]]\s*$'), '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+  /// Other editions of this album the library holds, by the same act.
+  List<ManifestRelease> _editions() {
+    final base = _base(release.title);
+    if (base.isEmpty) return const [];
+    return [
+      for (final r in manifest.releases)
+        if (r.id != release.id &&
+            _base(r.title) == base &&
+            r.artist.toLowerCase() == release.artist.toLowerCase())
+          r,
+    ];
+  }
+}
+
+/// This edition and the others held, side by side; a song held on one
+/// counts on the others (the box matches across the library).
+class _Editions extends StatelessWidget {
+  const _Editions({
+    required this.current,
+    required this.others,
+    required this.onOpen,
+  });
+
+  final ManifestRelease current;
+  final List<ManifestRelease> others;
+  final void Function(ManifestRelease) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final crayon = Looks.current.kind == LookKind.crayon;
+    Widget card(ManifestRelease r, {required bool here}) => Expanded(
+      child: Material(
+        color: here ? Tones.surface : Tones.surfaceRaised,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: here ? Tones.text : Tones.hairline,
+            width: crayon ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          customBorder: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          onTap: here ? null : () => onOpen(r),
+          child: Padding(
+            padding: const EdgeInsets.all(Space.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  r.title,
+                  style: TypeScale.title.copyWith(fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  [
+                    if (r.totalTracks != null) '${r.totalTracks} songs',
+                    'you have ${r.trackShas.length}',
+                  ].join(' · '),
+                  style: TypeScale.caption,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('EDITIONS', style: TypeScale.mono),
+        const SizedBox(height: Space.xs),
+        Row(
+          children: [
+            card(current, here: true),
+            for (final o in others.take(2)) ...[
+              const SizedBox(width: Space.sm),
+              card(o, here: false),
+            ],
+          ],
+        ),
+        const SizedBox(height: Space.xs),
+        Text(
+          'A song you hold on one edition counts on the other.',
+          style: TypeScale.caption,
+        ),
+      ],
+    );
+  }
+}
+
+/// What Genius says of the album, and who made it (the Roon pass).
+class _AlbumAbout extends StatefulWidget {
+  const _AlbumAbout({required this.release});
+
+  final ManifestRelease release;
+
+  @override
+  State<_AlbumAbout> createState() => _AlbumAboutState();
+}
+
+class _AlbumAboutState extends State<_AlbumAbout> {
+  AlbumAbout? _about;
+  bool _asked = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_asked) return;
+    _asked = true;
+    final client = GetsScope.maybeOf(context)?.client;
+    if (client == null) return;
+    client.aboutAlbum(widget.release.id).then((a) {
+      if (mounted && a != null) setState(() => _about = a);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = _about;
+    if (a == null) return const SizedBox.shrink();
+    const shown = {
+      'Producers',
+      'Writers',
+      'Mixing Engineer',
+      'Mastering Engineer',
+      'Label',
+    };
+    final credits = [
+      for (final c in a.credits)
+        if (shown.contains(c.role)) c,
+    ];
+    final open = AboutNav.maybeOf(context)?.openPerson;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (a.description case final d?) ...[
+          const AboutHeading('About this album'),
+          ReadMore(text: d, url: a.url),
+        ],
+        if (credits.isNotEmpty) ...[
+          const AboutHeading('Credits'),
+          CreditsCard(
+            rows: [
+              for (final c in credits)
+                CreditRow(
+                  role: c.role == 'Producers'
+                      ? 'Produced by'
+                      : c.role == 'Writers'
+                      ? 'Written by'
+                      : c.role,
+                  names: [for (final n in c.names.take(8)) personName(n)],
+                  onName: c.role == 'Label' || open == null
+                      ? null
+                      : (n) => open(n),
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }

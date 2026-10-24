@@ -16,6 +16,10 @@ import '../../core/ui/shared_sleeve.dart';
 import '../../domain/artist_view.dart';
 import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
+import '../../core/data/play_history.dart';
+import '../../domain/about.dart';
+import '../song/about_nav.dart';
+import '../song/about_widgets.dart';
 import '../album/album_page.dart';
 import '../library/library_widgets.dart';
 
@@ -40,7 +44,11 @@ class ArtistPage extends StatefulWidget {
     required this.artUrlFor,
     required this.manifestStore,
     this.queueStore,
+    this.history,
   });
+
+  /// Plays, for "Your [artist]" and where they rank among what you play.
+  final PlayHistory? history;
 
   final String artist;
   final TunesManifest manifest;
@@ -64,6 +72,11 @@ class _ArtistPageState extends State<ArtistPage> {
 
   ArtistDiscography? _discography;
   bool _loading = false;
+
+  /// What Genius says (the Roon pass): the bio and the people around them.
+  ArtistAbout? _about;
+  List<Collaborator> _people = const [];
+  Map<String, int> _plays = const {};
   bool _allSongs = false;
   bool _allAbsent = false;
 
@@ -74,6 +87,38 @@ class _ArtistPageState extends State<ArtistPage> {
   void initState() {
     super.initState();
     _load();
+    _loadAbout();
+  }
+
+  Future<void> _loadAbout() async {
+    final client = widget.client;
+    final history = widget.history;
+    if (history != null) {
+      final plays = await history.playCounts();
+      if (mounted) setState(() => _plays = plays);
+    }
+    if (widget.offline || client == null) return;
+    final r = await client.aboutArtist(widget.artist);
+    if (!mounted || r == null) return;
+    setState(() {
+      _about = r.artist;
+      _people = r.people;
+    });
+  }
+
+  /// Where this artist ranks among those you play, by plays; null when you
+  /// have not played them.
+  int? _rank() {
+    final byArtist = <String, int>{};
+    for (final t in widget.manifest.tracks) {
+      final n = _plays[t.sha];
+      if (n == null || n == 0) continue;
+      final a = (t.primaryArtist ?? t.artist).toLowerCase();
+      byArtist[a] = (byArtist[a] ?? 0) + n;
+    }
+    final mine = byArtist[widget.artist.toLowerCase()];
+    if (mine == null) return null;
+    return 1 + byArtist.values.where((v) => v > mine).length;
   }
 
   Future<void> _load() async {
@@ -127,6 +172,7 @@ class _ArtistPageState extends State<ArtistPage> {
       TunesPanels.artist(name),
       () => ArtistPage(
         artist: name,
+        history: widget.history,
         manifest: widget.manifest,
         client: widget.client,
         player: widget.player,
@@ -148,6 +194,26 @@ class _ArtistPageState extends State<ArtistPage> {
       if (r.id == id) return r;
     }
     return null;
+  }
+
+  /// Your most played of theirs, up to five; none until you have played any.
+  List<ManifestTrack> _mostPlayed(List<ManifestTrack> songs) {
+    final played = [
+      for (final t in songs)
+        if ((_plays[t.sha] ?? 0) > 0) t,
+    ]..sort((a, b) => (_plays[b.sha] ?? 0) - (_plays[a.sha] ?? 0));
+    return played.take(5).toList();
+  }
+
+  /// Songs held, per release year, oldest first.
+  Map<int, int> _byYear(List<ManifestTrack> songs) {
+    final out = <int, int>{};
+    for (final t in songs) {
+      final y = int.tryParse((t.year ?? '').padRight(4).substring(0, 4));
+      if (y == null || y < 1900) continue;
+      out[y] = (out[y] ?? 0) + 1;
+    }
+    return Map.fromEntries(out.entries.toList()..sort((a, b) => a.key - b.key));
   }
 
   @override
@@ -244,6 +310,107 @@ class _ArtistPageState extends State<ArtistPage> {
                                   count: gaps,
                                   onTap: () => _jump(_missingKey),
                                 ),
+                              ],
+                            ),
+                          ],
+                          if (songs.isNotEmpty) ...[
+                            const SizedBox(height: Space.lg),
+                            Row(
+                              children: [
+                                StatTile(
+                                  value: '${songs.length}',
+                                  label: 'songs you have',
+                                ),
+                                const SizedBox(width: Space.sm),
+                                StatTile(
+                                  value: view.hasCatalogue
+                                      ? '${view.catalogueOwned} / ${view.catalogueTotal}'
+                                      : '${view.ownedReleases.length}',
+                                  label: 'albums held',
+                                ),
+                                const SizedBox(width: Space.sm),
+                                StatTile(
+                                  value: _rank() == null ? '—' : '#${_rank()}',
+                                  label: 'among what you play',
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (_about?.description case final bio?) ...[
+                            const AboutHeading('About'),
+                            ReadMore(text: bio, url: _about!.url),
+                            if (_about!.alternateNames.isNotEmpty)
+                              Text(
+                                'Also known as ${_about!.alternateNames.take(4).join(', ')}',
+                                style: TypeScale.caption,
+                              ),
+                          ],
+                          if (_mostPlayed(songs) case final top
+                              when top.isNotEmpty) ...[
+                            AboutHeading('Your ${widget.artist}'),
+                            for (final (i, t) in top.indexed)
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                onTap: () => widget.player.playQueue(top, i),
+                                leading: SizedBox(
+                                  width: 22,
+                                  child: Text(
+                                    '${i + 1}',
+                                    style: TypeScale.title.copyWith(
+                                      color:
+                                          Looks.current.crayons[i %
+                                              Looks.current.crayons.length],
+                                    ),
+                                  ),
+                                ),
+                                title: Text(
+                                  t.title,
+                                  style: TypeScale.title.copyWith(fontSize: 15),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  t.album,
+                                  style: TypeScale.caption,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: Text(
+                                  '${_plays[t.sha]} plays',
+                                  style: TypeScale.caption,
+                                ),
+                              ),
+                          ],
+                          if (_people.isNotEmpty &&
+                              AboutNav.maybeOf(context) != null) ...[
+                            AboutHeading('The people around ${widget.artist}'),
+                            Text(
+                              'From the credits of songs you have.',
+                              style: TypeScale.caption,
+                            ),
+                            const SizedBox(height: Space.sm),
+                            CreditsCard(
+                              rows: [
+                                for (final p in _people.take(6))
+                                  ListTile(
+                                    onTap: () =>
+                                        AboutNav.maybeOf(context)
+                                            ?.openPerson(p.name),
+                                    title: Text(
+                                      p.name,
+                                      style: TypeScale.title.copyWith(
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      '${p.roles.join(', ')} · ${p.songs} ${p.songs == 1 ? 'song' : 'songs'}',
+                                      style: TypeScale.caption,
+                                    ),
+                                    trailing: Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: Tones.textMuted,
+                                    ),
+                                  ),
                               ],
                             ),
                           ],
@@ -355,6 +522,16 @@ class _ArtistPageState extends State<ArtistPage> {
                                   ),
                                 ),
                               ),
+                          ],
+                          if (_byYear(songs) case final years
+                              when years.length > 1) ...[
+                            const AboutHeading('Through the years'),
+                            YearBars(counts: years),
+                            const SizedBox(height: Space.xs),
+                            Text(
+                              'Songs you have, by the year they came out.',
+                              style: TypeScale.caption,
+                            ),
                           ],
                           // ---- Songs you don't have ---------------------------
                           const SizedBox(height: Space.xl),
