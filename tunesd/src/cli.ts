@@ -688,8 +688,11 @@ async function main(): Promise<void> {
           isPlaylistAlbum(tagAlbum) &&
           (albumTagCounts.get(normalize(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX
         ) {
-          const act = releaseArtistOf(probe.tags.albumArtist ?? null, probe.tags.artist.trim());
-          const first = await mb.firstAlbum(act || probe.tags.artist.trim(), probe.tags.title.trim());
+          // The song's own artist, never the album artist: a playlist's is
+          // "Various Artists" (or "Разные исполнители", Make Believe's), and
+          // MusicBrainz knows no song by them.
+          const act = probe.tags.artist.trim();
+          const first = await mb.firstAlbum(act, probe.tags.title.trim());
           if (first) {
             // The record's sleeve: any edition's, then this edition's, then
             // Deezer's for an album of exactly that name and artist (the

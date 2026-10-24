@@ -121,6 +121,7 @@ interface MusicBrainzRecording {
     id: string;
     title: string;
     status?: string;
+    "artist-credit"?: Array<{ name?: string }>;
     "primary-type"?: string | null;
     date?: string;
     "cover-art-archive"?: { front?: boolean; art_count?: number };
@@ -150,13 +151,20 @@ export interface FirstAlbum {
  * other songs for this purpose. Pure, for tests.
  */
 export function pickFirstAlbum(recordings: MusicBrainzRecording[], title: string): FirstAlbum | null {
-  const want = songTitleKey(title);
+  // The title as tagged, and without any brackets: 'Take My Breath Away
+  // (Love Theme From "Top Gun")' is filed as "Take My Breath Away".
+  const wants = new Set([songTitleKey(title), songTitleKey(title.replace(/\s*[([][^)\]]*[)\]]/g, ""))]);
   let best: (FirstAlbum & { date: string }) | null = null;
   for (const rec of recordings) {
     if (rec.video) continue;
-    if (songTitleKey(rec.title) !== want) continue;
+    if (!wants.has(songTitleKey(rec.title))) continue;
     if (/live|remix|demo|instrumental|edit|acapella|a cappella/i.test(rec.disambiguation ?? "")) continue;
+    const by = (rec["artist-credit"] ?? []).map((a) => songTitleKey(a.name ?? "")).filter((n) => n !== "");
     for (const rel of rec.releases ?? []) {
+      // The song's own artist's record: "Jingle Ball '98" by Various Artists
+      // is filed as an album too, and its sleeve says nothing about Berlin.
+      const credit = (rel["artist-credit"] ?? []).map((a) => songTitleKey(a.name ?? ""));
+      if (credit.length > 0 && !credit.some((c) => by.includes(c))) continue;
       const rg = rel["release-group"];
       const type = rg?.["primary-type"] ?? null;
       if (!rg?.id || (type !== "Album" && type !== "Single" && type !== "EP")) continue;
@@ -270,18 +278,31 @@ export class MusicBrainzClient {
   }
 
   private async getJson<T>(url: string): Promise<T | null> {
-    await this.rateLimit();
-    try {
-      const res = await this.fetcher(url, {
-        headers: { "User-Agent": this.userAgent, Accept: "application/json" },
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) return null;
-      return (await res.json()) as T;
-    } catch {
-      return null;
+    // 503 is MusicBrainz saying "too fast", not "nothing there". Taken as
+    // nothing, a song was marked as looked up and not asked again for half
+    // an hour or more (Make Believe, 24 Oct). Wait and ask again instead.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.rateLimit();
+      try {
+        const res = await this.fetcher(url, {
+          headers: { "User-Agent": this.userAgent, Accept: "application/json" },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (res.status === 503 && attempt < 2) {
+          await new Promise((r) => setTimeout(r, this.slowDownMs * (attempt + 1)));
+          continue;
+        }
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        return null;
+      }
     }
+    return null;
   }
+
+  /** How long to wait after MusicBrainz says too fast; tests shorten it. */
+  slowDownMs = 3000;
 
   private async getBytes(url: string): Promise<Uint8Array | null> {
     await this.rateLimit();

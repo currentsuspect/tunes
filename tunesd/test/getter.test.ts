@@ -325,6 +325,13 @@ describe("getting a song", () => {
     expect(acq).toHaveBeenCalledTimes(2);
     expect(committed).toHaveLength(2);
     expect(again.list().find((j) => j.id === a.id)?.by).toBe("Dennis");
+    // The line is saved after each song; let the last save land before the
+    // folder is cleaned up (CI caught ENOTEMPTY on rmdir).
+    await vi.waitFor(async () => {
+      await again.flushed();
+      expect(JSON.parse(await readFile(statePath, "utf8")).requests).toEqual([]);
+    });
+    await g.flushed();
   });
 
   it("says where each waiting song is in line, and lets one be taken out", async () => {

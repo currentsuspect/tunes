@@ -270,3 +270,91 @@ describe("the record a song first came out on", () => {
     expect(pickFirstAlbum([rec("Billie Jean", [rel("thriller", "1982", "Album")])], "Smooth Criminal")).toBeNull();
   });
 });
+
+describe("a title with a note in brackets", () => {
+  it("is matched with the note left off", () => {
+    const got = pickFirstAlbum(
+      [
+        {
+          id: "r",
+          title: "Take My Breath Away",
+          "artist-credit": [{ name: "Berlin" }],
+          releases: [
+            {
+              id: "ctp",
+              title: "Count Three & Pray",
+              status: "Official",
+              date: "1986",
+              "release-group": { id: "g-ctp", title: "Count Three & Pray", "primary-type": "Album", "secondary-types": [] },
+            },
+          ],
+        } as never,
+      ],
+      'Take My Breath Away (Love Theme From "Top Gun")'
+    );
+    expect(got?.title).toBe("Count Three & Pray");
+  });
+});
+
+describe("a various-artists collection", () => {
+  it("is never the song's record", () => {
+    const got = pickFirstAlbum(
+      [
+        {
+          id: "r",
+          title: "Take My Breath Away",
+          "artist-credit": [{ name: "Berlin" }],
+          releases: [
+            {
+              id: "jb",
+              title: "Jingle Ball ’98: The CD",
+              status: "Official",
+              date: "1998-12-18",
+              "artist-credit": [{ name: "Various Artists" }],
+              "release-group": { id: "g-jb", title: "Jingle Ball ’98: The CD", "primary-type": "Album", "secondary-types": [] },
+            },
+          ],
+        } as never,
+      ],
+      "Take My Breath Away"
+    );
+    expect(got).toBeNull();
+  });
+});
+
+describe("MusicBrainz saying too fast", () => {
+  it("is waited out and asked again, not taken as nothing found", async () => {
+    let calls = 0;
+    const fetcher = (async () => {
+      calls++;
+      if (calls === 1) return new Response("", { status: 503 });
+      return new Response(
+        JSON.stringify({
+          recordings: [
+            {
+              id: "r",
+              title: "Make Believe",
+              "artist-credit": [{ name: "Juice WRLD" }],
+              releases: [
+                {
+                  id: "drfl",
+                  title: "Death Race for Love",
+                  status: "Official",
+                  date: "2019-03-08",
+                  "artist-credit": [{ name: "Juice WRLD" }],
+                  "release-group": { id: "g", title: "Death Race for Love", "primary-type": "Album", "secondary-types": [] },
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+    const mb = new MusicBrainzClient("test", "/tmp", fetcher);
+    mb.slowDownMs = 1;
+    const got = await mb.firstAlbum("Juice Wrld", "Make Believe");
+    expect(got?.title).toBe("Death Race for Love");
+    expect(calls).toBe(2);
+  });
+});
