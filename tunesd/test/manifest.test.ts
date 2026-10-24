@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildManifest, releaseArtKey } from "../src/manifest.js";
+import { buildManifest, isPlaylistAlbum, releaseArtKey } from "../src/manifest.js";
 import type { TrackEnrichment } from "../src/manifest.js";
 import type { ProbeResult } from "../src/probe.js";
 
@@ -1133,5 +1133,60 @@ describe("lyrics in the manifest", () => {
       new Map([["a".repeat(64), { lyrics: "hi", source: "lrclib" }]]),
     ).integrity;
     expect(withLyrics).not.toBe(without);
+  });
+});
+
+describe("a song ripped from a playlist", () => {
+  const sha = "a".repeat(64);
+  const rip = probe({
+    tags: { title: "Make Believe", artist: "Juice Wrld", album: "Rap 2020", year: "2020" },
+    hasEmbeddedArt: true,
+  });
+  const record = enrichment({
+    artist: "Juice WRLD",
+    album: "Death Race for Love",
+    year: "2019",
+    artSha: "d".repeat(64),
+    releaseId: "mb:e856dbb8",
+  });
+
+  it("shows the record it came out on, not the playlist", () => {
+    const m = buildManifest(
+      [rip],
+      new Map(),
+      new Map([[sha, record]]),
+      [],
+      [],
+      new Map(),
+      new Map(),
+      new Map([[sha, "p".repeat(64)]])
+    );
+    const t = m.tracks[0]!;
+    expect(t.album).toBe("Death Race for Love");
+    expect(t.year).toBe("2019");
+    expect(t.artist).toBe("Juice WRLD");
+    // The playlist's baked-in picture loses to the record's sleeve.
+    expect(t.artSha).toBe("d".repeat(64));
+  });
+
+  it("leaves a real compilation alone when it is held whole", () => {
+    const many = ["1", "2", "3"].map((n) =>
+      probe({ sha: n.repeat(64), tags: { title: `Song ${n}`, artist: "Queen", album: "Greatest Hits" } })
+    );
+    const m = buildManifest(
+      many,
+      new Map(),
+      new Map([["1".repeat(64), enrichment({ album: "A Night at the Opera", releaseId: "mb:x" })]])
+    );
+    expect(m.tracks.find((t) => t.sha === "1".repeat(64))?.album).toBe("Greatest Hits");
+  });
+});
+
+describe("isPlaylistAlbum", () => {
+  it.each(["Rap 2020", "Hip Hop Hits 2019", "Top Hits", "King of Pop (Greatest Hits Mexican Collection) CD1", "Now That's What I Call Music! 54", "Rap"])("%s is a playlist", (t) => {
+    expect(isPlaylistAlbum(t)).toBe(true);
+  });
+  it.each(["Bad", "2014 Forest Hills Drive", "Death Race for Love", "1989", "Thriller 25", "Graduation"])("%s is a record", (t) => {
+    expect(isPlaylistAlbum(t)).toBe(false);
   });
 });

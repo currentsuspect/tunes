@@ -9,6 +9,7 @@ import {
   parseArtistTitle,
   splitArtistNames,
 } from "../src/enrich.js";
+import { pickFirstAlbum } from "../src/enrich.js";
 
 describe("enrichBackoffMs", () => {
   it("does not delay a track nobody has tried yet", () => {
@@ -238,5 +239,34 @@ describe("MusicBrainzClient.searchArtists", () => {
     const fetcher = async () => ({ ok: true, json: async () => ({ artists: [] }) }) as Response;
     const mb = new MusicBrainzClient("tunes/test", "", fetcher as unknown as typeof fetch);
     expect(await mb.searchArtists("zzz")).toEqual([]);
+  });
+});
+
+describe("the record a song first came out on", () => {
+  const rec = (title: string, releases: unknown[], disambiguation = "") =>
+    ({ id: title, title, disambiguation, "artist-credit": [{ name: "Michael Jackson" }], releases }) as never;
+  const rel = (id: string, date: string, type: string, secondary: string[] = [], title = id) => ({
+    id,
+    title,
+    status: "Official",
+    date,
+    "release-group": { id: `g-${id}`, title, "primary-type": type, "secondary-types": secondary },
+  });
+  it("earliest album, not a compilation, a live record or a remaster's later date", () => {
+    const got = pickFirstAlbum(
+      [
+        rec("Smooth Criminal", [rel("number-ones", "2003", "Album", ["Compilation"]), rel("bad-2012", "2012", "Album", [], "Bad")]),
+        rec("Smooth Criminal", [rel("bad", "1987-08-31", "Album", [], "Bad")]),
+        rec("Smooth Criminal", [rel("brunei", "1996", "Album", ["Live"])], "live"),
+        rec("Smooth Criminal", [rel("single", "1988", "Single", [], "Smooth Criminal")]),
+      ],
+      "Smooth Criminal (2012 Remaster)"
+    );
+    expect(got?.title).toBe("Bad");
+    expect(got?.year).toBe("1987");
+    expect(got?.groupId).toBe("g-bad");
+  });
+  it("nothing when only other songs come back", () => {
+    expect(pickFirstAlbum([rec("Billie Jean", [rel("thriller", "1982", "Album")])], "Smooth Criminal")).toBeNull();
   });
 });

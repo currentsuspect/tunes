@@ -16,13 +16,13 @@ import {
   persistDiscographies,
 } from "./discography.js";
 import { parseCredits, releaseArtistOf, sameArtistName } from "./credits.js";
-import { DiscogsClient, MusicBrainzClient, parseArtistTitle, SpotifyClient, storeCoverBytes } from "./enrich.js";
+import { DiscogsClient, MusicBrainzClient, parseArtistTitle, songTitleKey, SpotifyClient, storeCoverBytes } from "./enrich.js";
 import { enrichBackoffMs, enrichRetryDue } from "./enrich.js";
 import type { EnrichAttempt, EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
-import { buildManifest, isCategoryRelease, releaseArtKey } from "./manifest.js";
+import { buildManifest, isCategoryRelease, isPlaylistAlbum, normalize, PLAYLIST_ALBUM_MAX, releaseArtKey } from "./manifest.js";
 import type { ManifestV3, ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
@@ -667,6 +667,12 @@ async function main(): Promise<void> {
       // before the release-ordering loop so its long rate-limit sleeps cannot
       // starve the artist list.
       await backfillArtistPhotos();
+      // Songs per album tag, for the playlist-rip check below.
+      const albumTagCounts = new Map<string, number>();
+      for (const obj of objects) {
+        const a = probeCache.get(obj.sha)?.tags.album?.trim();
+        if (a) albumTagCounts.set(normalize(a), (albumTagCounts.get(normalize(a)) ?? 0) + 1);
+      }
       for (const obj of objects) {
         const existing = enrich.get(obj.sha);
         const stale = existing && Date.now() - Date.parse(existing.enrichedAt) > WEEK_MS;
@@ -713,6 +719,71 @@ async function main(): Promise<void> {
 
         const probe = probeCache.get(obj.sha)!;
         const tagged = Boolean(probe.tags.title) || Boolean(probe.tags.artist) || Boolean(probe.tags.album);
+        // A lone song under a playlist's name ("Rap 2020", "...Collection
+        // CD1"): its tags are trusted for the song, not the record. Ask
+        // MusicBrainz which record it came out on; the manifest puts that
+        // record's name, year and cover over the playlist's (isPlaylistAlbum).
+        const tagAlbum = probe.tags.album?.trim() ?? "";
+        if (
+          tagged &&
+          probe.tags.title &&
+          probe.tags.artist &&
+          isPlaylistAlbum(tagAlbum) &&
+          (albumTagCounts.get(normalize(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX
+        ) {
+          const act = releaseArtistOf(probe.tags.albumArtist ?? null, probe.tags.artist.trim());
+          const first = await mb.firstAlbum(act || probe.tags.artist.trim(), probe.tags.title.trim());
+          if (first) {
+            // The record's sleeve: any edition's, then this edition's, then
+            // Deezer's for an album of exactly that name and artist (the
+            // Cover Art Archive has nothing for some, Death Race for Love
+            // among them).
+            let cover = (await mb.fetchGroupCover(first.groupId)) ?? (await mb.fetchCover(first.releaseId));
+            if (!cover) {
+              try {
+                const who = first.artist || act;
+                const dz = (await deezer.searchAlbumCandidates(who, first.title)).find(
+                  // Edition notes aside: Deezer lists it as "Death Race For
+                  // Love (Bonus Track Version)".
+                  (c) => sameArtistName(c.artist, who) && songTitleKey(c.title) === songTitleKey(first.title)
+                );
+                if (dz?.coverUrl) {
+                  const res = await fetch(dz.coverUrl, { signal: AbortSignal.timeout(20_000) });
+                  const bytes = res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+                  if (bytes && bytes.length >= 1000) cover = await storeCoverBytes(env.dataDir, bytes);
+                }
+              } catch {
+                // Deezer out of reach: the record's name still goes in; the
+                // cover is looked for again when the entry goes stale.
+              }
+            }
+            enrich.set(obj.sha, {
+              sha: obj.sha,
+              artist: first.artist || null,
+              album: first.title,
+              year: first.year,
+              artSha: cover?.sha ?? null,
+              releaseId: `mb:${first.releaseId}`,
+              releaseType: first.type,
+              trackNumber: null,
+              discNumber: null,
+              totalTracks: null,
+              membership: [],
+              source: "musicbrainz",
+              enrichedAt: new Date().toISOString(),
+            });
+            log.info({
+              event: "ENRICH_PLAYLIST_RIP",
+              sha: obj.sha.slice(0, 8),
+              tagged: tagAlbum,
+              record: first.title,
+              cover: cover != null,
+            });
+            await persistEnrich();
+            await clearEnrichAttempt(obj.sha);
+            continue;
+          }
+        }
         if (tagged) {
           enrich.set(obj.sha, {
             sha: obj.sha,

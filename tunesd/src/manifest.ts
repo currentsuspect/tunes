@@ -124,6 +124,31 @@ const CATEGORY_RELEASES = new Set([
   "remixes", "remix", "greatest hits", "best of", "hits", "singles",
 ]);
 
+/**
+ * An album tag that names a playlist or a bootleg collection rather than a
+ * record: "Rap 2020", "Top Hits", "King of Pop (Greatest Hits Mexican
+ * Collection) CD1". Songs ripped from playlists and shared on Soulseek carry
+ * these, often with the playlist's picture baked in, so the song shows up
+ * under the wrong name and someone else's face (24 Oct: Make Believe,
+ * Smooth Criminal).
+ *
+ * The name alone is not enough to overrule a file: callers also require that
+ * the library holds only a song or two under it ([PLAYLIST_ALBUM_MAX]), so a
+ * real "Greatest Hits" someone owns whole stays as it is.
+ */
+export function isPlaylistAlbum(title: string): boolean {
+  const t = title.trim();
+  if (t === "") return false;
+  if (isCategoryRelease(t)) return true;
+  // A genre or mood and a year: "Rap 2020", "Hip Hop Hits 2019".
+  if (/^[a-z&'+\- ]{2,24}\s(hits\s)?(19|20)\d\d$/i.test(t) && !/^\d/.test(t)) return true;
+  return /\b(top hits|greatest hits|hits of (the )?(19|20)\d\d|best of (19|20)\d\d|collection|playlist|various artists|now that'?s what|compilation|mixtape vol)\b|\bcd ?\d+\b|\bdisc ?\d+\b/i.test(t);
+}
+
+/** At most this many songs under a playlist-looking album, or it is a real
+ * album the listener holds and is left alone. */
+export const PLAYLIST_ALBUM_MAX = 2;
+
 export function isCategoryRelease(title: string): boolean {
   return CATEGORY_RELEASES.has(norm(title));
 }
@@ -269,10 +294,26 @@ export function buildManifest(
     }
   }
   const allProbes = [...probeFor.values()];
+  // Songs per album tag, to tell a lone playlist rip from a compilation held
+  // whole (isPlaylistAlbum).
+  const perAlbumTag = new Map<string, number>();
+  for (const p of allProbes) {
+    const a = p.tags.album?.trim();
+    if (a) perAlbumTag.set(norm(a), (perAlbumTag.get(norm(a)) ?? 0) + 1);
+  }
   const tracks: ManifestTrack[] = allProbes
     .map((p) => {
       const meta = metaBySha.get(p.sha);
       const enrich = enrichBySha.get(p.sha);
+      // A playlist's name in the album tag, and MusicBrainz knows the record
+      // the song came out on: the record wins, name, year and cover.
+      const tagAlbum = p.tags.album?.trim() ?? "";
+      const playlistTag =
+        tagAlbum !== "" &&
+        (enrich?.releaseId?.startsWith("mb:") ?? false) &&
+        enrich?.album != null &&
+        isPlaylistAlbum(tagAlbum) &&
+        (perAlbumTag.get(norm(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX;
       const tagged = Boolean(p.tags.title) || Boolean(p.tags.artist) || Boolean(p.tags.album);
       // Filename parse is the last-resort seed for both title and artist
       // when no embedded tags and no enrich hit. Available even when
@@ -295,14 +336,22 @@ export function buildManifest(
           title = title.slice(dash + 3).trim();
         }
       }
-      const artist = p.tags.artist?.trim()
+      const tagArtist = p.tags.artist?.trim();
+      // Only the spelling: "Juice Wrld" from a playlist rip is "Juice WRLD".
+      // A different name is a different claim and the file's stays.
+      const artist =
+        (playlistTag && tagArtist && enrich?.artist && norm(enrich.artist) === norm(tagArtist)
+          ? enrich.artist
+          : tagArtist)
         ?? filenameParse?.artist
         ?? enrich?.artist
         ?? "unknown artist";
-      const album = p.tags.album?.trim()
-        ?? enrich?.album
-        ?? "unknown album";
-      const year = p.tags.year ?? enrich?.year ?? null;
+      const album = playlistTag
+        ? enrich!.album!
+        : p.tags.album?.trim()
+          ?? enrich?.album
+          ?? "unknown album";
+      const year = playlistTag ? enrich?.year ?? null : p.tags.year ?? enrich?.year ?? null;
       // One album routinely carries a different artist string per track
       // ("Yeat", "Yeat, Don Toliver", "Yeat;Summrs"), which used to shatter it
       // into a release per credit line. Recover the act and the guests.
@@ -320,7 +369,7 @@ export function buildManifest(
         enrich?.releaseId != null &&
         isCategoryRelease(enrich?.album ?? "") &&
         !p.tags.album;
-      const fileNamedAlbum = Boolean(p.tags.album?.trim());
+      const fileNamedAlbum = Boolean(p.tags.album?.trim()) && !playlistTag;
       const releaseKey = releaseKeyFor(
         { primaryArtist: releaseArtist, album: categoryRelease ? "unknown album" : album, sha: p.sha, artist },
         fileNamedAlbum,
@@ -328,7 +377,8 @@ export function buildManifest(
       );
       // Cover art the tagger embedded is always about this exact recording;
       // a release-level cover fetched from a provider is an approximation.
-      const embeddedArtSha = embeddedArtBySha.get(p.sha) ?? null;
+      // A playlist rip's baked-in picture is the playlist's, not the song's.
+      const embeddedArtSha = playlistTag ? null : embeddedArtBySha.get(p.sha) ?? null;
       // Last resort: a cover fetched for the release as a whole, for files that
       // carry no picture of their own.
       const releaseArtSha =

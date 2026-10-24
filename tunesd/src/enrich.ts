@@ -114,14 +114,91 @@ interface MusicBrainzRecording {
   id: string;
   title: string;
   score?: number;
+  video?: boolean;
+  disambiguation?: string;
   "artist-credit"?: Array<{ name?: string }>;
   releases?: Array<{
     id: string;
     title: string;
+    status?: string;
     "primary-type"?: string | null;
     date?: string;
     "cover-art-archive"?: { front?: boolean; art_count?: number };
+    "release-group"?: {
+      id?: string;
+      title?: string;
+      "primary-type"?: string | null;
+      "secondary-types"?: string[];
+    };
   }>;
+}
+
+/** The record a song first came out on, as MusicBrainz has it. */
+export interface FirstAlbum {
+  artist: string;
+  title: string;
+  year: string | null;
+  type: string;
+  releaseId: string;
+  groupId: string;
+}
+
+/**
+ * Of a song's recordings, the earliest official album, single or EP that is
+ * not a compilation, live record, remix set or soundtrack: the sleeve the
+ * song came out in. Recordings marked live, remix, demo or instrumental are
+ * other songs for this purpose. Pure, for tests.
+ */
+export function pickFirstAlbum(recordings: MusicBrainzRecording[], title: string): FirstAlbum | null {
+  const want = songTitleKey(title);
+  let best: (FirstAlbum & { date: string }) | null = null;
+  for (const rec of recordings) {
+    if (rec.video) continue;
+    if (songTitleKey(rec.title) !== want) continue;
+    if (/live|remix|demo|instrumental|edit|acapella|a cappella/i.test(rec.disambiguation ?? "")) continue;
+    for (const rel of rec.releases ?? []) {
+      const rg = rel["release-group"];
+      const type = rg?.["primary-type"] ?? null;
+      if (!rg?.id || (type !== "Album" && type !== "Single" && type !== "EP")) continue;
+      if ((rg["secondary-types"] ?? []).length > 0) continue;
+      if (rel.status != null && rel.status !== "Official") continue;
+      const date = rel.date && rel.date !== "" ? rel.date : "9999";
+      // An album beats a single of the same year: the album is the record
+      // people know the song by.
+      const better =
+        best == null ||
+        date.slice(0, 4) < best.date.slice(0, 4) ||
+        (date.slice(0, 4) === best.date.slice(0, 4) && type === "Album" && best.type !== "Album");
+      if (better) {
+        best = {
+          artist: rec["artist-credit"]?.[0]?.name ?? "",
+          title: rg.title ?? rel.title,
+          year: date === "9999" ? null : date.slice(0, 4),
+          type,
+          releaseId: rel.id,
+          groupId: rg.id,
+          date,
+        };
+      }
+    }
+  }
+  if (best == null) return null;
+  const { date: _date, ...out } = best;
+  return out;
+}
+
+/**
+ * A song title with the edition notes taken off, for matching one copy of a
+ * song with another: "Smooth Criminal (2012 Remaster)" and "Smooth Criminal
+ * - 2012 Remaster" are both "smoothcriminal". Featured artists go too.
+ */
+export function songTitleKey(title: string): string {
+  return title
+    .replace(/\s*[([][^)\]]*(remaster|version|edit|mono|stereo|feat\.?|ft\.?|with |bonus|deluxe|explicit|clean)[^)\]]*[)\]]/gi, "")
+    .replace(/\s+-\s+.*(remaster|version|edit|mono|stereo).*$/i, "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 export interface ReleaseTrackRow {
@@ -396,6 +473,22 @@ export class MusicBrainzClient {
       }))
       .filter((g) => g.id !== "" && g.title !== "");
     return { mbid, groups };
+  }
+
+  /** The record [title] by [artist] first came out on; null when unsure. */
+  async firstAlbum(artist: string, title: string): Promise<FirstAlbum | null> {
+    const bare = title.replace(/\s*[([][^)\]]*[)\]]/g, "").replace(/\s+-\s+.*$/, "").trim() || title;
+    const q = `recording:"${bare.replace(/"/g, "")}" AND artist:"${artist.replace(/"/g, "")}" AND status:official`;
+    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(q)}&fmt=json&limit=25`;
+    const body = await this.getJson<{ recordings?: MusicBrainzRecording[] }>(url);
+    return pickFirstAlbum(body?.recordings ?? [], title);
+  }
+
+  /** A release group's front cover, from any of its releases. */
+  async fetchGroupCover(groupId: string): Promise<{ sha: string; bytes: Uint8Array } | null> {
+    const bytes = await this.getBytes(`https://coverartarchive.org/release-group/${groupId}/front-500`);
+    if (!bytes || bytes.length < 1000) return null;
+    return storeCoverBytes(this.cacheDir, bytes);
   }
 
   async fetchCover(releaseId: string): Promise<{ sha: string; bytes: Uint8Array } | null> {
