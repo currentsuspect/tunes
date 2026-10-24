@@ -59,6 +59,8 @@ abstract final class TunesPanels {
   static String album(String id) => 'tunes/album/$id';
   static String artist(String name) => 'tunes/artist/$name';
   static String playlist(int id) => 'tunes/playlist/$id';
+  static String song(String sha) => 'tunes/song/$sha';
+  static String person(String name) => 'tunes/person/$name';
 
   /// A mix the app built. Keyed by what is in it as well as what it is called,
   /// because the same mix is a different list next week and a retained panel

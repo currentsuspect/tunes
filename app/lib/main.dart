@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'features/song/about_nav.dart';
+import 'features/song/person_page.dart';
+import 'features/song/song_page.dart';
 import 'core/platform/mpris.dart';
 import 'core/ui/row_arrows.dart';
 import 'core/audio/audio_focus.dart';
@@ -2086,6 +2089,48 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// A song's own page (the Roon pass): its story, makers and moments.
+  void _openSong(ManifestTrack track) {
+    final manifest = _manifest ?? const TunesManifest(tracks: [], releases: []);
+    _nav.openPanel(
+      TunesPanels.song(track.sha),
+      () => SongPage(
+        track: track,
+        manifest: manifest,
+        player: widget.player,
+        artUrlFor: _artUrlFor,
+        history: widget.history,
+        onOpenArtist: (a) => _openArtist(a, manifest),
+        onOpenAlbum: (r) => _openAlbum(r, manifest),
+        onOpenPerson: _openPerson,
+        onOpenLyrics: () => LyricsSheet.show(
+          context,
+          track: track,
+          player: widget.player,
+          clip: widget.client.clip,
+          artUrlFor: _artUrlFor,
+          onSave: (saved, text) => _lyricSharing.save(saved.sha, text),
+        ),
+      ),
+    );
+  }
+
+  /// A producer's, writer's or featured artist's work in the library.
+  void _openPerson(String name) {
+    final manifest = _manifest ?? const TunesManifest(tracks: [], releases: []);
+    _nav.openPanel(
+      TunesPanels.person(name),
+      () => PersonPage(
+        name: name,
+        manifest: manifest,
+        player: widget.player,
+        artUrlFor: _artUrlFor,
+        onOpenSong: _openSong,
+        onOpenArtist: (a) => _openArtist(a, manifest),
+      ),
+    );
+  }
+
   void _openNowPlaying() {
     _nav.openPanel(
       TunesPanels.nowPlaying,
@@ -2145,7 +2190,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // are only offered on panels, which live in this shell.
     return GetsScope(
       gets: _gets,
-      child: SleepScope(sleep: _sleep, child: _buildShell(context)),
+      child: SleepScope(
+        sleep: _sleep,
+        // Song and person pages, from any track menu or credit.
+        child: AboutNav(
+          openSong: _openSong,
+          openPerson: _openPerson,
+          child: _buildShell(context),
+        ),
+      ),
     );
   }
 

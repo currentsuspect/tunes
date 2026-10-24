@@ -1,3 +1,5 @@
+import '../../features/song/about_nav.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -27,7 +29,11 @@ class TrackActionsSheet extends StatelessWidget {
     required this.onPlayNext,
     required this.onAddToQueue,
     required this.onEdit,
+    this.onAbout,
   });
+
+  /// Opens the song's own page (the Roon pass); null leaves the row out.
+  final VoidCallback? onAbout;
 
   final ManifestTrack track;
   final Future<void> Function() onPlayNext;
@@ -41,6 +47,8 @@ class TrackActionsSheet extends StatelessWidget {
     required Future<void> Function() onAddToQueue,
     required Future<void> Function() onEdit,
   }) {
+    // Read here, under the shell: the sheet's own route sits above it.
+    final about = AboutNav.maybeOf(context);
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Tones.surface,
@@ -55,6 +63,7 @@ class TrackActionsSheet extends StatelessWidget {
         onPlayNext: onPlayNext,
         onAddToQueue: onAddToQueue,
         onEdit: onEdit,
+        onAbout: about == null ? null : () => about.openSong(track),
       ),
     );
   }
@@ -69,6 +78,16 @@ class TrackActionsSheet extends StatelessWidget {
           children: [
             _Header(track: track),
             Divider(height: 1, thickness: 0.5, color: Tones.hairline),
+            if (onAbout case final open?)
+              _ActionRow(
+                icon: Icons.info_outline_rounded,
+                label: 'About this song',
+                subtitle: 'Its story, who made it, your history with it',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  open();
+                },
+              ),
             // First, because it is the one action here that says something
             // about the track rather than about the queue.
             if (LikesScope.maybeOf(context) case final likes?)

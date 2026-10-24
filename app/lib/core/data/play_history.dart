@@ -351,6 +351,32 @@ class PlayHistory extends ChangeNotifier {
     ];
   }
 
+  /// One song's history: plays to the end, skips, and the first and last
+  /// time it was played (the Song page's "You and this song").
+  Future<({int plays, int skips, DateTime? first, DateTime? last})> songStats(
+    String sha,
+  ) async {
+    final rows = await (_db.select(
+      _db.playEvents,
+    )..where((e) => e.sha.equals(sha))).get();
+    var plays = 0;
+    var skips = 0;
+    int? first;
+    int? last;
+    for (final r in rows) {
+      if (r.completed) {
+        plays++;
+        if (first == null || r.startedAt < first) first = r.startedAt;
+        if (last == null || r.startedAt > last) last = r.startedAt;
+      } else {
+        skips++;
+      }
+    }
+    DateTime? at(int? ms) =>
+        ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+    return (plays: plays, skips: skips, first: at(first), last: at(last));
+  }
+
   /// How many times each track was played, for the tracks that were.
   Future<Map<String, int>> playCounts() async {
     final count = _db.playEvents.id.count();

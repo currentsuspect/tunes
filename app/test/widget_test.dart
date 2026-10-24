@@ -1,3 +1,5 @@
+import 'package:tunes/domain/about.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -106,6 +108,18 @@ class _TestQueueStore extends QueueStore {
 }
 
 class _FakeClient implements TunesClient {
+  @override
+  Future<({SongAbout? song, AlbumAbout? album})?> aboutSong(String sha) async =>
+      null;
+  @override
+  Future<AlbumAbout?> aboutAlbum(String releaseId) async => null;
+  @override
+  Future<({ArtistAbout? artist, List<Collaborator> people})?> aboutArtist(
+    String name,
+  ) async => null;
+  @override
+  Future<List<Work>?> aboutPerson(String name) async => null;
+
   _FakeClient(
     this.result, {
     this.onSearch,
