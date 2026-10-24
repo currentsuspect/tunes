@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -25,6 +26,9 @@ class _Box extends TunesClient {
   final completes = <String>[];
   int searches = 0;
 
+  /// While set, a Soulseek search waits on it, as one waits on peers.
+  Completer<void>? hold;
+
   @override
   Future<SearchResults> search(String q) async =>
       const SearchResults(tracks: [], releases: [], artists: []);
@@ -35,6 +39,7 @@ class _Box extends TunesClient {
   @override
   Future<List<FoundSong>> soulseekSearch(String q) async {
     searches++;
+    await hold?.future;
     return found;
   }
 
@@ -326,6 +331,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(box.searches, 0);
     expect(find.textContaining('on Soulseek'), findsOneWidget);
+    await done(tester, gets);
+  });
+
+  testWidgets('typing on while Soulseek is out does not stop the next ask', (
+    tester,
+  ) async {
+    // 24 Oct: the "still asking" flag was cleared only if the box still
+    // held the first query when the answer came, so every later ask
+    // returned early.
+    final box = _Box()..hold = Completer<void>();
+    final gets = await pump(
+      tester,
+      box,
+      SearchView(
+        tracks: owned,
+        releases: [release],
+        client: box,
+        player: FakeTunePlayer(),
+        store: store,
+        downloading: const {},
+        onDownload: (_) {},
+        offline: false,
+        artUrlFor: (s) => 'http://test/art/$s',
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'goosebumps');
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(box.searches, 1);
+    // Typed on before peers answered, then they answer.
+    await tester.enterText(find.byType(TextField), 'stargazing');
+    await tester.pump(const Duration(milliseconds: 1000));
+    box.hold!.complete();
+    box.hold = null;
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('on Soulseek'));
+    await tester.pumpAndSettle();
+    expect(box.searches, 2);
     await done(tester, gets);
   });
 }
