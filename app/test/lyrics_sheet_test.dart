@@ -317,6 +317,58 @@ void main() {
       expect(find.textContaining('brand new words'), findsOneWidget);
     },
   );
+
+  group('word timing in the sheet', () {
+    const lyrics =
+        '[00:01.00]<00:01.00>hello <00:02.50>world<00:03.10>\n'
+        '[00:08.00]<00:08.00>next <00:08.50>line';
+
+    testWidgets('tapping a word jumps to that word', (tester) async {
+      final player = _StubPlayer();
+      await _pump(
+        tester,
+        lyrics: lyrics,
+        onSave: (_, _) async {},
+        player: player,
+      );
+      await tester.tap(find.text('world'));
+      await tester.pump();
+      expect(player.sought, const Duration(milliseconds: 2500));
+    });
+
+    testWidgets(
+      'a line can be looped, start of its first word to end of its last',
+      (tester) async {
+        final player = _TimedPlayer();
+        await _pump(
+          tester,
+          lyrics: lyrics,
+          onSave: (_, _) async {},
+          player: player,
+        );
+        await tester.longPress(find.text('hello '));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Loop this line'));
+        await tester.pumpAndSettle();
+        // 150 ms before "hello", so its first sound is heard whole.
+        expect(player.sought, const Duration(milliseconds: 850));
+        expect(find.text('Looping this line · Stop'), findsOneWidget);
+
+        // Past the end of "world" (3.10 s, plus a breath): back to the start.
+        player.sought = null;
+        player.moveTo(const Duration(milliseconds: 3400));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(player.sought, const Duration(milliseconds: 850));
+
+        await tester.tap(find.text('Looping this line · Stop'));
+        await tester.pumpAndSettle();
+        player.sought = null;
+        player.moveTo(const Duration(milliseconds: 3400));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(player.sought, isNull);
+      },
+    );
+  });
 }
 
 /// A player whose current track can be moved, as playing on does.
@@ -351,4 +403,23 @@ extension on ManifestTrack {
         discNumber: discNumber,
         lyrics: lyrics,
       );
+}
+
+class _TimedPlayer extends _StubPlayer {
+  Duration _pos = Duration.zero;
+
+  @override
+  Duration get position => _pos;
+
+  @override
+  void seek(Duration target) {
+    super.seek(target);
+    _pos = target;
+    notifyListeners();
+  }
+
+  void moveTo(Duration to) {
+    _pos = to;
+    notifyListeners();
+  }
 }

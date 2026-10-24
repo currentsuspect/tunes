@@ -11,6 +11,7 @@
 /// for anything that writes (a voice label, a share).
 library;
 
+import 'adlibs.dart';
 import 'lrc_parser.dart';
 import 'voices.dart';
 
@@ -28,13 +29,20 @@ class ReadingLrc {
   final List<int> origin;
 }
 
-ReadingLrc splitForReading(Lrc lrc, {int maxChars = kReadingLineChars}) {
+/// [adlibsApart]: the screen shows ad-libs on a row of their own (the
+/// lyrics sheet does, the player's preview does not), so they do not count
+/// towards a line's length.
+ReadingLrc splitForReading(
+  Lrc lrc, {
+  int maxChars = kReadingLineChars,
+  bool adlibsApart = false,
+}) {
   final lines = <LrcLine>[];
   final origin = <int>[];
   for (var i = 0; i < lrc.lines.length; i++) {
     final line = lrc.lines[i];
     final next = i + 1 < lrc.lines.length ? lrc.lines[i + 1].timestamp : null;
-    final halves = _split(line, next, maxChars);
+    final halves = _split(line, next, maxChars, adlibsApart);
     for (final h in halves) {
       lines.add(h);
       origin.add(i);
@@ -46,8 +54,16 @@ ReadingLrc splitForReading(Lrc lrc, {int maxChars = kReadingLineChars}) {
   );
 }
 
-List<LrcLine> _split(LrcLine line, Duration? nextStart, int maxChars) {
-  final shown = LyricVoices.plain(line.text);
+List<LrcLine> _split(
+  LrcLine line,
+  Duration? nextStart,
+  int maxChars,
+  bool adlibsApart,
+) {
+  // Where ad-libs sit on a row of their own (adlibs.dart), only the main
+  // words count towards a line being too long.
+  final plain = LyricVoices.plain(line.text);
+  final shown = adlibsApart ? (splitAdlibText(plain)?.main ?? plain) : plain;
   if (shown.length <= maxChars) return [line];
   final tokens = line.hasWordTiming
       ? [for (final w in line.words) w.text]
