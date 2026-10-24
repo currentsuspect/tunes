@@ -10,6 +10,7 @@ import type { Getter, GetRequest } from "./getter.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
+import type { AboutService } from "./about.js";
 import { kMaxLyricChars, type LyricStore } from "./lyricstore.js";
 import type {
   ArtistDiscography,
@@ -92,7 +93,10 @@ export class ManifestServer {
     private readonly clips: ClipMaker | null = null,
     /// The computer's updates (the Linux bundle), or null: /update?platform=
     /// linux then answers 204 and /update/linux 404.
-    private readonly linuxUpdates: UpdateFeed | null = null
+    private readonly linuxUpdates: UpdateFeed | null = null,
+    /// What Genius knows (about.ts), for the song, album, artist and person
+    /// pages; null answers 503.
+    private readonly about: AboutService | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -405,6 +409,36 @@ export class ManifestServer {
             JSON.stringify({ tracks, releases, artists, externalArtists, externalReleases })
           );
           return;
+        }
+
+        // The Roon pass's pages (about.ts): a song's story and makers, an
+        // album's and an artist's write-up, a person's work in the library.
+        if (url.pathname.startsWith("/about/")) {
+          const json = (code: number, body: unknown) => {
+            res.writeHead(code, {
+              "content-type": "application/json; charset=utf-8",
+              // Changes slowly; a page reopened within the hour need not ask.
+              "cache-control": "private, max-age=3600",
+            });
+            res.end(JSON.stringify(body));
+          };
+          const about = this.about;
+          if (!about) return json(503, { error: "about is not set up" });
+          const p = url.searchParams;
+          if (url.pathname === "/about/song") {
+            const sha = p.get("sha") ?? "";
+            if (!/^[0-9a-f]{64}$/.test(sha)) return json(400, { error: "expected sha" });
+            const r = await about.song(sha);
+            return r ? json(200, r) : json(404, { error: "no such song" });
+          }
+          if (url.pathname === "/about/album") {
+            return json(200, await about.album(p.get("release") ?? ""));
+          }
+          const name = (p.get("name") ?? "").trim();
+          if (name === "" || name.length > 200) return json(400, { error: "expected name" });
+          if (url.pathname === "/about/artist") return json(200, await about.artist(name));
+          if (url.pathname === "/about/person") return json(200, about.person(name));
+          return json(404, { error: "unknown" });
         }
 
         // Songs out there, getting one, how gets are going, an album's full

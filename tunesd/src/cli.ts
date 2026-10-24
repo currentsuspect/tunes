@@ -39,6 +39,8 @@ import { coalesce, playableOnly, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
 import { ClipMaker } from "./clip.js";
 import { analyzeBeats, BeatStore } from "./beats.js";
+import { AboutService, type AboutTrack } from "./about.js";
+import { AboutStore, GeniusAboutClient } from "./genius.js";
 import { LINUX, UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
@@ -354,6 +356,28 @@ async function main(): Promise<void> {
     // Lyrics: found by the daemon, or typed by a listener, and served to every
     // phone through the manifest (see lyricstore.ts).
     const beatStore = await new BeatStore(join(env.dataDir, "beats.json")).load();
+    // What Genius knows about the music (genius.ts, about.ts): the Roon
+    // pass's song, album, artist and person pages.
+    let aboutTracks: AboutTrack[] = [];
+    const about = new AboutService(
+      await new AboutStore(join(env.dataDir, "about.json")).load(),
+      new GeniusAboutClient(),
+      () => aboutTracks,
+      log
+    );
+    let aboutPassRunning = false;
+    const aboutPass = async (): Promise<void> => {
+      if (aboutPassRunning) return;
+      aboutPassRunning = true;
+      try {
+        const r = await about.pass(20);
+        if (r.asked > 0) log.info({ event: "ABOUT_PASS", ...r });
+      } catch (e) {
+        log.warn({ event: "ABOUT_PASS_FAILED", err: String(e).slice(0, 200) });
+      } finally {
+        aboutPassRunning = false;
+      }
+    };
     const lyricStore = (await new LyricStore(join(env.dataDir, "lyrics.json")).load()).useBeats(beatStore);
     const lrclib = new LrclibClient();
     const lyricChain = new LyricChain(lrclib, new NeteaseClient(), new GeniusClient());
@@ -1392,7 +1416,7 @@ async function main(): Promise<void> {
         lastDropped = dropped;
         log.info({ event: "MANIFEST_HIDES_UNPLAYABLE", count: dropped });
       }
-      return buildManifest(
+      const built = buildManifest(
         playableProbes,
         metaBySha,
         enrichForManifest,
@@ -1406,6 +1430,9 @@ async function main(): Promise<void> {
         goneProbes,
         replacedBy
       );
+      // The library as the about pages and their pass see it (about.ts).
+      aboutTracks = built.tracks;
+      return built;
     };
 
     // Publish watermarks: rows newer than rowsSince, manifest when its
@@ -1914,7 +1941,8 @@ async function main(): Promise<void> {
         () => publishSoon.request(),
         getter,
         new ClipMaker(join(env.dataDir, "tmp-clips")),
-        linuxUpdates
+        linuxUpdates,
+        about
       );
       await server.start();
       // Lyrics are asked for on their own beat as well as after each scan: a
@@ -1922,6 +1950,10 @@ async function main(): Promise<void> {
       // forty scans for them. The first one starts soon after launch.
       setTimeout(() => void fetchLyrics(), 15_000).unref();
       setInterval(() => void fetchLyrics(), 120_000).unref();
+      // Genius, at a walk: 20 songs every 3 minutes, a few seconds apart, so
+      // the library's credits fill in over a day or so (about.ts).
+      setTimeout(() => void aboutPass(), 60_000).unref();
+      setInterval(() => void aboutPass(), 180_000).unref();
       void runEnrichPass()
         .then(() => publishSoon.request())
         .catch((e) => log.error({ event: "ENRICH_PASS_ERROR", err: String(e) }));

@@ -87,6 +87,12 @@ const API_PATHS = new Set([
   "/soulseek/complete",
   "/soulseek/cancel",
   "/tracklist",
+  // What Genius knows, for the song, album, artist and person pages (tunesd
+  // about.ts). Read-only, token-checked like the rest.
+  "/about/song",
+  "/about/album",
+  "/about/artist",
+  "/about/person",
 ]);
 
 /**
