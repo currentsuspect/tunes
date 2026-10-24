@@ -6,6 +6,7 @@ import '../../core/data/playlist_store.dart';
 import '../../core/data/reachability.dart';
 import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/tunes_menu.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/collection_download.dart';
 import '../../core/ui/download_button.dart';
@@ -267,20 +268,20 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             Icons.more_horiz_rounded,
                             color: Tones.textMuted,
                           ),
-                          color: Tones.surfaceRaised,
+                          tooltip: 'More',
                           onSelected: (v) =>
                               v == 'rename' ? _rename() : _delete(),
                           itemBuilder: (_) => [
-                            PopupMenuItem(
-                              value: 'rename',
-                              child: Text('Rename', style: TypeScale.body),
+                            tunesMenuItem(
+                              'rename',
+                              Icons.edit_outlined,
+                              'Rename',
                             ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text(
-                                'Delete playlist',
-                                style: TypeScale.body,
-                              ),
+                            tunesMenuItem(
+                              'delete',
+                              Icons.delete_outline_rounded,
+                              'Delete playlist',
+                              danger: true,
                             ),
                           ],
                         ),

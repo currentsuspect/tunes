@@ -6,6 +6,29 @@ import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var notifications: MethodChannel? = null
+
+    // What a tapped notification asked for ("play:<sha>", "open:gets",
+    // "open:update"), kept until Dart asks: on a cold start the engine is
+    // not listening yet when the intent arrives.
+    private var pendingAction: String? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        pendingAction = intent?.getStringExtra(EXTRA_ACTION)
+        super.onCreate(savedInstanceState)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        val action = intent.getStringExtra(EXTRA_ACTION) ?: return
+        val channel = notifications
+        if (channel == null) {
+            pendingAction = action
+        } else {
+            channel.invokeMethod("action", action)
+        }
+    }
+
     override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
         val engine = super.provideFlutterEngine(context) ?: FlutterEngine(context)
         FlutterEngineCache.getInstance().put("audio_service_engine", engine)
@@ -45,9 +68,32 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/notifications")
+        notifications = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/notifications")
+        notifications!!
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // A plain note: a song landed, someone got songs, an
+                    // update is ready. Not the media notification, which
+                    // audio_service owns.
+                    "show" -> {
+                        try {
+                            showNote(
+                                call.argument<Int>("id") ?: 1,
+                                call.argument<String>("title") ?: "",
+                                call.argument<String>("body"),
+                                call.argument<String>("tap"),
+                                call.argument<String>("actionLabel"),
+                                call.argument<String>("action"),
+                            )
+                        } catch (e: Exception) {
+                            // A note that cannot be shown is not worth a crash.
+                        }
+                        result.success(null)
+                    }
+                    "takeAction" -> {
+                        result.success(pendingAction)
+                        pendingAction = null
+                    }
                     "requestPostNotifications" -> {
                         result.success(null)
                         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -64,6 +110,41 @@ class MainActivity : FlutterActivity() {
                             } catch (e: Exception) {
                                 // never let a permission request take the app down
                             }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // A picture to the phone's share sheet: the month card.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tunes/share")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "image" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("no_path", "image needs a path", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                this,
+                                "$packageName.updates",
+                                java.io.File(path),
+                            )
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "image/png"
+                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(
+                                android.content.Intent.createChooser(
+                                    send,
+                                    call.argument<String>("title"),
+                                ),
+                            )
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("share_failed", e.message, null)
                         }
                     }
                     else -> result.notImplemented()
@@ -122,6 +203,62 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun showNote(
+        id: Int,
+        title: String,
+        body: String?,
+        tap: String?,
+        actionLabel: String?,
+        action: String?,
+    ) {
+        val manager = getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+            as android.app.NotificationManager
+        if (android.os.Build.VERSION.SDK_INT >= 26 &&
+            manager.getNotificationChannel(CHANNEL_GETS) == null
+        ) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    CHANNEL_GETS,
+                    "Songs and updates",
+                    android.app.NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "A song you asked for is here, or a new Tunes is ready"
+                },
+            )
+        }
+        val builder = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_GETS)
+            .setSmallIcon(R.drawable.ic_stat_music)
+            .setContentTitle(title)
+            .setAutoCancel(true)
+        if (body != null) builder.setContentText(body)
+        if (tap != null) builder.setContentIntent(pending(id * 2, tap))
+        if (actionLabel != null && action != null) {
+            builder.addAction(0, actionLabel, pending(id * 2 + 1, action))
+        }
+        androidx.core.app.NotificationManagerCompat.from(this).notify(id, builder.build())
+    }
+
+    /** Reopens this activity carrying [action]; singleTop, so a running app
+     * gets it in onNewIntent rather than a second copy of itself. */
+    private fun pending(code: Int, action: String): android.app.PendingIntent {
+        val intent = android.content.Intent(this, MainActivity::class.java).apply {
+            putExtra(EXTRA_ACTION, action)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        return android.app.PendingIntent.getActivity(
+            this,
+            code,
+            intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    companion object {
+        private const val CHANNEL_GETS = "tunes.gets"
+        private const val EXTRA_ACTION = "tunes.action"
     }
 
     private fun installApk(path: String) {

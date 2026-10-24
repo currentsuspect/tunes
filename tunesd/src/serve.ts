@@ -366,7 +366,10 @@ export class ManifestServer {
               return json(503, { error: String(e) });
             }
           }
-          if (url.pathname === "/soulseek/jobs") return json(200, { jobs: getter.list() });
+          if (url.pathname === "/soulseek/jobs") {
+            const days = Number(url.searchParams.get("days") ?? "1");
+            return json(200, { jobs: getter.list(Number.isFinite(days) ? days : 1) });
+          }
           if (url.pathname === "/tracklist") {
             const id = url.searchParams.get("release") ?? "";
             const tracks = await getter.tracklist(id).catch(() => null);

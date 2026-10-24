@@ -75,7 +75,7 @@ class _Box extends TunesClient {
   }
 
   @override
-  Future<List<GetJob>> soulseekJobs() async => const [];
+  Future<List<GetJob>> soulseekJobs({int? days}) async => const [];
 }
 
 ManifestTrack _t(String sha, String title, int n) => ManifestTrack(

@@ -387,7 +387,8 @@ export class Getter {
   private persist(): void {
     const path = this.deps.statePath;
     if (!path) return;
-    const since = this.now().getTime() - 24 * 3600_000;
+    // A week of finished ones, for the shelf; every unfinished one.
+    const since = this.now().getTime() - 7 * 24 * 3600_000;
     const body: Saved = {
       jobs: this.jobs.filter((j) => Date.parse(j.at) >= since || UNFINISHED.includes(j.state)),
       requests: [...this.requests.entries()],
@@ -454,9 +455,10 @@ export class Getter {
     return songs;
   }
 
-  /** The last day's gets, newest first. */
-  list(): GetJob[] {
-    const since = this.now().getTime() - 24 * 3600_000;
+  /** The last [days] days' gets (one by default), newest first. A week is
+   * what Home's "Just got" shelf shows. */
+  list(days = 1): GetJob[] {
+    const since = this.now().getTime() - Math.min(Math.max(days, 1), 7) * 24 * 3600_000;
     // The one under way counts as first, so the next waiting song is 2nd in
     // line: what the person sees is how many songs come before theirs.
     let place = this.jobs.some((j) => ["searching", "downloading", "checking"].includes(j.state)) ? 1 : 0;

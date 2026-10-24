@@ -59,6 +59,10 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The action sits beside the heading, centred on it, and the note runs
+    // the full width under both. The action used to sit beside the note at
+    // the bottom, which squeezed the note onto two lines and left the
+    // button floating away from the thing it plays (24 Oct, approved).
     return Padding(
       padding: EdgeInsets.fromLTRB(
         padding,
@@ -66,30 +70,78 @@ class SectionHeader extends StatelessWidget {
         trailing == null ? padding : Space.md,
         Space.md,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ..._title(),
-                if (note != null && Looks.current.kind != LookKind.noir)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      note!,
-                      style: TypeScale.note.copyWith(
-                        fontSize: 14,
-                        color: Tones.textMuted,
-                      ),
-                    ),
-                  ),
-              ],
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _title(),
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          if (note != null && Looks.current.kind != LookKind.noir)
+            Padding(
+              padding: EdgeInsets.only(
+                top: 2,
+                right: trailing == null ? 0 : padding - Space.md,
+              ),
+              child: Text(
+                note!,
+                style: TypeScale.note.copyWith(
+                  fontSize: 14,
+                  color: Tones.textMuted,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Play all of a shelf: a round button beside its heading. Crayon colours it
+/// in with the heading's crayon and gives it an ink edge.
+class SectionPlay extends StatelessWidget {
+  const SectionPlay({super.key, required this.label, required this.onTap});
+
+  /// What it plays, for the screen reader ("Listen again").
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    final crayon = look.kind == LookKind.crayon;
+    final fill = crayon
+        ? look.crayons[label.hashCode.abs() % look.crayons.length]
+        : Tones.surfaceRaised;
+    return Tooltip(
+      message: 'Play $label',
+      child: Material(
+        color: fill,
+        shape: CircleBorder(
+          side: BorderSide(
+            color: crayon ? Tones.text : Tones.hairline,
+            width: crayon ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox.square(
+            dimension: 44,
+            child: Icon(
+              Icons.play_arrow_rounded,
+              size: 24,
+              color: crayon ? const Color(0xFF22201C) : Tones.text,
             ),
           ),
-          ?trailing,
-        ],
+        ),
       ),
     );
   }

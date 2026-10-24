@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../../domain/soulseek.dart';
+import '../platform/notifications.dart';
 import '../net/tunes_client.dart';
 
 /// Songs being got from Soulseek, shared by every screen that offers a Get
@@ -21,6 +22,56 @@ class GetsController extends ChangeNotifier {
   final Map<String, GetJob> _bySong = {};
   Timer? _poll;
   bool _disposed = false;
+
+  final List<void Function(GetJob)> _landedListeners = [];
+
+  /// Told once for each song this phone asked for, when it lands: the toast
+  /// on screen and the notification (owner, 24 Oct: "they don't know it's
+  /// there").
+  void addLandedListener(void Function(GetJob) f) => _landedListeners.add(f);
+  void removeLandedListener(void Function(GetJob) f) =>
+      _landedListeners.remove(f);
+
+  List<GetJob> _recent = const [];
+
+  /// The week's gets on the box, everyone's, newest first, as last fetched:
+  /// what Home's "Just got" shelf is made of. Empty until [refreshRecent].
+  List<GetJob> get recent => _recent;
+
+  /// Fetches the week's gets for the shelf. Quiet on failure: the shelf
+  /// keeps what it had.
+  Future<List<GetJob>> refreshRecent() async {
+    try {
+      final jobs = await client.soulseekJobs(days: 7);
+      _recent = jobs;
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      // The box is out of reach; try again next time.
+    }
+    return _recent;
+  }
+
+  /// Takes a waiting song out of the line.
+  Future<bool> cancel(GetJob job) async {
+    final ok = await client.soulseekCancel(job.id);
+    if (ok) {
+      _take([
+        GetJob(
+          id: job.id,
+          title: job.title,
+          artist: job.artist,
+          album: job.album,
+          release: job.release,
+          by: job.by,
+          state: GetState.failed,
+        ),
+      ]);
+      // Out of the line, so not a failure to show either.
+      _bySong.remove(job.songKey);
+      if (!_disposed) notifyListeners();
+    }
+    return ok;
+  }
 
   /// The latest get of this song, if any was asked for.
   GetJob? jobFor(String artist, String title) =>
@@ -56,6 +107,15 @@ class GetsController extends ChangeNotifier {
   int pendingFor(String release) =>
       _bySong.values.where((j) => j.release == release && !j.finished).length;
 
+  /// Android asks once whether Tunes may post notes; the first Get is when
+  /// a note would first be worth having.
+  bool _askedToNotify = false;
+  void _askToNotify() {
+    if (_askedToNotify) return;
+    _askedToNotify = true;
+    unawaited(requestNotificationPermissionIfNeeded());
+  }
+
   Future<GetJob?> get(
     FoundSong? copy, {
     String? title,
@@ -64,6 +124,7 @@ class GetsController extends ChangeNotifier {
     int? durationMs,
     String? release,
   }) async {
+    _askToNotify();
     try {
       final job = await client.soulseekGet(
         title: copy?.title ?? title!,
@@ -81,6 +142,7 @@ class GetsController extends ChangeNotifier {
   }
 
   Future<int> complete(String release) async {
+    _askToNotify();
     try {
       final jobs = await client.soulseekComplete(release);
       _take(jobs);
@@ -91,19 +153,26 @@ class GetsController extends ChangeNotifier {
   }
 
   void _take(List<GetJob> jobs) {
-    var landed = false;
+    final landed = <GetJob>[];
     for (final j in jobs) {
       final before = _bySong[j.songKey];
       if (j.state == GetState.done &&
           before != null &&
           before.state != GetState.done) {
-        landed = true;
+        landed.add(j);
       }
       _bySong[j.songKey] = j;
     }
     if (_disposed) return;
     notifyListeners();
-    if (landed) onLanded();
+    if (landed.isNotEmpty) {
+      onLanded();
+      for (final j in landed) {
+        for (final f in [..._landedListeners]) {
+          f(j);
+        }
+      }
+    }
     final going = _bySong.values.any((j) => !j.finished);
     if (going && _poll == null) {
       _poll = Timer.periodic(const Duration(seconds: 2), (_) => _check());

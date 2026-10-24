@@ -373,3 +373,21 @@ describe("who asked", () => {
     expect(askerName(undefined)).toBeNull();
   });
 });
+
+describe("the week's gets", () => {
+  it("a day by default, up to a week when asked", () => {
+    let now = new Date("2026-10-20T12:00:00Z");
+    const g = new Getter({
+      api: { loggedIn: async () => true } as never,
+      inLibrary: () => "have",
+      log: { info() {}, warn() {}, error() {} } as never,
+      now: () => now,
+    } as never);
+    g.get({ title: "Old", artist: "A" });
+    now = new Date("2026-10-23T12:00:00Z");
+    g.get({ title: "New", artist: "A" });
+    expect(g.list().map((j) => j.title)).toEqual(["New"]);
+    expect(g.list(7).map((j) => j.title)).toEqual(["New", "Old"]);
+    expect(g.list(30).map((j) => j.title)).toEqual(["New", "Old"]);
+  });
+});

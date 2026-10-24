@@ -157,6 +157,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Follow the thread'), findsOneWidget);
+    // The shelf's Play sits beside its heading now, so the card sits a
+    // little lower than the 600 px test screen shows.
+    await tester.ensureVisible(find.text('Two').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Two').first);
     await tester.pumpAndSettle();
     expect(playedFrom, greaterThanOrEqualTo(0));

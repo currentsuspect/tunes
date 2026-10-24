@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'looks.dart';
 import 'tokens.dart';
 
 ThemeData buildTunesTheme(MediaQueryData mq) {
@@ -73,6 +74,31 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
         side: BorderSide(color: Tones.hairline),
       ),
       margin: EdgeInsets.zero,
+    ),
+    // Every "more" menu. They took Material's defaults plus the control
+    // radius, which in Crayon is a pill: a tall rounded slab laid over the
+    // top bar with its first item clipped (owner, 24 Oct: "weird and not in
+    // theme at all"). Now a card that opens under its button: an ink edge and
+    // no blur in Crayon, a hairline and a soft lift in Room and Noir.
+    popupMenuTheme: PopupMenuThemeData(
+      color: Tones.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      position: PopupMenuPosition.under,
+      elevation: look.kind == LookKind.crayon ? 0 : 8,
+      shadowColor: Colors.black.withValues(alpha: look.isDark ? 0.6 : 0.18),
+      menuPadding: const EdgeInsets.symmetric(vertical: Space.xs),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(
+          RadiusTokens.card.clamp(4, 14).toDouble(),
+        ),
+        side: look.kind == LookKind.crayon
+            ? BorderSide(color: Tones.text, width: 2)
+            : BorderSide(color: Tones.hairline),
+      ),
+      textStyle: TypeScale.body,
+      labelTextStyle: WidgetStatePropertyAll(TypeScale.body),
+      iconColor: Tones.textMuted,
+      iconSize: 20,
     ),
     dividerTheme: DividerThemeData(
       color: Tones.hairline,

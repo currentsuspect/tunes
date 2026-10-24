@@ -12,6 +12,9 @@ import '../../core/nav/nav_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/theme/looks.dart';
 import '../../core/ui/crayon_marks.dart';
+import '../../core/ui/tunes_menu.dart';
+import '../../core/audio/sleep_timer.dart';
+import 'sleep_sheet.dart';
 import '../../core/ui/look_extras.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
@@ -294,11 +297,16 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   ),
                                   Expanded(
                                     child: Center(
-                                      child: SourceTag(
-                                        player: widget.player,
-                                        held: downloaded,
-                                        offline: widget.offline,
-                                        reachability: widget.reachability,
+                                      // While a sleep timer runs, the time
+                                      // left takes the source's place: it is
+                                      // what matters at that hour.
+                                      child: _SleepOrSource(
+                                        source: SourceTag(
+                                          player: widget.player,
+                                          held: downloaded,
+                                          offline: widget.offline,
+                                          reachability: widget.reachability,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -307,12 +315,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       Icons.more_horiz_rounded,
                                       color: Tones.textMuted,
                                     ),
-                                    color: Tones.surface,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(
-                                        RadiusTokens.control,
-                                      ),
-                                    ),
+                                    tooltip: 'More',
                                     onSelected: (action) {
                                       switch (action) {
                                         case 'queue':
@@ -352,6 +355,14 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                         case 'stop':
                                           widget.player.stop();
                                           break;
+                                        case 'sleep':
+                                          final sleep = SleepScope.maybeOf(
+                                            context,
+                                          );
+                                          if (sleep != null) {
+                                            SleepSheet.show(context, sleep);
+                                          }
+                                          break;
                                         case 'info':
                                           _showTrackInfo(context, current);
                                           break;
@@ -364,56 +375,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       }
                                     },
                                     itemBuilder: (context) => [
-                                      PopupMenuItem(
-                                        value: 'queue',
-                                        child: Text(
-                                          'Queue',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'artist',
-                                        child: Text(
-                                          'Go to artist',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'album',
-                                        child: Text(
-                                          'Go to album',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'playlist',
-                                        child: Text(
-                                          'Add to playlist',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'download',
-                                        child: Text(
-                                          downloaded
-                                              ? 'Remove download'
-                                              : 'Download',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'stop',
-                                        child: Text(
-                                          'Stop',
-                                          style: TypeScale.body,
-                                        ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'info',
-                                        child: Text(
-                                          'Track information',
-                                          style: TypeScale.body,
-                                        ),
+                                      tunesMenuItem(
+                                        'queue',
+                                        Icons.queue_music_rounded,
+                                        'Queue',
                                       ),
                                       // Beside the player already when the window is wide
                                       // and the song has lyrics; otherwise this is the way
@@ -427,13 +392,55 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           (current.lyrics ?? '')
                                               .trim()
                                               .isNotEmpty))
-                                        PopupMenuItem(
-                                          value: 'lyrics',
-                                          child: Text(
-                                            'Lyrics',
-                                            style: TypeScale.body,
-                                          ),
+                                        tunesMenuItem(
+                                          'lyrics',
+                                          Icons.lyrics_outlined,
+                                          'Lyrics',
                                         ),
+                                      tunesMenuDivider(),
+                                      tunesMenuItem(
+                                        'artist',
+                                        Icons.person_outline_rounded,
+                                        'Go to artist',
+                                      ),
+                                      tunesMenuItem(
+                                        'album',
+                                        Icons.album_outlined,
+                                        'Go to album',
+                                      ),
+                                      tunesMenuDivider(),
+                                      tunesMenuItem(
+                                        'playlist',
+                                        Icons.playlist_add_rounded,
+                                        'Add to playlist',
+                                      ),
+                                      tunesMenuItem(
+                                        'download',
+                                        downloaded
+                                            ? Icons.cloud_off_outlined
+                                            : Icons.download_rounded,
+                                        downloaded
+                                            ? 'Remove download'
+                                            : 'Download',
+                                        danger: downloaded,
+                                      ),
+                                      tunesMenuItem(
+                                        'info',
+                                        Icons.info_outline_rounded,
+                                        'Track information',
+                                      ),
+                                      tunesMenuDivider(),
+                                      if (SleepScope.maybeOf(context) != null)
+                                        tunesMenuItem(
+                                          'sleep',
+                                          Icons.bedtime_outlined,
+                                          'Sleep timer',
+                                        ),
+                                      tunesMenuItem(
+                                        'stop',
+                                        Icons.stop_circle_outlined,
+                                        'Stop',
+                                      ),
                                     ],
                                   ),
                                 ],
@@ -963,6 +970,7 @@ class _PlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final crayon = Looks.current.kind == LookKind.crayon;
     return Semantics(
       button: true,
       label: player.playing ? 'Pause' : 'Play',
@@ -972,11 +980,26 @@ class _PlayButton extends StatelessWidget {
         child: Container(
           width: 68,
           height: 68,
-          decoration: BoxDecoration(color: Tones.text, shape: BoxShape.circle),
+          // Crayon: coloured in with the cover's crayon, ink edge, a hard
+          // shadow. The others: paper on ink.
+          decoration: crayon
+              ? BoxDecoration(
+                  color: AccentScope.of(context),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Tones.text, width: 2.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Looks.current.inkShadow,
+                      offset: const Offset(3, 3),
+                    ),
+                  ],
+                )
+              : BoxDecoration(color: Tones.text, shape: BoxShape.circle),
           child: Icon(
             player.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
             size: 38,
-            color: Tones.base,
+            // Ink on a crayon: every crayon in the box is light enough.
+            color: crayon ? const Color(0xFF22201C) : Tones.base,
           ),
         ),
       ),
@@ -1087,7 +1110,8 @@ class _Artwork extends StatelessWidget {
                     left: side * 0.05,
                     top: -12,
                     child: CrayonTape(
-                      color: Looks.current.crayons[1],
+                      // The cover's crayon (cover_tint.dart), both pieces.
+                      color: AccentScope.of(context),
                       angle: -0.24,
                       length: side * 0.23,
                     ),
@@ -1096,7 +1120,7 @@ class _Artwork extends StatelessWidget {
                     right: side * 0.03,
                     top: -10,
                     child: CrayonTape(
-                      color: Looks.current.crayons[2],
+                      color: AccentScope.of(context),
                       angle: 0.19,
                       length: side * 0.23,
                     ),
@@ -1298,4 +1322,65 @@ String audioSpec(ManifestTrack t) {
     if (lossless) 'LOSSLESS',
   ];
   return parts.join('  ·  ');
+}
+
+/// The sleep timer's time left, as a pill that opens the timer; otherwise
+/// where the song is coming from.
+class _SleepOrSource extends StatelessWidget {
+  const _SleepOrSource({required this.source});
+
+  final Widget source;
+
+  @override
+  Widget build(BuildContext context) {
+    final sleep = SleepScope.maybeOf(context);
+    if (sleep == null || !sleep.active) return source;
+    final crayon = Looks.current.kind == LookKind.crayon;
+    final left = sleep.remaining;
+    final text = switch (sleep.mode) {
+      SleepMode.timed => 'Sleeping in ${sleepClock(left ?? Duration.zero)}',
+      SleepMode.endOfSong => 'Stopping after this song',
+      SleepMode.endOfAlbum => 'Stopping after this album',
+      SleepMode.off => '',
+    };
+    return Semantics(
+      button: true,
+      label: '$text. Sleep timer',
+      child: Material(
+        color: Colors.transparent,
+        shape: StadiumBorder(
+          side: BorderSide(
+            color: crayon ? Tones.text : Tones.hairline,
+            width: crayon ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () => SleepSheet.show(context, sleep),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.bedtime_rounded,
+                  size: 16,
+                  color: crayon ? Looks.current.crayons[1] : Tones.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  text,
+                  style: TypeScale.caption.copyWith(
+                    color: Tones.text,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

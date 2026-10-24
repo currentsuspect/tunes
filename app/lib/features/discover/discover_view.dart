@@ -224,7 +224,10 @@ class _ThreadRail extends StatelessWidget {
           rail.title,
           padding: Space.lg,
           note: rail.subtitle,
-          trailing: PlayPill(onTap: () => onPlay(rail.tracks, 0)),
+          trailing: SectionPlay(
+            label: rail.title,
+            onTap: () => onPlay(rail.tracks, 0),
+          ),
         ),
         SizedBox(
           height: 176,

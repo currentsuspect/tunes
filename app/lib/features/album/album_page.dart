@@ -10,6 +10,7 @@ import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/crayon_marks.dart';
+import '../../core/ui/get_status.dart';
 import '../../core/ui/pressable.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../core/data/download_manager.dart';
@@ -550,45 +551,7 @@ class _MissingRow extends StatelessWidget {
     final e = entry;
     final j = job;
     final faint = Tones.textMuted.withValues(alpha: 0.6);
-    final Widget action;
-    if (j != null && !j.finished) {
-      action = SizedBox(
-        width: 40,
-        height: 40,
-        child: Center(
-          child: Looks.current.kind == LookKind.crayon
-              ? CrayonDownloadFace(
-                  state: CrayonDownloadState.running,
-                  progress: j.progress,
-                )
-              : SizedBox.square(
-                  dimension: 22,
-                  child: CircularProgressIndicator(
-                    value: j.progress,
-                    strokeWidth: 2.2,
-                    color: Tones.held,
-                    backgroundColor: Tones.hairline,
-                  ),
-                ),
-        ),
-      );
-    } else if (j != null && j.state == GetState.done) {
-      action = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: Space.sm),
-        child: Text('adding…', style: TypeScale.caption),
-      );
-    } else if (onGet != null) {
-      action = TextButton(
-        onPressed: onGet,
-        style: TextButton.styleFrom(
-          foregroundColor: Tones.text,
-          minimumSize: const Size(48, 40),
-        ),
-        child: Text(j == null ? 'Get' : 'Try again'),
-      );
-    } else {
-      action = const SizedBox.shrink();
-    }
+    final action = GetAction(title: e.title, job: j, onGet: onGet);
     final n = e.trackNumber;
     return Semantics(
       label: '${e.title}, not in your library',
@@ -618,7 +581,7 @@ class _MissingRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'not in your library',
+                    getNote(j) ?? 'not in your library',
                     style: TypeScale.caption.copyWith(
                       color: faint,
                       fontSize: 11.5,

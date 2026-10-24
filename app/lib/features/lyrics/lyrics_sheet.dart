@@ -7,6 +7,7 @@ import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/tunes_menu.dart';
 import '../../core/ui/track_swipe.dart';
 import '../../core/ui/cover_tint.dart';
 import '../../domain/manifest.dart';
@@ -417,7 +418,6 @@ class _Header extends StatelessWidget {
             PopupMenuButton<String>(
               tooltip: 'Lyrics options',
               icon: Icon(Icons.more_horiz_rounded, color: Tones.textMuted),
-              color: Tones.surfaceRaised,
               onSelected: (v) {
                 switch (v) {
                   case 'edit':
@@ -445,23 +445,22 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                   ),
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text(
-                    kind == _LyricsKind.none ? 'Add lyrics' : 'Edit lyrics',
-                  ),
+                tunesMenuItem(
+                  'edit',
+                  Icons.edit_outlined,
+                  kind == _LyricsKind.none ? 'Add lyrics' : 'Edit lyrics',
                 ),
                 if (onSync != null)
-                  const PopupMenuItem(
-                    value: 'sync',
-                    child: Text('Sync to the track'),
+                  tunesMenuItem(
+                    'sync',
+                    Icons.timer_outlined,
+                    'Sync to the track',
                   ),
                 if (settings != null && kind != _LyricsKind.none)
-                  PopupMenuItem(
-                    value: 'size',
-                    child: Text(
-                      'Text size · ${const ['Small', 'Medium', 'Large'][settings.lyricSize.clamp(0, 2)]}',
-                    ),
+                  tunesMenuItem(
+                    'size',
+                    Icons.format_size_rounded,
+                    'Text size · ${const ['Small', 'Medium', 'Large'][settings.lyricSize.clamp(0, 2)]}',
                   ),
               ],
             ),

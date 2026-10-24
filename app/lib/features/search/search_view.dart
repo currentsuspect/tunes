@@ -13,6 +13,7 @@ import '../../core/net/tunes_client.dart';
 import '../../core/theme/looks.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/crayon_marks.dart';
+import '../../core/ui/get_status.dart';
 import '../../core/ui/pressable.dart';
 import '../../core/ui/empty_state.dart';
 import '../../core/ui/initials.dart';
@@ -1755,52 +1756,18 @@ class _FoundCard extends StatelessWidget {
       ?s.album,
       if (s.durationMs != null) _mmss(s.durationMs!),
     ].join(' \u00b7 ');
-    final Widget action;
-    final String? note;
-    if (playable case final t?) {
-      note = 'in your library now';
-      action = _RoundButton(
-        tooltip: 'Play ${s.title}',
-        icon: Icons.play_arrow_rounded,
-        filled: true,
-        onTap: () => onPlay(t),
-      );
-    } else if (j != null && !j.finished) {
-      note = switch (j.state) {
-        GetState.queued => 'waiting its turn',
-        GetState.searching => 'looking for another copy',
-        GetState.checking => 'checking it',
-        _ =>
-          j.progress == null
-              ? 'getting it'
-              : 'getting it \u2026 ${(j.progress! * 100).round()}%',
-      };
-      action = _crayon
-          ? CrayonDownloadFace(
-              state: CrayonDownloadState.running,
-              progress: j.progress,
-              size: 34,
-            )
-          : SizedBox.square(
-              dimension: 30,
-              child: CircularProgressIndicator(
-                value: j.progress,
-                strokeWidth: 3,
-                color: Tones.held,
-                backgroundColor: Tones.hairline,
-              ),
-            );
-    } else if (j != null && j.state == GetState.done) {
-      note = 'adding it to your library';
-      action = const SizedBox.square(dimension: 34);
-    } else {
-      note = j == null
-          ? null
-          : j.state == GetState.notFound
-          ? 'nobody would send it; try another'
-          : "that copy didn't work; try again";
-      action = _GetButton(onTap: onGet);
-    }
+    final note = playable != null
+        ? (j?.by == null
+              ? 'in your library now'
+              : 'got by ${j!.by} · yours now')
+        : getNote(j);
+    final action = GetAction(
+      title: s.title,
+      job: j,
+      onGet: onGet,
+      playable: playable,
+      onPlay: onPlay,
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(Space.md, 10, 10, 10),
       decoration: BoxDecoration(
@@ -1896,86 +1863,6 @@ class _Tag extends StatelessWidget {
           letterSpacing: 0,
           color: Tones.text,
           fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
-        ),
-      ),
-    );
-  }
-}
-
-class _GetButton extends StatelessWidget {
-  const _GetButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Tones.primary,
-      shape: StadiumBorder(
-        side: _crayon
-            ? BorderSide(color: Tones.text, width: 2)
-            : BorderSide.none,
-      ),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 44, minWidth: 72),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.arrow_downward_rounded,
-                  size: 18,
-                  color: _crayon ? Tones.text : Tones.onPrimary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Get',
-                  style: TypeScale.title.copyWith(
-                    fontSize: 14,
-                    color: _crayon ? Tones.text : Tones.onPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-    this.filled = false,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: filled ? Tones.text : Colors.transparent,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox.square(
-            dimension: 44,
-            child: Icon(icon, color: filled ? Tones.base : Tones.text),
-          ),
         ),
       ),
     );

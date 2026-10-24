@@ -21,4 +21,7 @@
 -->
 <paths>
     <files-path name="updates" path="updates/"/>
+    <!-- The month card picture handed to the share sheet (month_card.dart),
+         and nothing else under files/. -->
+    <files-path name="share" path="share/"/>
 </paths>

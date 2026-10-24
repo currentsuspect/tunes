@@ -13,6 +13,7 @@ import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
 import 'core/audio/stream_relay.dart';
 import 'core/net/update_installer.dart';
+import 'features/notes/note_center.dart';
 import 'features/updates/update_controller.dart';
 import 'core/platform/device.dart';
 import 'features/desktop/desktop_keys.dart';
@@ -57,6 +58,8 @@ import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
 import 'core/platform/diag_log.dart';
+import 'core/platform/notifications.dart';
+import 'core/audio/sleep_timer.dart';
 import 'core/theme/theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'core/theme/tokens.dart';
@@ -69,6 +72,7 @@ import 'domain/collection_gaps.dart';
 import 'domain/threads.dart';
 import 'domain/discography.dart';
 import 'domain/manifest.dart';
+import 'domain/soulseek.dart';
 import 'core/data/gets.dart';
 import 'core/ui/gets_bar.dart';
 import 'domain/mixes.dart';
@@ -949,6 +953,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _gets = GetsController(client: widget.client, onLanded: _reload);
+    _gets.addLandedListener(_onSongLanded);
+    unawaited(_gets.refreshRecent());
+    _notes = NoteCenter(
+      gets: _gets,
+      settings: widget.settings,
+      updates: _updates,
+      foreground: () => _foreground,
+    );
+    _noteTaps = noteActions().listen(_onNoteTapped);
     WidgetsBinding.instance.addObserver(this);
     _nav.addListener(_onNavChanged);
     // The screens below still take a Set<String> of in-flight shas; keep it in
@@ -959,7 +972,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.accountSync?.onChanged = _onAccountSynced;
     FocusManager.instance.addListener(_regainFocus);
     _refreshTimer = Timer.periodic(_refreshEvery, (_) {
-      if (_foreground && mounted) _reload();
+      if (_foreground && mounted) {
+        _reload();
+        unawaited(_gets.refreshRecent());
+      }
     });
     _local.addListener(_trackRecents);
     _local.addListener(_feedRadio);
@@ -999,6 +1015,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     FocusManager.instance.removeListener(_regainFocus);
     _keys.dispose();
+    _noteTaps?.cancel();
+    _sleep.dispose();
+    _notes.dispose();
     _gets.dispose();
     _updates.dispose();
     if (widget.accountSync?.onChanged == _onAccountSynced) {
@@ -1160,6 +1179,117 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// The day's gets from Soulseek, from the bar or from search.
+  /// A song this phone asked for is in the library: say so where it can be
+  /// played, whichever screen is up.
+  void _onSongLanded(GetJob job) {
+    unawaited(_gets.refreshRecent());
+    if (!mounted || !_foreground) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    final crayon = Looks.current.kind == LookKind.crayon;
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 6),
+        backgroundColor: crayon ? Tones.text : Tones.surfaceRaised,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: crayon ? BorderSide.none : BorderSide(color: Tones.hairline),
+        ),
+        content: Row(
+          children: [
+            Icon(
+              Icons.check_rounded,
+              color: crayon ? Looks.current.crayons[3] : Tones.held,
+            ),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: Text(
+                '${job.title} is in your library',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TypeScale.body.copyWith(
+                  color: crayon ? Tones.base : Tones.text,
+                ),
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'Play',
+          textColor: crayon ? Tones.base : Tones.primary,
+          onPressed: () => _playLanded(job),
+        ),
+      ),
+    );
+  }
+
+  late final NoteCenter _notes;
+
+  /// Stops the music later (Now Playing's menu). The desktop fades back to
+  /// its own volume slider; the phone plays at full.
+  late final SleepTimer _sleep = SleepTimer(
+    player: widget.player,
+    restoreLevel: () => Device.isDesktop ? widget.settings.volume : 1,
+  );
+  StreamSubscription<String>? _noteTaps;
+
+  /// A note in the shade was tapped.
+  void _onNoteTapped(String action) {
+    if (!mounted) return;
+    if (action.startsWith('play:')) {
+      unawaited(_playSha(action.substring(5)));
+    } else if (action == 'open:gets') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openGets();
+      });
+    } else if (action == 'open:update') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openProfile(_manifest?.tracks.length ?? 0);
+      });
+    }
+  }
+
+  /// Plays a song that just landed, once this phone's library has it. The
+  /// library is fetched again on landing, so it may take a moment.
+  Future<void> _playLanded(GetJob job) => _playSha(job.sha);
+
+  Future<void> _playSha(String? sha) async {
+    if (sha == null) return;
+    for (var i = 0; i < 20 && mounted; i++) {
+      final t = _trackForSha(sha);
+      if (t != null) {
+        widget.player.playQueue([t], 0);
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  ManifestTrack? _trackForSha(String? sha) {
+    if (sha == null) return null;
+    for (final t in _manifest?.tracks ?? const <ManifestTrack>[]) {
+      if (t.sha == sha) return t;
+    }
+    return null;
+  }
+
+  /// The week's gets that are in the library, newest first, for Home.
+  List<(ManifestTrack, GetJob)> _justGot() {
+    final bySha = {
+      for (final t in _manifest?.tracks ?? const <ManifestTrack>[]) t.sha: t,
+    };
+    final seen = <String>{};
+    return [
+      for (final j in _gets.recent)
+        if (j.state == GetState.done &&
+            j.sha != null &&
+            bySha[j.sha] != null &&
+            seen.add(j.sha!))
+          (bySha[j.sha]!, j),
+    ].take(12).toList();
+  }
+
   void _openGets() {
     final bySha = {
       for (final t in _manifest?.tracks ?? const <ManifestTrack>[]) t.sha: t,
@@ -1941,7 +2071,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // The download scope lives in TunesApp, above the Navigator. Re-publishing
     // it here would cover this shell only, which is the bug that was. Gets
     // are only offered on panels, which live in this shell.
-    return GetsScope(gets: _gets, child: _buildShell(context));
+    return GetsScope(
+      gets: _gets,
+      child: SleepScope(sleep: _sleep, child: _buildShell(context)),
+    );
   }
 
   Widget _buildShell(BuildContext context) {
@@ -2573,51 +2706,56 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         manifestStore: widget.manifestStore,
         recents: playable(_recents),
       ),
-      _ => HomeView(
-        aboveFeed: widget.remoteNow == null || widget.accountSync == null
-            ? null
-            : ContinueCard(
-                remote: widget.remoteNow!,
-                player: widget.player,
-                manifest: manifest,
-                serverNow: widget.accountSync!.serverNowMs,
-                onContinue: (tracks, index, at) {
-                  // Load it where it was, then play: the place is restored the
-                  // way a relaunch restores it, so it resumes at the second.
-                  widget.player.restoreQueue(tracks, index, at: at);
-                  widget.player.play();
-                },
-              ),
-        manifest: manifest,
-        missingAlbums: offline ? const [] : _missingAlbums,
-        onRefresh: _refresh,
-        onRepeat: playable(_onRepeat),
-        listenAgain: playable(_listenAgain),
-        mixes: [
-          for (final m in _mixes)
-            if (playable(m.tracks).length >= 8)
-              Mix(
-                id: m.id,
-                title: m.title,
-                note: m.note,
-                kind: m.kind,
-                tracks: playable(m.tracks),
-              ),
-        ],
-        unheard: offline
-            ? [
-                for (final u in _unheard)
-                  if (u.release.trackShas.any(held)) u,
-              ]
-            : _unheard,
-        onMixTap: _openMix,
-        onArtistTap: (artist) => _openArtist(artist, manifest),
-        onAlbumTap: (release) => _openAlbum(release, manifest),
-        onPlay: (list, index) {
-          // Mirror is handled by the player's onQueuePlayed hook.
-          widget.player.playQueue(list, index);
-        },
-        artUrlFor: _artUrlFor,
+      _ => ListenableBuilder(
+        listenable: _gets,
+        builder: (context, _) => HomeView(
+          justGot: _justGot(),
+          onOpenGets: _openGets,
+          aboveFeed: widget.remoteNow == null || widget.accountSync == null
+              ? null
+              : ContinueCard(
+                  remote: widget.remoteNow!,
+                  player: widget.player,
+                  manifest: manifest,
+                  serverNow: widget.accountSync!.serverNowMs,
+                  onContinue: (tracks, index, at) {
+                    // Load it where it was, then play: the place is restored the
+                    // way a relaunch restores it, so it resumes at the second.
+                    widget.player.restoreQueue(tracks, index, at: at);
+                    widget.player.play();
+                  },
+                ),
+          manifest: manifest,
+          missingAlbums: offline ? const [] : _missingAlbums,
+          onRefresh: _refresh,
+          onRepeat: playable(_onRepeat),
+          listenAgain: playable(_listenAgain),
+          mixes: [
+            for (final m in _mixes)
+              if (playable(m.tracks).length >= 8)
+                Mix(
+                  id: m.id,
+                  title: m.title,
+                  note: m.note,
+                  kind: m.kind,
+                  tracks: playable(m.tracks),
+                ),
+          ],
+          unheard: offline
+              ? [
+                  for (final u in _unheard)
+                    if (u.release.trackShas.any(held)) u,
+                ]
+              : _unheard,
+          onMixTap: _openMix,
+          onArtistTap: (artist) => _openArtist(artist, manifest),
+          onAlbumTap: (release) => _openAlbum(release, manifest),
+          onPlay: (list, index) {
+            // Mirror is handled by the player's onQueuePlayed hook.
+            widget.player.playQueue(list, index);
+          },
+          artUrlFor: _artUrlFor,
+        ),
       ),
     };
     // Keyed by tab and by tap: re-tapping the active tab swaps the key (see

@@ -19,7 +19,7 @@ class _Box extends TunesClient {
       GetJob(id: 'old', title: title, artist: artist, state: GetState.queued);
 
   @override
-  Future<List<GetJob>> soulseekJobs() async => jobs;
+  Future<List<GetJob>> soulseekJobs({int? days}) async => jobs;
 }
 
 void main() {

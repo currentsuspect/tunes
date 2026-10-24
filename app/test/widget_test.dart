@@ -232,10 +232,13 @@ class _FakeClient implements TunesClient {
       GetJob(id: 'j', title: title, artist: artist, state: GetState.queued);
 
   @override
-  Future<List<GetJob>> soulseekJobs() async => const [];
+  Future<List<GetJob>> soulseekJobs({int? days}) async => const [];
 
   @override
   Future<List<GetJob>> soulseekComplete(String releaseId) async => const [];
+
+  @override
+  Future<bool> soulseekCancel(String id) async => false;
 
   @override
   Future<List<TracklistEntry>?> tracklist(String releaseId) async => null;
@@ -1497,14 +1500,14 @@ void main() {
       FakeTunePlayer(),
     );
 
-    expect(find.text('You Asked For It'), findsOneWidget);
-    expect(find.text('Search that gets you'), findsOneWidget);
+    expect(find.text(kWhatsNewTitle), findsOneWidget);
+    expect(find.text(kWhatsNew.first.title), findsOneWidget);
     // Recorded as shown straight away, so an interruption does not bring it back.
     expect(settings.whatsNewSeen, kWhatsNewId);
 
     await tester.tap(find.text('Let\'s go'));
     await tester.pumpAndSettle();
-    expect(find.text('You Asked For It'), findsNothing);
+    expect(find.text(kWhatsNewTitle), findsNothing);
     // The app is there underneath.
     expect(find.text('Home'), findsOneWidget);
   });
@@ -1516,7 +1519,7 @@ void main() {
       _FakeClient(() async => _manifestOf(_library())),
       FakeTunePlayer(),
     );
-    expect(find.text('You Asked For It'), findsNothing);
+    expect(find.text(kWhatsNewTitle), findsNothing);
   });
 
   testWidgets('settings open from the avatar', (tester) async {

@@ -51,6 +51,13 @@ export function mapMtprotoError(e: unknown): Error {
   // PermanentError and took the daemon down four times in the week to 24
   // Oct, losing everyone's queued gets each time.
   if (isTransportError(msg)) return new RetryableError(msg);
+  // Moving a download to another data centre exports the login there, and
+  // that hand-over sometimes fails ("The provided authorization is invalid",
+  // AUTH_BYTES_INVALID). The session itself is fine: a restart got straight
+  // back in on 24 Oct. Asked again later, not fatal.
+  if (/AUTH_BYTES_INVALID|provided authorization is invalid/i.test(msg)) {
+    return new RetryableError(msg, 60_000);
+  }
   return new PermanentError(msg);
 }
 

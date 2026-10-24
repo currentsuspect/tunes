@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/shelf_widgets.dart';
 import '../../core/ui/tunes_refresh.dart';
@@ -12,6 +13,7 @@ import '../../core/ui/initials.dart';
 import '../../core/ui/missing_cover.dart';
 import '../../domain/discography.dart';
 import '../../domain/manifest.dart';
+import '../../domain/soulseek.dart';
 import '../library/library_widgets.dart';
 
 class HomeView extends StatelessWidget {
@@ -30,7 +32,17 @@ class HomeView extends StatelessWidget {
     required this.artUrlFor,
     required this.onRefresh,
     this.aboveFeed,
+    this.justGot = const [],
+    this.onOpenGets,
   });
+
+  /// Songs got from Soulseek this week, newest first, each with the get that
+  /// brought it (who asked, when). Owner, 24 Oct: a song that lands should
+  /// have somewhere to show up, or nobody knows it is there.
+  final List<(ManifestTrack, GetJob)> justGot;
+
+  /// Opens the line. Null hides the link.
+  final VoidCallback? onOpenGets;
 
   /// Shown before everything else when there is something to say about right
   /// now, such as music playing on another device. Null draws nothing.
@@ -126,8 +138,12 @@ class HomeView extends StatelessWidget {
       if (t.addedAt == null) continue;
       if (t.addedAt!.isAfter(cutoff)) justAdded.add(t);
     }
-    final justAddedSorted = [...justAdded]
-      ..sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
+    // A song in Just got is not shown again a shelf lower.
+    final gotShas = {for (final (t, _) in justGot) t.sha};
+    final justAddedSorted = [
+      for (final t in justAdded)
+        if (!gotShas.contains(t.sha)) t,
+    ]..sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
     final missing =
         releases
             .where(
@@ -154,6 +170,16 @@ class HomeView extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: Space.lg),
       children: [
         ?aboveFeed,
+        if (justGot.isNotEmpty)
+          _JustGotShelf(
+            items: justGot,
+            now: now,
+            onPlay: onPlay,
+            onOpenGets: onOpenGets,
+            artUrlFor: artUrlFor,
+            sectionPadding: _sectionPadding,
+            peek: _carouselPeek,
+          ),
         if (justAddedSorted.isNotEmpty)
           _JustAddedCarousel(
             tracks: justAddedSorted,
@@ -279,7 +305,7 @@ class _DynamicRail extends StatelessWidget {
           title,
           padding: sectionPadding,
           note: subtitle,
-          trailing: PlayPill(onTap: () => onPlay(tracks, 0)),
+          trailing: SectionPlay(label: title, onTap: () => onPlay(tracks, 0)),
         ),
         SizedBox(
           height: 176,
@@ -506,6 +532,150 @@ class _UnheardRail extends StatelessWidget {
 
 /// Horizontal carousel of "just added" tracks. Edges peek so the user
 /// can tell it's scrollable.
+/// Songs got from Soulseek this week: who asked, and a NEW mark for the
+/// last hour. Tapping one plays it; the link opens the line.
+class _JustGotShelf extends StatelessWidget {
+  const _JustGotShelf({
+    required this.items,
+    required this.now,
+    required this.onPlay,
+    required this.onOpenGets,
+    required this.artUrlFor,
+    required this.sectionPadding,
+    required this.peek,
+  });
+
+  final List<(ManifestTrack, GetJob)> items;
+  final DateTime now;
+  final void Function(List<ManifestTrack>, int) onPlay;
+  final VoidCallback? onOpenGets;
+  final String Function(String sha) artUrlFor;
+  final double sectionPadding;
+  final double peek;
+
+  @override
+  Widget build(BuildContext context) {
+    final crayon = Looks.current.kind == LookKind.crayon;
+    final tracks = [for (final (t, _) in items) t];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          'Just got',
+          padding: sectionPadding,
+          note: 'Asked for this week, by you and your people',
+          trailing: onOpenGets == null
+              ? null
+              : TextButton(
+                  onPressed: onOpenGets,
+                  style: TextButton.styleFrom(foregroundColor: Tones.text),
+                  child: const Text('The line'),
+                ),
+        ),
+        SizedBox(
+          height: 186,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(peek, Space.sm, sectionPadding, 0),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: Space.md),
+            itemBuilder: (context, i) {
+              final (t, job) = items[i];
+              final at = job.at;
+              final fresh = at != null && now.difference(at).inMinutes < 60;
+              return SizedBox(
+                width: 132,
+                child: Pressable(
+                  onTap: () => onPlay(tracks, i),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          PressTarget(
+                            child: Artwork(
+                              url: t.artSha == null
+                                  ? null
+                                  : artUrlFor(t.artSha!),
+                              artSha: t.artSha,
+                              size: 132,
+                              fallback: GeneratedArtwork(
+                                title: t.title,
+                                artist: t.artistDisplay,
+                                size: 132,
+                                borderRadius: RadiusTokens.card,
+                              ),
+                            ),
+                          ),
+                          if (fresh)
+                            Positioned(
+                              top: -8,
+                              left: 8,
+                              child: Transform.rotate(
+                                angle: crayon ? -0.07 : 0,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: crayon
+                                        ? Looks.current.crayons[1]
+                                        : Tones.primary,
+                                    borderRadius: BorderRadius.circular(
+                                      crayon ? 2 : 99,
+                                    ),
+                                    border: crayon
+                                        ? Border.all(
+                                            color: const Color(0xFF22201C),
+                                            width: 1.5,
+                                          )
+                                        : null,
+                                  ),
+                                  child: Text(
+                                    'NEW',
+                                    style: TypeScale.caption.copyWith(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 1,
+                                      color: crayon
+                                          ? const Color(0xFF22201C)
+                                          : Tones.onPrimary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: Space.xs),
+                      Text(
+                        t.title,
+                        style: cardTitleStyle(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        job.by == null
+                            ? t.artistDisplay
+                            : '${t.artistDisplay} · ${job.by} asked',
+                        style: TypeScale.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _JustAddedCarousel extends StatelessWidget {
   const _JustAddedCarousel({
     required this.tracks,

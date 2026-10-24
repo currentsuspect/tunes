@@ -9,7 +9,7 @@ void main() {
   ) async {
     await tester.pumpWidget(MaterialApp(home: WhatsNewPage(onDone: () {})));
     expect(find.text(kWhatsNewTitle), findsOneWidget);
-    expect(find.textContaining('Dennis asked for half of it'), findsOneWidget);
+    expect(find.textContaining('You asked'), findsOneWidget);
 
     // Scrolled rather than assumed on screen: it is a long page.
     for (final e in kWhatsNew) {

@@ -8,6 +8,9 @@ import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/listening_stats.dart';
 import '../../domain/manifest.dart';
+import '../../domain/month_recap.dart';
+import '../../core/data/settings_store.dart';
+import 'month_card.dart';
 
 /// Where the names on "Your listening" lead, handed down from the app shell.
 class ListeningLinks {
@@ -105,6 +108,19 @@ class _ListeningPageState extends State<ListeningPage> {
               style: TypeScale.display.copyWith(fontSize: 34),
             ),
             const SizedBox(height: Space.md),
+            // Last month, once it is over, when there was enough of it.
+            if (events != null)
+              if (MonthRecap.lastMonth(
+                    events: events,
+                    library: widget.library,
+                    now: DateTime.now(),
+                  )
+                  case final recap?)
+                MonthEntry(
+                  recap: recap,
+                  name: SettingsScope.maybeOf(context)?.displayName,
+                  artUrlFor: widget.artUrlFor,
+                ),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(

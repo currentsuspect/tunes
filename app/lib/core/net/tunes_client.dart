@@ -605,12 +605,26 @@ class TunesClient {
   }
 
   /// The last day's gets, newest first.
-  Future<List<GetJob>> soulseekJobs() async {
-    final j = await _json('GET', '/soulseek/jobs');
+  Future<List<GetJob>> soulseekJobs({int? days}) async {
+    final j = await _json(
+      'GET',
+      days == null ? '/soulseek/jobs' : '/soulseek/jobs?days=$days',
+    );
     return [
       for (final x in j['jobs'] as List<dynamic>? ?? const [])
         GetJob.fromJson(x as Map<String, dynamic>),
     ];
+  }
+
+  /// Takes a waiting song out of the line. False when it had already
+  /// started (a download under way finishes) or the box forgot it.
+  Future<bool> soulseekCancel(String id) async {
+    try {
+      await _json('POST', '/soulseek/cancel', body: {'id': id});
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Gets every song of [releaseId] the library lacks.

@@ -83,6 +83,9 @@ class GetJob {
     this.release,
     this.progress,
     this.sha,
+    this.by,
+    this.position,
+    this.at,
   });
 
   final String id;
@@ -93,6 +96,15 @@ class GetJob {
   final GetState state;
   final double? progress;
   final String? sha;
+
+  /// Who asked, by account name ("Dennis"); null on an older box.
+  final String? by;
+
+  /// Place in the line while waiting: 1 is next, counting the one under way.
+  final int? position;
+
+  /// When it was asked for.
+  final DateTime? at;
 
   bool get finished =>
       state == GetState.done ||
@@ -119,6 +131,9 @@ class GetJob {
     ),
     progress: (j['progress'] as num?)?.toDouble(),
     sha: j['sha'] as String?,
+    by: j['by'] as String?,
+    position: (j['position'] as num?)?.toInt(),
+    at: DateTime.tryParse(j['at'] as String? ?? ''),
   );
 }
 

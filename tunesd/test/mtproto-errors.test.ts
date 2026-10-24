@@ -9,6 +9,7 @@ describe("mapMtprotoError", () => {
     "Request timed out",
     "connect ETIMEDOUT 149.154.167.91:443",
     "Cannot send requests while disconnected",
+    "The provided authorization is invalid. (caused by InvokeWithLayer)",
   ])("retries %s", (msg) => {
     expect(mapMtprotoError(new Error(msg))).toBeInstanceOf(RetryableError);
   });

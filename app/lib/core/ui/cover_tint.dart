@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../data/art_store.dart';
+import '../theme/looks.dart';
 import '../theme/tokens.dart';
 
 /// The colour a cover lends to the room around it.
@@ -178,11 +179,7 @@ class _TintBuilderState extends State<TintBuilder> {
     return TweenAnimationBuilder<Color?>(
       // A look without a glow keeps its own accent: Noir's one gold, not
       // whatever colour the cover happens to be.
-      tween: ColorTween(
-        end: Looks.current.glowStrength == 0
-            ? Tones.primary
-            : (_tint ?? Tones.primary),
-      ),
+      tween: ColorTween(end: _accentFor(_tint)),
       duration: MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
           : const Duration(milliseconds: 900),
@@ -193,6 +190,37 @@ class _TintBuilderState extends State<TintBuilder> {
       },
     );
   }
+}
+
+/// What the cover lends the screen in each look. Room: its colour. Noir:
+/// nothing, its one gold stays. Crayon: the crayon in the box nearest the
+/// cover's colour, so the tape, the line and the play button are coloured
+/// in with it, and nothing glows (owner, 24 Oct, approved).
+Color _accentFor(Color? tint) {
+  final look = Looks.current;
+  if (tint == null) return Tones.primary;
+  if (look.kind == LookKind.crayon) return nearestCrayon(tint, look.crayons);
+  if (look.glowStrength == 0) return Tones.primary;
+  return tint;
+}
+
+/// The crayon closest in hue to [tint], weighing lightness a little, so a
+/// pale yellow cover picks yellow and not the nearest hue on a wheel.
+Color nearestCrayon(Color tint, List<Color> crayons) {
+  final t = HSLColor.fromColor(tint);
+  Color best = crayons.first;
+  var bestScore = double.infinity;
+  for (final c in crayons) {
+    final h = HSLColor.fromColor(c);
+    var dh = (t.hue - h.hue).abs();
+    if (dh > 180) dh = 360 - dh;
+    final score = dh / 180 + (t.lightness - h.lightness).abs() * 0.5;
+    if (score < bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
 }
 
 /// A wash of [tint] pouring in from the top of the screen over the ink wall.

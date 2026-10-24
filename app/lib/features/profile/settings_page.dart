@@ -457,6 +457,33 @@ class _SettingsPageState extends State<SettingsPage> {
                       ],
                     ),
 
+                    // Notes in the shade are Android's; the desktop app has
+                    // no shade to put them in.
+                    if (Platform.isAndroid)
+                      _Group(
+                        title: 'Tell me when',
+                        children: [
+                          _SwitchTile(
+                            title: 'A song I asked for lands',
+                            detail: 'With Play right there.',
+                            value: s.noteMine,
+                            onChanged: s.setNoteMine,
+                          ),
+                          _SwitchTile(
+                            title: 'Someone else gets songs',
+                            detail: 'One note per batch, not per song.',
+                            value: s.noteOthers,
+                            onChanged: s.setNoteOthers,
+                          ),
+                          _SwitchTile(
+                            title: 'A new Tunes is ready',
+                            detail: 'Once per version.',
+                            value: s.noteUpdate,
+                            onChanged: s.setNoteUpdate,
+                          ),
+                        ],
+                      ),
+
                     _Group(
                       title: 'Storage',
                       children: [

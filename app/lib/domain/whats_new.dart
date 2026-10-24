@@ -2,7 +2,7 @@
 ///
 /// [id] names the pack. The screen is shown once per id, so a later pack gets its
 /// own: change the id and the entries together.
-const kWhatsNewId = 'asked-for-2026-10';
+const kWhatsNewId = 'the-line-2026-10';
 
 class WhatsNewEntry {
   const WhatsNewEntry(this.title, this.body);
@@ -11,16 +11,48 @@ class WhatsNewEntry {
   final String body;
 }
 
-const kWhatsNewTitle = 'You Asked For It';
+const kWhatsNewTitle = 'Watch It Come';
 
 const kWhatsNewIntro =
-    'Most of this came from you. Dennis asked for half of it. Here is '
-    'everything new since the Birthday Pack.';
+    'You asked where your song was. Now you can watch it come, all the way '
+    'into your library. Plus a sleep timer, your month on a card, and a '
+    'tidier Crayon.';
 
 const kWhatsNewSignoff =
     'Made by Dylan, for the people he listens with. Keep asking.';
 
 const kWhatsNew = <WhatsNewEntry>[
+  WhatsNewEntry(
+    'The line',
+    'Every song asked for, one at a time: what is coming down now, who is '
+        'next and who asked. "2nd in line" means one song before yours. Take '
+        'your own out with the cross.',
+  ),
+  WhatsNewEntry(
+    'Just got',
+    'Songs got this week sit at the top of Home, with who asked. When yours '
+        'lands, Tunes says so and gives you Play.',
+  ),
+  WhatsNewEntry(
+    'Told when it lands',
+    "A note when your song arrives, if Tunes is in the background. Choose what "
+        'you hear about in Settings, under Tell me when.',
+  ),
+  WhatsNewEntry(
+    'Sleep timer',
+    'In the menu on the player: 15 minutes to an hour, or the end of the song '
+        'or album. The last minute fades out.',
+  ),
+  WhatsNewEntry(
+    'Your month in Tunes',
+    'At the top of Your listening once a month is over: your hours, the song '
+        'on repeat, your person. Share it as a picture.',
+  ),
+  WhatsNewEntry(
+    'Crayon, coloured in',
+    "The player takes the crayon closest to the cover's colour. Songs with no "
+        'cover get a hand-drawn one, and the menus match the look.',
+  ),
   WhatsNewEntry(
     'Search that gets you',
     'Songs, albums, artists and playlists, each with a count. "travis 2018" '

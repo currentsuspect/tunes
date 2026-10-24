@@ -81,7 +81,11 @@ class LookGround extends StatelessWidget {
             child: RepaintBoundary(
               child: CustomPaint(
                 painter: look.kind == LookKind.crayon
-                    ? _DotsPainter(look.text.withValues(alpha: 0.10))
+                    // Chalk dots read fainter on the board than ink dots on
+                    // paper: at the same strength the dark page looked flat.
+                    ? _DotsPainter(
+                        look.text.withValues(alpha: look.isDark ? 0.16 : 0.10),
+                      )
                     : _GrainPainter(look.isDark),
               ),
             ),

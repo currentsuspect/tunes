@@ -133,6 +133,28 @@ class SettingsStore extends ChangeNotifier {
   bool get updateNoteOnHome => _bool(_updateNoteOnHome, fallback: true);
   Future<void> setUpdateNoteOnHome(bool v) => _put(_updateNoteOnHome, '$v');
 
+  // Notes in the shade (Settings, "Tell me when"; design approved 24 Oct).
+  static const _noteMine = 'notes.mineLanded';
+  static const _noteOthers = 'notes.othersGot';
+  static const _noteUpdate = 'notes.updateReady';
+  static const _noteUpdateBuild = 'notes.updateNotedBuild';
+
+  /// A song I asked for lands. On by default: it is the point of asking.
+  bool get noteMine => _bool(_noteMine, fallback: true);
+  Future<void> setNoteMine(bool v) => _put(_noteMine, '$v');
+
+  /// Someone else gets songs. Off by default: their asks, not mine.
+  bool get noteOthers => _bool(_noteOthers, fallback: false);
+  Future<void> setNoteOthers(bool v) => _put(_noteOthers, '$v');
+
+  /// A new Tunes is ready, once per version.
+  bool get noteUpdate => _bool(_noteUpdate, fallback: true);
+  Future<void> setNoteUpdate(bool v) => _put(_noteUpdate, '$v');
+
+  /// The build last announced in the shade, so a version is announced once.
+  String? get noteUpdateBuild => _cache[_noteUpdateBuild];
+  Future<void> setNoteUpdateBuild(String v) => _put(_noteUpdateBuild, v);
+
   // --- search --------------------------------------------------------------
 
   static const _recentSearches = 'search.recent';
