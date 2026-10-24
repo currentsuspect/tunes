@@ -39,6 +39,7 @@ class SettingsStore extends ChangeNotifier {
   static const _lyricSize = 'lyrics.size';
   static const _showLyrics = 'lyrics.show';
   static const _wordEffects = 'lyrics.wordEffects';
+  static const _dropMoments = 'lyrics.dropMoments';
   static const _radioReach = 'radio.reach';
   static const _radioMode = 'radio.mode';
   static const _eqActive = 'eq.active';
@@ -322,6 +323,10 @@ class SettingsStore extends ChangeNotifier {
   /// Picture words (ice, smoke, money, high) moving as they are sung.
   bool get wordEffects => _bool(_wordEffects, fallback: true);
   Future<void> setWordEffects(bool v) => _put(_wordEffects, '$v');
+
+  /// The song breaking out of its lyrics on its drops (drops.dart).
+  bool get dropMoments => _bool(_dropMoments, fallback: true);
+  Future<void> setDropMoments(bool v) => _put(_dropMoments, '$v');
 
   Future<void> setLyricSize(int v) => _put(_lyricSize, '${v.clamp(0, 2)}');
 
