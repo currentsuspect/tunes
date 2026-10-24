@@ -6,7 +6,7 @@ import { SlskdApi, slskdConfig } from "./soulseek.js";
 import { Getter } from "./getter.js";
 import { auditDue, auditSources } from "./audit.js";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile, rename, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import type { ArtistDiscography } from "./discography.js";
@@ -1734,6 +1734,25 @@ async function main(): Promise<void> {
     // Fetch lyrics for tracks that have none, a few at a time. Not awaited by
     // the cycle: a slow or absent LRCLIB must never delay the scan schedule.
     let lyricPassRunning = false;
+    /** A song's audio from the box's own copy in R2, to a temp file, for
+     *  reading its moments; null when it is not there or cannot be had. */
+    const readFromR2 = async (sha: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${audioBase}/audio/${sha}`, {
+          headers: { authorization: `Bearer ${env.publishKey}` },
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!res.ok) return null;
+        const dir = join(env.dataDir, "tmp-beats");
+        await mkdir(dir, { recursive: true });
+        const file = join(dir, sha);
+        await writeFile(file, new Uint8Array(await res.arrayBuffer()));
+        return file;
+      } catch {
+        return null;
+      }
+    };
+
     const fetchLyrics = async (): Promise<void> => {
       if (lyricPassRunning) return;
       lyricPassRunning = true;
@@ -1763,15 +1782,29 @@ async function main(): Promise<void> {
       try {
         let read = 0;
         let moments = 0;
+        // Songs held here are read from disk; the rest from the box's own
+        // copy in R2, a few a pass, so the whole library gets its moments
+        // without fetching anything from Telegram (24 Oct).
+        let fromR2 = 0;
         for (const sha of lyricStore.needingBeats()) {
           if (read >= 20) break;
-          if (!store.has(sha)) continue;
+          let path: string | null = null;
+          let temp = false;
+          if (store.has(sha)) {
+            path = store.pathOf(sha);
+          } else if (fromR2 < 6 && audioLedger[sha] && env.publishKey && audioBase) {
+            path = await readFromR2(sha);
+            temp = path != null;
+            if (temp) fromR2++;
+          }
+          if (!path) continue;
           // A file ffmpeg cannot read is recorded as having no moments, so
           // it is not tried again every pass.
-          const m = await analyzeBeats(store.pathOf(sha)).catch((e: unknown) => {
+          const m = await analyzeBeats(path).catch((e: unknown) => {
             log.warn({ event: "BEATS_READ_FAILED", sha, err: String(e).slice(0, 200) });
             return { drops: [], breaks: [], pulse: [], quiet: [] };
           });
+          if (temp) await rm(path, { force: true });
           await beatStore.set(sha, m);
           read++;
           if (m.drops.length || m.breaks.length) moments++;

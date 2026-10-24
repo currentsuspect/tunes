@@ -493,3 +493,29 @@ describe("the lean manifest (24 Oct: lyrics were 87% of it)", () => {
   });
 });
 
+describe("the box reading its own audio back (24 Oct, drop moments)", () => {
+  const SHA2 = "b".repeat(64);
+  const env = () => ({
+    INTERNAL_PUBLISH_KEY: KEY,
+    CACHE: {
+      get: vi.fn(async (key: string) =>
+        key === SHA2 ? { body: new Response("flac bytes").body!, httpMetadata: { contentType: "audio/flac" } } : null,
+      ),
+    },
+  }) as any;
+  const get = (sha: string, key = KEY) =>
+    new Request(`${HOST}/internal/audio/${sha}`, { headers: { authorization: `Bearer ${key}` } });
+
+  it("hands the box the bytes it put there", async () => {
+    const res = await handleAudioPut(get(SHA2), `/internal/audio/${SHA2}`, env());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/flac");
+    expect(await res.text()).toBe("flac bytes");
+  });
+
+  it("only to the service key, and 404 for what is not there", async () => {
+    expect((await handleAudioPut(get(SHA2, "x".repeat(64)), `/internal/audio/${SHA2}`, env())).status).toBe(401);
+    expect((await handleAudioPut(get(SHA), `/internal/audio/${SHA}`, env())).status).toBe(404);
+  });
+});
+
