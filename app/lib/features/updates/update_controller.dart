@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/platform/device.dart';
 import '../../core/net/tunes_client.dart';
 import '../../core/net/update_check.dart';
 import '../../core/net/update_installer.dart';
@@ -19,8 +20,12 @@ class UpdateController extends ChangeNotifier {
     required this.installer,
     bool? supported,
     bool? computer,
-  }) : computer = computer ?? Platform.isLinux,
-       supported = supported ?? (Platform.isAndroid || Platform.isLinux);
+  }) : computer = computer ?? _linuxComputer,
+       supported = supported ?? (Platform.isAndroid || _linuxComputer);
+
+  /// A Linux computer, as the rest of the app sees it ([Device.isDesktop]),
+  /// so a suite that pretends to be a phone gets the phone's updates.
+  static bool get _linuxComputer => Platform.isLinux && Device.isDesktop;
 
   /// Updating a computer's Linux bundle rather than a phone's APK. Settable
   /// so the phone's path is tested on the computer the suite runs on.
