@@ -127,6 +127,17 @@ export class LrclibClient {
     album: string;
     durationMs: number | null;
   }): Promise<LyricsResult | null> {
+    return toResult(await this.candidate(ours));
+  }
+
+  /** The best-matching LRCLIB row, whole, for a caller choosing between its
+   * synced and plain words (see lyricsources.ts). */
+  async candidate(ours: {
+    title: string;
+    artist: string;
+    album: string;
+    durationMs: number | null;
+  }): Promise<LyricsCandidate | null> {
     const params = new URLSearchParams({
       track_name: ours.title,
       artist_name: ours.artist,
@@ -142,6 +153,6 @@ export class LrclibClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new LyricsUnavailable(`lrclib ${res.status}`);
     const rows = (await res.json()) as LyricsCandidate[];
-    return toResult(bestLyricsMatch(rows, ours));
+    return bestLyricsMatch(rows, ours);
   }
 }

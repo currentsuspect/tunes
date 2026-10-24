@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +8,17 @@ import {
   runLyricPass,
   type LyricTarget,
 } from "../src/lyricstore.js";
-import { LyricsUnavailable } from "../src/lyrics.js";
+import type { ChainAnswer, FoundLyrics, LyricTiming } from "../src/lyricsources.js";
+
+const got = (text: string, timing: LyricTiming = "line", source: FoundLyrics["source"] = "lrclib"): FoundLyrics => ({
+  text,
+  source,
+  timing,
+  id: "9",
+  raw: { text },
+});
+const answer = (text: string | null): ChainAnswer => ({ found: text ? got(text) : null, complete: true });
+const down: ChainAnswer = { found: null, complete: false };
 
 const T = (n: number): LyricTarget => ({
   sha: String(n).padStart(64, "0"),
@@ -41,9 +51,9 @@ describe("a listener's lyrics reach everyone", () => {
 
   it("win over a fetch, now and later", async () => {
     const s = await new LyricStore(file).load();
-    await s.setFetched(T(1).sha, { text: "from lrclib", id: 5 });
+    await s.setFetched(T(1).sha, got("from lrclib"));
     await s.setUser(T(1).sha, "mine");
-    await s.setFetched(T(1).sha, { text: "from lrclib again", id: 6 });
+    await s.setFetched(T(1).sha, got("from lrclib again"));
     expect(s.get(T(1).sha)?.text).toBe("mine");
     expect(s.get(T(1).sha)?.source).toBe("user");
   });
@@ -84,7 +94,7 @@ describe("remembering what LRCLIB did not have", () => {
 
 describe("the fetch pass", () => {
   const ok = (text: string | null) => ({
-    find: async () => (text ? { synced: text, plain: null, id: 9 } : null),
+    find: async () => answer(text),
   });
 
   it("fills in what is missing and leaves what is there", async () => {
@@ -96,7 +106,7 @@ describe("the fetch pass", () => {
       client: ok("[00:01.00] la"),
       gapMs: 0,
     });
-    expect(r).toEqual({ found: 2, none: 0, stoppedEarly: false });
+    expect(r).toEqual({ found: 2, none: 0, upgraded: 0, stoppedEarly: false });
     expect(s.get(T(1).sha)?.text).toBe("mine");
     expect(s.get(T(2).sha)?.source).toBe("lrclib");
   });
@@ -107,7 +117,7 @@ describe("the fetch pass", () => {
     await runLyricPass({
       tracks: [T(1), T(2), T(3), T(4)],
       store: s,
-      client: { find: async () => (asked++, null) },
+      client: { find: async () => (asked++, answer(null)) },
       limit: 2,
       gapMs: 0,
     });
@@ -122,16 +132,13 @@ describe("the fetch pass", () => {
       tracks: [T(1)],
       store: s,
       client: {
-        find: async () => {
-          if (++calls < 3) throw new LyricsUnavailable("lrclib 503");
-          return { synced: "[00:01.00] la", plain: null, id: 4 };
-        },
+        find: async () => (++calls < 3 ? down : answer("[00:01.00] la")),
       },
       gapMs: 0,
       retryGapMs: 0,
     });
     expect(calls).toBe(3);
-    expect(r).toEqual({ found: 1, none: 0, stoppedEarly: false });
+    expect(r).toEqual({ found: 1, none: 0, upgraded: 0, stoppedEarly: false });
     expect(s.get(T(1).sha)?.source).toBe("lrclib");
   });
 
@@ -141,10 +148,7 @@ describe("the fetch pass", () => {
       tracks: [T(1), T(2)],
       store: s,
       client: {
-        find: async (q) => {
-          if (q.title === "Song 1") throw new LyricsUnavailable("lrclib 503");
-          return { synced: "[00:01.00] la", plain: null, id: 4 };
-        },
+        find: async (q) => (q.title === "Song 1" ? down : answer("[00:01.00] la")),
       },
       gapMs: 0,
       retryGapMs: 0,
@@ -164,7 +168,7 @@ describe("the fetch pass", () => {
       client: {
         find: async () => {
           calls++;
-          throw new LyricsUnavailable("down");
+          return down;
         },
       },
       gapMs: 0,
@@ -187,5 +191,50 @@ describe("the fetch pass", () => {
     });
     expect(r.none).toBe(1);
     expect(s.needsLookup(T(1).sha)).toBe(false);
+  });
+});
+
+describe("more sources, finer timing", () => {
+  it("asks songs with no words before songs it could only improve", async () => {
+    const s = await new LyricStore(file).load();
+    // An old LRCLIB record (no chain, line timing) and a brand-new song.
+    await s.setFetched(T(1).sha, got("[00:01.00] old"));
+    (s.get(T(1).sha) as { chain?: number }).chain = 1;
+    const asked: string[] = [];
+    await runLyricPass({
+      tracks: [T(1), T(2)],
+      store: s,
+      client: { find: async (q) => (asked.push(q.title), answer(null)) },
+      gapMs: 0,
+    });
+    expect(asked).toEqual(["Song 2", "Song 1"]);
+  });
+
+  it("upgrades line timing to word timing, and never the other way", async () => {
+    const s = await new LyricStore(file).load();
+    await s.setFetched(T(1).sha, got("[00:01.00] line"));
+    await s.setFetched(T(1).sha, got("[00:01.000]<00:01.000>word<00:01.400>", "word", "netease"));
+    expect(s.get(T(1).sha)?.timing).toBe("word");
+    expect(s.get(T(1).sha)?.source).toBe("netease");
+    await s.setFetched(T(1).sha, got("plain words", "plain", "genius"));
+    expect(s.get(T(1).sha)?.timing).toBe("word");
+    expect(s.forManifest().get(T(1).sha)?.source).toBe("netease");
+  });
+
+  it("re-asks a song nothing had, once new sources join", async () => {
+    const s = await new LyricStore(file).load();
+    await s.setFetched(T(1).sha, null);
+    expect(s.needsLookup(T(1).sha)).toBe(false);
+    (s.get(T(1).sha) as { chain?: number }).chain = 1;
+    expect(s.lookupPriority(T(1).sha)).toBe(0);
+  });
+
+  it("keeps everything fetched and every listener save, for training", async () => {
+    const s = await new LyricStore(file).load();
+    await s.setFetched(T(1).sha, got("[00:01.00] a"));
+    await s.setUser(T(1).sha, "[00:01.020]<00:01.020>a<00:01.300>");
+    await s.setUser(T(1).sha, "[00:01.010]<00:01.010>a<00:01.290>");
+    const lines = (await readFile(join(dir, "lyrics-raw", `${T(1).sha}.jsonl`), "utf8")).trim().split("\n");
+    expect(lines.map((l) => JSON.parse(l).kind)).toEqual(["lrclib", "user", "user"]);
   });
 });
