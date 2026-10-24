@@ -34,6 +34,7 @@ class SettingsStore extends ChangeNotifier {
   static const _themeBrightness = 'theme.brightness';
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
+  static const _lyricsEndRangeMs = 'lyrics.endRangeMs';
   static const _animatedArtwork = 'nowPlaying.animatedArtwork';
   static const _lyricSize = 'lyrics.size';
   static const _showLyrics = 'lyrics.show';
@@ -447,6 +448,16 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setLyricsTapOffset(Duration v) =>
       _put(_lyricsTapOffsetMs, '${v.inMilliseconds}');
+
+  /// How long a window the lyric maker gives for finding a word's end. Picked
+  /// once and kept: it suits a song's tempo more than any one word.
+  Duration get lyricsEndRange {
+    final ms = int.tryParse(_cache[_lyricsEndRangeMs] ?? '');
+    return Duration(milliseconds: ms ?? 800);
+  }
+
+  Future<void> setLyricsEndRange(Duration v) =>
+      _put(_lyricsEndRangeMs, '${v.inMilliseconds}');
 }
 
 /// Makes [SettingsStore] reachable from anywhere without threading it through
