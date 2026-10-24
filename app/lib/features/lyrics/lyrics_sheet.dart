@@ -9,13 +9,14 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/adlib_kinds.dart';
 import '../../core/lyrics/adlib_motion.dart';
-import '../../core/lyrics/adlibs.dart';
 import '../../core/lyrics/word_fx.dart';
 import '../../core/lyrics/word_fx_motion.dart';
 import 'adlib_style.dart';
+import 'lyric_center.dart';
 import 'word_fx_view.dart';
 import 'share_moment.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/lyrics/lyric_fx.dart';
 import '../../core/lyrics/reading.dart';
 import '../../core/lyrics/voices.dart';
 import '../../core/theme/tokens.dart';
@@ -207,6 +208,21 @@ class _LyricsSheetState extends State<LyricsSheet> {
   /// Puts one line on the left or right by writing a `v1:` / `v2:` label into
   /// it (see [LyricVoices]). Shared like any other edit, and any other LRC
   /// reader just sees a line that starts with a label.
+  /// Saves [next] as this song's lyrics, as any edit is: shared with
+  /// everyone through the box. The Lyric Center's fixes come this way.
+  Future<void> _saveLyrics(String next) async {
+    final track = _track;
+    if (next == _lyrics) return;
+    try {
+      await widget.onSave(track, next);
+      if (mounted) setState(() => _saved[track.sha] = next);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
   Future<void> _setLineVoice(Lrc lrc, int index, int? voice) async {
     final track = _track;
     final next = LyricVoices.relabel(
@@ -310,6 +326,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
                             scrollController: scrollController,
                             onAddLyrics: _startEdit,
                             onLineVoice: _setLineVoice,
+                            onLyrics: _saveLyrics,
                             onShareMoment: widget.clip == null
                                 ? null
                                 : (words, from, to) => shareMoment(
@@ -518,6 +535,7 @@ class _View extends StatefulWidget {
     required this.onAddLyrics,
     required this.onLineVoice,
     this.onShareMoment,
+    this.onLyrics,
     this.sha = '',
   });
 
@@ -525,6 +543,9 @@ class _View extends StatefulWidget {
 
   /// The song, which seeds which effect a picture word gets on each line.
   final String sha;
+
+  /// Saves edited lyrics (the Lyric Center's fixes). Null hides it.
+  final Future<void> Function(String lyrics)? onLyrics;
 
   /// The track's own artists: the only names a line label may use.
   final List<String> artists;
@@ -550,6 +571,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   /// voice label is written to the stored line, never to half of one.
   Lrc? _source;
   List<int> _origin = const [];
+  List<int> _wordOffset = const [];
   // Who is singing each timed line, which decides the side it sits on.
   List<LyricVoice> _voices = const [];
   // Drives the within-word sweep. Only the active line listens to it, so the
@@ -617,6 +639,31 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     }
     final words = LyricVoices.plain(_source!.lines[origin].text);
     return (words: words, from: from, to: to);
+  }
+
+  void _openCenter(int i) {
+    final source = _source;
+    final save = widget.onLyrics;
+    if (source == null || save == null || i >= _origin.length) return;
+    final line = _origin[i];
+    final stored = source.lines[line];
+    openLyricCenter(
+      context,
+      words: stored.text
+          .split(RegExp(r'\s+'))
+          .where((t) => t.isNotEmpty)
+          .toList(),
+      line: line,
+      fixes: _fixes,
+      seed: _fxSeedFor(context, i),
+      onSave: (table) => save(table.applyTo(widget.lyrics)),
+      onHear: () {
+        // From just before the line, so its first word is heard whole.
+        final at = stored.timestamp - const Duration(milliseconds: 600);
+        widget.player.seek(at.isNegative ? Duration.zero : at);
+        if (!widget.player.playing) widget.player.play();
+      },
+    );
   }
 
   void _shareMoment(int i) {
@@ -711,6 +758,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         : splitForReading(_source!, adlibsApart: true);
     _lrc = reading?.lrc;
     _origin = reading?.origin ?? const [];
+    _wordOffset = reading?.wordOffset ?? const [];
     _voices = LyricVoices.resolve([
       for (final l in _lrc?.lines ?? const <LrcLine>[]) l.text,
     ], artists: widget.artists);
@@ -895,68 +943,6 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     );
   }
 
-  /// A line-timed line with its ad-libs on a smaller row beneath (see
-  /// adlibs.dart), on the side away from the lead.
-  /// A line-timed line with its ad-libs on a smaller row beneath (see
-  /// adlibs.dart), each in its kind's voice (adlib_kinds.dart). On the line
-  /// being sung ([live]) they move when they are most likely heard: at the
-  /// line's end, or its start for one written first (estimatedAdlibTimes).
-  /// A line-timed line's words with its picture word moving, or null when it
-  /// has none. With no word timing, the word is placed by where it sits in
-  /// the line: its share of the characters, across most of the line's time.
-  static Widget? _mainWithFx(
-    List<String> words,
-    TextAlign align,
-    ({
-      ValueListenable<Duration> playhead,
-      Duration lineStart,
-      Duration? nextStart,
-    })
-    live,
-    int seed,
-  ) {
-    final hit = lineWordFx(words, seed);
-    if (hit == null) return null;
-    final next = live.nextStart != null && live.nextStart! > live.lineStart
-        ? live.nextStart!
-        : live.lineStart + const Duration(seconds: 4);
-    // Sung over the first 85% of the gap; the rest is breath and ad-libs.
-    final span = (next - live.lineStart).inMilliseconds * 0.85;
-    final total = words.fold<int>(0, (n, w) => n + w.length + 1);
-    final before = words
-        .take(hit.index)
-        .fold<int>(0, (n, w) => n + w.length + 1);
-    final start =
-        live.lineStart +
-        Duration(milliseconds: (span * before / total).round());
-    final len = math.max(
-      300,
-      (span * (words[hit.index].length + 1) / total).round(),
-    );
-    final end = start + Duration(milliseconds: len);
-    return Wrap(
-      alignment: switch (align) {
-        TextAlign.end => WrapAlignment.end,
-        TextAlign.center => WrapAlignment.center,
-        _ => WrapAlignment.start,
-      },
-      children: [
-        for (var i = 0; i < words.length; i++)
-          if (i == hit.index)
-            ValueListenableBuilder<Duration>(
-              valueListenable: live.playhead,
-              builder: (context, pos, child) => WordFxBox(
-                look: wordFxLook(hit.fx, start: start, end: end, position: pos),
-                child: child!,
-              ),
-              child: Text(i == words.length - 1 ? words[i] : '${words[i]} '),
-            )
-          else
-            Text(i == words.length - 1 ? words[i] : '${words[i]} '),
-      ],
-    );
-  }
-
   /// The seed for shown line [i]'s picture word, or null when "Words that
   /// move" is off. Seeded by the stored line, so a split line picks once.
   int? _fxSeedFor(BuildContext context, int i) {
@@ -965,11 +951,31 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     return fxSeed(widget.sha, _origin[i]);
   }
 
+  /// The Lyric Center's fixes, read from the lyric's own metadata.
+  LyricFxTable get _fixes =>
+      LyricFxTable.parse(_source?.metadata[LyricFxTable.key]);
+
+  /// The fix for word [w] of shown line [i], by its place in the stored
+  /// lyric (a second half's words come after its first half's).
+  FxFix? Function(int w) _fixAtFor(int i) {
+    final table = _fixes;
+    final line = i < _origin.length ? _origin[i] : i;
+    final offset = i < _wordOffset.length ? _wordOffset[i] : 0;
+    return (w) => table.at(line, offset + w);
+  }
+
+  /// A line-timed line: its main words, its picture word moving as it is
+  /// sung, and its ad-libs on a smaller row beneath, each in its kind's
+  /// voice. With no word timing, everything is placed by estimate: ad-libs
+  /// at the line's end (or its start for one written first), the picture
+  /// word by its share of the line's characters. The Lyric Center's fixes
+  /// ([fixAt]) change a kind or effect and move its moment.
   static Widget _withAdlibs(
     String text,
     TextAlign align,
     double size, {
     int? fxSeed,
+    FxFix? Function(int w)? fixAt,
     ({
       ValueListenable<Duration> playhead,
       Duration lineStart,
@@ -977,81 +983,145 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     })?
     live,
   }) {
+    // Raw words, so indexes match the stored lyric; placeholders are kept
+    // for counting and skipped when drawn.
     final tokens = text
         .split(RegExp(r'\s+'))
-        .where((t) => t.isNotEmpty && !isPlaceholder(t))
+        .where((t) => t.isNotEmpty)
         .toList();
-    final whole = wholeLineAdlib(tokens);
-    final mask = whole == null ? adlibMask(tokens) : const <bool>[];
-    final groups = whole != null ? [whole] : adlibGroups(tokens, mask);
-    if (groups.isEmpty) {
-      return live != null && fxSeed != null
-          ? _mainWithFx(tokens, align, live, fxSeed) ??
-                Text(text, textAlign: align)
-          : Text(text, textAlign: align);
-    }
+    final lfx = resolveLineFx(
+      tokens,
+      seed: live == null ? null : fxSeed,
+      fixAt: fixAt,
+    );
+    final mask = [
+      for (var i = 0; i < tokens.length; i++) lfx.kinds.containsKey(i),
+    ];
+    final groups = lfx.whole
+        ? [
+            (
+              words: [for (var i = 0; i < tokens.length; i++) i],
+              kind: lfx.kinds[0] ?? AdlibKind.plain,
+            ),
+          ]
+        : [
+            for (final g in adlibGroups(tokens, mask))
+              (words: g.words, kind: lfx.kinds[g.words.first] ?? g.kind),
+          ];
+    final next = live == null
+        ? null
+        : (live.nextStart != null && live.nextStart! > live.lineStart
+              ? live.nextStart!
+              : live.lineStart + const Duration(seconds: 4));
     final times = live == null
         ? null
         : estimatedAdlibTimes(live.lineStart, live.nextStart, [
-            for (final g in groups) whole != null || g.words.first == 0,
+            for (final g in groups) lfx.whole || g.words.first == 0,
           ]);
     final end = align == TextAlign.end;
     return Builder(
       builder: (context) {
         final accent = AccentScope.of(context);
-        // A whole-line ad-lib at the line's own size, not a step down.
         final base = DefaultTextStyle.of(context).style
-            .copyWith(fontSize: whole != null ? size * 1.15 : size);
-        Widget row(Duration? pos) => Wrap(
-          alignment: whole != null
+            .copyWith(fontSize: lfx.whole ? size * 1.15 : size);
+        Widget adlibRow(Duration? pos) => Wrap(
+          alignment: lfx.whole
               ? (end ? WrapAlignment.end : WrapAlignment.start)
               : (end ? WrapAlignment.start : WrapAlignment.end),
           spacing: 10,
           runSpacing: 4,
           children: [
             for (var k = 0; k < groups.length; k++)
-              adlibChip(
-                tokens,
-                groups[k],
-                base,
-                accent,
-                trailLeft: whole == null && !end,
-                look: pos == null || times == null
-                    ? null
-                    : adlibLook(
-                        groups[k].kind,
-                        start: times[k].start,
-                        end: times[k].end,
-                        position: pos,
-                      ),
-              ),
+              if (!groups[k].words.every((i) => isPlaceholder(tokens[i])))
+                adlibChip(
+                  tokens,
+                  groups[k],
+                  base,
+                  accent,
+                  trailLeft: !lfx.whole && !end,
+                  look: pos == null || times == null
+                      ? null
+                      : adlibLook(
+                          groups[k].kind,
+                          start:
+                              times[k].start +
+                              lfx.shiftOf(groups[k].words.first),
+                          end:
+                              times[k].end + lfx.shiftOf(groups[k].words.first),
+                          position: pos,
+                        ),
+                ),
           ],
         );
         final adlibs = live == null
-            ? row(null)
+            ? adlibRow(null)
             : ValueListenableBuilder<Duration>(
                 valueListenable: live.playhead,
-                builder: (context, pos, _) => row(pos),
+                builder: (context, pos, _) => adlibRow(pos),
               );
-        if (whole != null) return adlibs;
-        final mainTokens = [
+        if (lfx.whole) return adlibs;
+        final mainAt = [
           for (var i = 0; i < tokens.length; i++)
-            if (!mask[i]) tokens[i],
+            if (!mask[i] && !isPlaceholder(tokens[i])) i,
         ];
-        final main = mainTokens
+        final mainText = mainAt
+            .map((i) => tokens[i])
             .join(' ')
             .replaceAll(RegExp(r'\s+([,.!?;:])'), r'$1');
-        final mainText =
-            (live != null && fxSeed != null
-                ? _mainWithFx(mainTokens, align, live, fxSeed)
-                : null) ??
-            Text(main, textAlign: align);
+        final picture = lfx.picture;
+        Widget main = Text(mainText, textAlign: align);
+        if (live != null && next != null && picture != null) {
+          // The picture word, placed by its share of the line's characters
+          // across the 85% of the line that is sung, then moved by any fix.
+          final span = (next - live.lineStart).inMilliseconds * 0.85;
+          final total = mainAt.fold<int>(0, (n, i) => n + tokens[i].length + 1);
+          final before = mainAt
+              .takeWhile((i) => i != picture.index)
+              .fold<int>(0, (n, i) => n + tokens[i].length + 1);
+          final shift = lfx.shiftOf(picture.index);
+          final start =
+              live.lineStart +
+              Duration(milliseconds: (span * before / total).round()) +
+              shift;
+          final len = math.max(
+            300,
+            (span * (tokens[picture.index].length + 1) / total).round(),
+          );
+          final wordEnd = start + Duration(milliseconds: len);
+          main = Wrap(
+            alignment: switch (align) {
+              TextAlign.end => WrapAlignment.end,
+              TextAlign.center => WrapAlignment.center,
+              _ => WrapAlignment.start,
+            },
+            children: [
+              for (final i in mainAt)
+                if (i == picture.index)
+                  ValueListenableBuilder<Duration>(
+                    valueListenable: live.playhead,
+                    builder: (context, pos, child) => WordFxBox(
+                      look: wordFxLook(
+                        picture.fx,
+                        start: start,
+                        end: wordEnd,
+                        position: pos,
+                      ),
+                      child: child!,
+                    ),
+                    child: Text(i == mainAt.last ? tokens[i] : '${tokens[i]} '),
+                  )
+                else
+                  Text(i == mainAt.last ? tokens[i] : '${tokens[i]} '),
+            ],
+          );
+        }
+        if (groups.isEmpty) return main;
         // Stretched, so the ad-lib row spans the line and can sit at its
         // far side.
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [mainText, adlibs],
+          children: [main, adlibs],
         );
       },
     );
@@ -1162,6 +1232,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                         playhead: _playhead,
                         onWordTap: widget.player.seek,
                         fxSeed: _fxSeedFor(context, i),
+                        fixAt: _fixAtFor(i),
                         trackEnd: widget.player.duration,
                         isActive: isActive,
                         isPast: isPast,
@@ -1186,6 +1257,7 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                           align,
                           size,
                           fxSeed: isActive ? _fxSeedFor(context, i) : null,
+                          fixAt: _fixAtFor(i),
                           // Only the line being sung animates its ad-libs.
                           live: isActive
                               ? (
@@ -1229,6 +1301,18 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                 );
               },
             ),
+            if (widget.onLyrics != null)
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high_rounded, size: 20),
+                title: const Text('Lyric Center'),
+                subtitle: const Text(
+                  'Fix how a word or ad-lib looks, and when it comes',
+                ),
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  _openCenter(i);
+                },
+              ),
             ListTile(
               leading: Icon(
                 _loop?.origin == _origin[i]
