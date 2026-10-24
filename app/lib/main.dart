@@ -10,6 +10,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'core/platform/mpris.dart';
+import 'core/ui/row_arrows.dart';
 import 'core/audio/audio_focus.dart';
 import 'core/audio/queue_restore.dart';
 import 'core/audio/stream_relay.dart';
@@ -723,8 +724,10 @@ class _TunesAppState extends State<TunesApp> {
             child: ListenableBuilder(
               listenable: _theme,
               builder: (context, _) => MaterialApp(
-                title: 'tunes',
+                title: 'Tunes',
                 debugShowCheckedModeBanner: false,
+                // Arrows on sideways rows on a computer (row_arrows.dart).
+                scrollBehavior: const TunesScrollBehavior(),
                 theme: buildTunesTheme(mq),
                 navigatorObservers: [_rootGuard],
                 // Crayon's paper, Noir's grain: over every route.
@@ -2224,7 +2227,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           autofocus: true,
           onKeyEvent: _onKey,
           child: LayoutBuilder(
-            builder: (context, box) => isWideWindow(box.biggest)
+            builder: (context, box) => usesDesktopShell(box.biggest)
                 ? _buildWide(context)
                 : _buildNarrow(),
           ),
@@ -2287,7 +2290,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   bool _wideNow(BuildContext context) =>
-      isWideWindow(MediaQuery.sizeOf(context));
+      usesDesktopShell(MediaQuery.sizeOf(context));
 
   Widget _buildNarrow() {
     return Scaffold(
@@ -2318,8 +2321,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       listenable: Listenable.merge([widget.player, widget.settings]),
       builder: (context, _) {
         final track = widget.player.current;
+        // Beside the player only with room for both; a half-screen window
+        // shows the player, with lyrics a tap away as on a phone.
         final showPane =
             track != null &&
+            isWideWindow(MediaQuery.sizeOf(context)) &&
             widget.settings.showLyrics &&
             (track.lyrics ?? '').trim().isNotEmpty;
         return _wideNowPlayingRow(track, showPane);
@@ -2383,6 +2389,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ListenableBuilder(
                   listenable: widget.settings,
                   builder: (context, _) => DesktopSidebar(
+                    compact: compactSidebar(MediaQuery.sizeOf(context)),
                     selectedTab: onTab ? _tab : null,
                     onTab: _onTabSelected,
                     playlists: store,
@@ -2600,6 +2607,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 ),
                               ),
                             )
+                          // On a wide window the sidebar carries the name,
+                          // so a page says what it is instead (Discover has
+                          // its own title below).
+                          else if (_wideNow(context))
+                            ...switch (_tab) {
+                              2 => [Text('Search', style: TypeScale.wordmark)],
+                              3 => [Text('Library', style: TypeScale.wordmark)],
+                              _ => const <Widget>[],
+                            }
                           else
                             Text('tunes', style: TypeScale.wordmark),
                           // The library's size belongs to the wordmark, not

@@ -11,6 +11,17 @@ import 'package:flutter/foundation.dart';
 /// phone on its side is wide but short, so it keeps the phone layout.
 bool isWideWindow(Size size) => size.width >= 900 && size.height >= 560;
 
+/// Whether the app wears its computer frame (sidebar, play bar across the
+/// bottom). On a computer from 600 wide, so a window tiled to half a laptop
+/// screen is still a computer app, with a slim sidebar ([compactSidebar]),
+/// not the phone's tab bar; elsewhere, a wide window as before.
+bool usesDesktopShell(Size size) => Device.isDesktop
+    ? size.width >= 600 && size.height >= 400
+    : isWideWindow(size);
+
+/// The sidebar as icons only, between 600 and 900 wide.
+bool compactSidebar(Size size) => size.width < 900;
+
 class Device {
   static final bool _desktop =
       Platform.isLinux || Platform.isWindows || Platform.isMacOS;

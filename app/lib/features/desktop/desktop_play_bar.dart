@@ -115,7 +115,18 @@ class _DesktopPlayBarState extends State<DesktopPlayBar> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (track != null) widget.statusBuilder(context),
+                    // Shrinks rather than pushing the volume off the
+                    // edge: "playing on phone · Play here", the queue, mute
+                    // and the slider are wider than this third on a
+                    // 1366-wide laptop.
+                    if (track != null)
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: widget.statusBuilder(context),
+                        ),
+                      ),
                     const SizedBox(width: Space.sm),
                     if (widget.onQueue != null)
                       IconButton(
@@ -145,22 +156,24 @@ class _DesktopPlayBarState extends State<DesktopPlayBar> {
                         color: Tones.textMuted,
                       ),
                     ),
-                    SizedBox(
-                      width: 110,
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 6,
+                    // Mute stays; the slider needs a wider window.
+                    if (MediaQuery.sizeOf(context).width >= 900)
+                      SizedBox(
+                        width: 110,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6,
+                            ),
+                            overlayShape: SliderComponentShape.noOverlay,
+                            activeTrackColor: Tones.text,
+                            inactiveTrackColor: Tones.hairline,
+                            thumbColor: Tones.text,
                           ),
-                          overlayShape: SliderComponentShape.noOverlay,
-                          activeTrackColor: Tones.text,
-                          inactiveTrackColor: Tones.hairline,
-                          thumbColor: Tones.text,
+                          child: Slider(value: _volume, onChanged: _setVolume),
                         ),
-                        child: Slider(value: _volume, onChanged: _setVolume),
                       ),
-                    ),
                   ],
                 ),
               ),

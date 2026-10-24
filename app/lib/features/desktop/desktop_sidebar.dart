@@ -18,7 +18,14 @@ class DesktopSidebar extends StatelessWidget {
     required this.name,
     required this.avatarPath,
     this.activePlaylistId,
+    this.compact = false,
   });
+
+  /// Icons only, for a window tiled to half a laptop screen (600–900 wide):
+  /// the places and Settings stay, playlists are in Library.
+  final bool compact;
+
+  static const compactWidth = 72.0;
 
   /// The tab showing, or null while a page (an album, the player) is open.
   final int? selectedTab;
@@ -39,8 +46,76 @@ class DesktopSidebar extends StatelessWidget {
     (NavGlyph.library, 'Library'),
   ];
 
+  Widget _compact(BuildContext context) {
+    return Container(
+      width: compactWidth,
+      decoration: BoxDecoration(
+        color: Tones.base,
+        border: Border(right: BorderSide(color: Tones.hairline)),
+      ),
+      child: SafeArea(
+        right: false,
+        bottom: false,
+        child: Column(
+          children: [
+            const SizedBox(height: Space.lg),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: Image.asset('assets/icon.png', width: 34, height: 34),
+            ),
+            const SizedBox(height: Space.lg),
+            for (var i = 0; i < _items.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Tooltip(
+                  message: _items[i].$2,
+                  child: Material(
+                    color: selectedTab == i
+                        ? Tones.surfaceRaised
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => onTab(i),
+                      child: SizedBox(
+                        width: 52,
+                        height: 46,
+                        child: Center(
+                          child: NavGlyphIcon(
+                            glyph: _items[i].$1,
+                            size: 22,
+                            color: selectedTab == i
+                                ? Tones.text
+                                : Tones.textMuted,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const Spacer(),
+            Tooltip(
+              message: 'Settings',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: onSettings,
+                child: Padding(
+                  padding: const EdgeInsets.all(Space.sm),
+                  child: ProfileAvatar(name: name, path: avatarPath, size: 36),
+                ),
+              ),
+            ),
+            const SizedBox(height: Space.md),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (compact) return _compact(context);
     return Container(
       width: width,
       decoration: BoxDecoration(

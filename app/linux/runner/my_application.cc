@@ -20,6 +20,55 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+static gchar* window_size_file() {
+  return g_build_filename(g_get_user_config_dir(), APPLICATION_ID,
+                          "window.ini", nullptr);
+}
+
+static void load_window_size(gint* width, gint* height, gboolean* maximized) {
+  g_autofree gchar* path = window_size_file();
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  if (!g_key_file_load_from_file(file, path, G_KEY_FILE_NONE, nullptr)) return;
+  gint w = g_key_file_get_integer(file, "window", "width", nullptr);
+  gint h = g_key_file_get_integer(file, "window", "height", nullptr);
+  // Ignore anything too small to use, a file from a broken run included.
+  if (w >= 400 && h >= 300) {
+    *width = w;
+    *height = h;
+  }
+  *maximized = g_key_file_get_boolean(file, "window", "maximized", nullptr);
+}
+
+static gboolean save_window_size(GtkWidget* widget, GdkEvent*, gpointer) {
+  GtkWindow* window = GTK_WINDOW(widget);
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  gboolean maximized = gtk_window_is_maximized(window);
+  if (!maximized) {
+    gint w = 0, h = 0;
+    gtk_window_get_size(window, &w, &h);
+    g_key_file_set_integer(file, "window", "width", w);
+    g_key_file_set_integer(file, "window", "height", h);
+  } else {
+    // Keep the size it had before it was maximised.
+    g_autofree gchar* path = window_size_file();
+    g_autoptr(GKeyFile) old = g_key_file_new();
+    if (g_key_file_load_from_file(old, path, G_KEY_FILE_NONE, nullptr)) {
+      g_key_file_set_integer(
+          file, "window", "width",
+          g_key_file_get_integer(old, "window", "width", nullptr));
+      g_key_file_set_integer(
+          file, "window", "height",
+          g_key_file_get_integer(old, "window", "height", nullptr));
+    }
+  }
+  g_key_file_set_boolean(file, "window", "maximized", maximized);
+  g_autofree gchar* path = window_size_file();
+  g_autofree gchar* dir = g_path_get_dirname(path);
+  g_mkdir_with_parents(dir, 0700);
+  g_key_file_save_to_file(file, path, nullptr);
+  return FALSE;  // Let the window close.
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -53,7 +102,15 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "Tunes");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // The size it was last closed at (and whether it was maximised), so it
+  // opens as it was left rather than at 1280x720 every time.
+  gint width = 1280, height = 720;
+  gboolean maximized = FALSE;
+  load_window_size(&width, &height, &maximized);
+  gtk_window_set_default_size(window, width, height);
+  if (maximized) gtk_window_maximize(window);
+  g_signal_connect(window, "delete-event", G_CALLBACK(save_window_size),
+                   nullptr);
 
   // The logo, by name from the icon theme (tools/install-linux.sh puts it
   // there under the app id, which is also what Wayland docks match the

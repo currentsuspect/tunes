@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/platform/device.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/download_store.dart';
 import '../../core/data/manifest_store.dart';
@@ -226,7 +227,10 @@ class _ArtistPageState extends State<ArtistPage> {
                           if (songs.isNotEmpty && gaps > 0) ...[
                             const SizedBox(height: Space.lg),
                             Wrap(
-                              alignment: WrapAlignment.center,
+                              alignment:
+                                  isWideWindow(MediaQuery.sizeOf(context))
+                                  ? WrapAlignment.start
+                                  : WrapAlignment.center,
                               spacing: Space.sm,
                               runSpacing: Space.sm,
                               children: [
@@ -461,81 +465,111 @@ class _Hero extends StatelessWidget {
         '${view.catalogueOwned} of ${view.catalogueTotal} in your library',
     ].join('  ·  ');
     final done = view.completion;
-    return Column(
-      children: [
-        SharedSleeve(
-          tag: 'artist-$artist',
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: coverLift(tint, alpha: 0.55, blur: 52, dy: 20),
-            ),
-            child: Artwork(
-              url: photoSha == null ? null : artUrlFor(photoSha!),
-              artSha: photoSha,
-              size: 152,
-              borderRadius: 76,
-              shared: true,
-              fallback: InitialsAvatar(name: artist, size: 152),
+    final wide = isWideWindow(MediaQuery.sizeOf(context));
+    final photo = SharedSleeve(
+      tag: 'artist-$artist',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: coverLift(tint, alpha: 0.55, blur: 52, dy: 20),
+        ),
+        child: Artwork(
+          url: photoSha == null ? null : artUrlFor(photoSha!),
+          artSha: photoSha,
+          size: 152,
+          borderRadius: 76,
+          shared: true,
+          fallback: InitialsAvatar(name: artist, size: 152),
+        ),
+      ),
+    );
+    final details = <Widget>[
+      Text(
+        artist,
+        textAlign: wide ? TextAlign.start : TextAlign.center,
+        style: TypeScale.display.copyWith(fontSize: wide ? 44 : 34),
+      ),
+      const SizedBox(height: Space.sm),
+      Text(
+        facts,
+        textAlign: wide ? TextAlign.start : TextAlign.center,
+        style: TypeScale.mono,
+      ),
+      if (done != null) ...[
+        const SizedBox(height: Space.md),
+        SizedBox(
+          width: 168,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: done,
+              minHeight: 3,
+              backgroundColor: Tones.hairline,
+              valueColor: AlwaysStoppedAnimation(tint),
             ),
           ),
         ),
-        const SizedBox(height: Space.lg),
-        Text(
-          artist,
-          textAlign: TextAlign.center,
-          style: TypeScale.display.copyWith(fontSize: 34),
-        ),
-        const SizedBox(height: Space.sm),
-        Text(facts, textAlign: TextAlign.center, style: TypeScale.mono),
-        if (done != null) ...[
-          const SizedBox(height: Space.md),
-          SizedBox(
-            width: 168,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: done,
-                minHeight: 3,
-                backgroundColor: Tones.hairline,
-                valueColor: AlwaysStoppedAnimation(tint),
+      ],
+      const SizedBox(height: Space.lg),
+      Row(
+        mainAxisAlignment: wide
+            ? MainAxisAlignment.start
+            : MainAxisAlignment.center,
+        children: [
+          FilledButton.icon(
+            onPressed: onPlay,
+            icon: const Icon(Icons.play_arrow_rounded, size: 20),
+            label: const Text('Play'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Tones.text,
+              foregroundColor: Tones.base,
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.sm + 2,
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.sm),
+          OutlinedButton.icon(
+            onPressed: onShuffle,
+            icon: const Icon(Icons.shuffle_rounded, size: 18),
+            label: const Text('Shuffle'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Tones.text,
+              side: BorderSide(color: Tones.hairline),
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.sm + 2,
               ),
             ),
           ),
         ],
-        const SizedBox(height: Space.lg),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+      ),
+    ];
+    // A computer's window is wide and short: the photo beside the name
+    // rather than above it, so the music starts higher up.
+    if (wide) {
+      return Padding(
+        padding: const EdgeInsets.only(top: Space.sm),
+        child: Row(
           children: [
-            FilledButton.icon(
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_rounded, size: 20),
-              label: const Text('Play'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Tones.text,
-                foregroundColor: Tones.base,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Space.lg,
-                  vertical: Space.sm + 2,
-                ),
-              ),
-            ),
-            const SizedBox(width: Space.sm),
-            OutlinedButton.icon(
-              onPressed: onShuffle,
-              icon: const Icon(Icons.shuffle_rounded, size: 18),
-              label: const Text('Shuffle'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Tones.text,
-                side: BorderSide(color: Tones.hairline),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Space.lg,
-                  vertical: Space.sm + 2,
-                ),
+            photo,
+            const SizedBox(width: Space.xl),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: details,
               ),
             ),
           ],
         ),
+      );
+    }
+    return Column(
+      children: [
+        photo,
+        const SizedBox(height: Space.lg),
+        ...details,
       ],
     );
   }

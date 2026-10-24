@@ -1,3 +1,5 @@
+import 'row_arrows.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart'
@@ -35,7 +37,7 @@ class TunesRefreshList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      behavior: const TunesScrollBehavior(verticalScrollbar: false),
       child: CustomScrollView(
         // Bouncing, so the list can be pulled past its top at all on Android,
         // where the default clamps and the indicator would have nothing to ride.
