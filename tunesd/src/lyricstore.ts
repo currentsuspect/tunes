@@ -1,7 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import type { LrclibClient } from "./lyrics.js";
-import { LyricsUnavailable } from "./lyrics.js";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { ChainAnswer, FetchedSource, FoundLyrics, LyricTiming, Ours } from "./lyricsources.js";
 
 /**
  * Where lyrics live, so that one person adding them is everyone having them.
@@ -23,7 +22,12 @@ import { LyricsUnavailable } from "./lyrics.js";
  * "Nothing exists" and "the service was down" are different outcomes. Only the
  * first is recorded: an outage must not mark a library as lyric-less.
  */
-export type LyricSource = "user" | "lrclib" | "none";
+export type LyricSource = "user" | FetchedSource | "none";
+
+/** Which set of sources a record was looked up with. Raised when sources are
+ * added, so songs that had nothing, or only line timing, are asked again. 2:
+ * NetEase (word-timed YRC) and Genius joined LRCLIB, 24 Oct. */
+export const kLyricChain = 2;
 
 export interface LyricRecord {
   /** The words, with timestamps when LRCLIB had them. Null for `none`. */
@@ -35,6 +39,12 @@ export interface LyricRecord {
   updatedAt: string;
   /** When LRCLIB was last asked. */
   checkedAt: string | null;
+  /** How finely the words are timed. Absent on records from before 24 Oct. */
+  timing?: LyricTiming;
+  /** The source's own id for the song (any source; lrclibId predates it). */
+  sourceId?: string | null;
+  /** [kLyricChain] at the last lookup; absent means 1, LRCLIB alone. */
+  chain?: number;
 }
 
 interface LyricFile {
@@ -72,10 +82,10 @@ export class LyricStore {
   }
 
   /** sha -> the words and where they came from, for the manifest. */
-  forManifest(): Map<string, { lyrics: string; source: "user" | "lrclib" }> {
-    const out = new Map<string, { lyrics: string; source: "user" | "lrclib" }>();
+  forManifest(): Map<string, { lyrics: string; source: Exclude<LyricSource, "none"> }> {
+    const out = new Map<string, { lyrics: string; source: Exclude<LyricSource, "none"> }>();
     for (const [sha, r] of Object.entries(this.data.tracks)) {
-      if (r.text && (r.source === "user" || r.source === "lrclib")) {
+      if (r.text && r.source !== "none") {
         out.set(sha, { lyrics: r.text, source: r.source });
       }
     }
@@ -109,45 +119,88 @@ export class LyricStore {
       };
     }
     await this.persist();
+    // A listener's own timing is the best label a timing model can learn
+    // from, so every save is kept, not only the latest.
+    await this.archive(sha, { kind: "user", at: stamp, text: clean });
   }
 
-  /** What a lookup found. Never replaces a listener's version. */
-  async setFetched(
-    sha: string,
-    found: { text: string; id: number | null } | null,
-    now = new Date(),
-  ): Promise<void> {
+  /** What a lookup found. Never replaces a listener's version, and never
+   * swaps finer timing for coarser: an upgrade pass that finds only what the
+   * song already has leaves it as it is. */
+  async setFetched(sha: string, found: FoundLyrics | null, now = new Date()): Promise<void> {
     const have = this.data.tracks[sha];
     if (have?.source === "user") return;
     const stamp = now.toISOString();
-    this.data.tracks[sha] = found
-      ? {
-          text: found.text,
-          source: "lrclib",
-          lrclibId: found.id,
-          updatedAt: stamp,
-          checkedAt: stamp,
-        }
-      : {
-          text: null,
-          source: "none",
-          lrclibId: null,
-          // Nothing changed for anyone, so this is not a change.
-          updatedAt: have?.updatedAt ?? stamp,
-          checkedAt: stamp,
-        };
+    const rank = (t: LyricTiming | undefined) => (t === "word" ? 2 : t === "line" ? 1 : 0);
+    const haveTiming = have?.timing ?? (have?.text ? (/^\[\d+:\d/m.test(have.text) ? "line" : "plain") : undefined);
+    if (found && have?.text && rank(found.timing) < rank(haveTiming)) found = null;
+    if (!found && have?.text) {
+      this.data.tracks[sha] = { ...have, timing: haveTiming, checkedAt: stamp, chain: kLyricChain };
+    } else if (found) {
+      const same = have?.text === found.text;
+      this.data.tracks[sha] = {
+        text: found.text,
+        source: found.source,
+        lrclibId: found.source === "lrclib" && found.id ? Number(found.id) : null,
+        sourceId: found.id,
+        timing: found.timing,
+        // Unchanged words are not a change for anyone.
+        updatedAt: same && have ? have.updatedAt : stamp,
+        checkedAt: stamp,
+        chain: kLyricChain,
+      };
+      if (!same) await this.archive(sha, { kind: found.source, at: stamp, timing: found.timing, id: found.id, raw: found.raw });
+    } else {
+      this.data.tracks[sha] = {
+        text: null,
+        source: "none",
+        lrclibId: null,
+        // Nothing changed for anyone, so this is not a change.
+        updatedAt: have?.updatedAt ?? stamp,
+        checkedAt: stamp,
+        chain: kLyricChain,
+      };
+    }
     await this.persist();
   }
 
-  /** Whether this track is worth asking LRCLIB about now. */
-  needsLookup(sha: string, now = Date.now()): boolean {
+  /**
+   * Whether to ask now, and how urgently: 0 for a song with no words, 1 for
+   * one whose words could be timed more finely by sources added since it was
+   * last asked, null for no.
+   */
+  lookupPriority(sha: string, now = Date.now()): 0 | 1 | null {
     const r = this.data.tracks[sha];
-    if (!r) return true;
+    if (!r) return 0;
+    if (r.source === "user") return null;
+    const older = (r.chain ?? 1) < kLyricChain;
     if (r.source === "none") {
+      if (older) return 0;
       const at = r.checkedAt ? Date.parse(r.checkedAt) : 0;
-      return now - at > kRetryNoneAfterMs;
+      return now - at > kRetryNoneAfterMs ? 0 : null;
     }
-    return false;
+    return older && r.timing !== "word" ? 1 : null;
+  }
+
+  /** Whether this track is worth asking about now. */
+  needsLookup(sha: string, now = Date.now()): boolean {
+    return this.lookupPriority(sha, now) !== null;
+  }
+
+  /**
+   * Everything ever fetched or saved for a song, appended one JSON line at a
+   * time to `lyrics-raw/<sha>.jsonl` beside the store: the training set for
+   * the timing model. Never read by the app; a failure to write it is
+   * logged by the caller's pass, never fatal to the lyrics themselves.
+   */
+  private async archive(sha: string, entry: Record<string, unknown>): Promise<void> {
+    try {
+      const dir = join(dirname(this.path), "lyrics-raw");
+      await mkdir(dir, { recursive: true });
+      await appendFile(join(dir, `${sha}.jsonl`), JSON.stringify(entry) + "\n");
+    } catch {
+      // The archive is a by-product; the store above is what matters.
+    }
   }
 
   private persist(): Promise<void> {
@@ -171,17 +224,18 @@ export interface LyricTarget {
 }
 
 /**
- * One pass of fetching: up to [limit] tracks that need it, one at a time and
- * [gapMs] apart (LRCLIB is a free service and is asked politely). Stops at the
- * first outage rather than hammering a service that is down.
+ * One pass of fetching: up to [limit] songs, ones with no words before ones
+ * whose words could be timed more finely, one at a time and [gapMs] apart
+ * (these are free services, asked politely). Stops after two songs in a row
+ * that no source could be asked about, rather than hammering an outage.
  *
- * Returns how many were found, how many LRCLIB had nothing for, and whether it
- * stopped early.
+ * "Nothing found" is only recorded when every source answered: a miss while
+ * one was down would hide the song from the next pass for a week.
  */
 export async function runLyricPass(opts: {
   tracks: LyricTarget[];
   store: LyricStore;
-  client: Pick<LrclibClient, "find">;
+  client: { find(ours: Ours): Promise<ChainAnswer> };
   limit?: number;
   gapMs?: number;
   /** Tries per track before it counts as a failure. */
@@ -190,59 +244,50 @@ export async function runLyricPass(opts: {
   retryGapMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
-}): Promise<{ found: number; none: number; stoppedEarly: boolean }> {
+}): Promise<{ found: number; none: number; upgraded: number; stoppedEarly: boolean }> {
   const limit = opts.limit ?? 25;
   const gap = opts.gapMs ?? 1000;
   const attempts = opts.attempts ?? 3;
   const retryGap = opts.retryGapMs ?? 3000;
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const now = opts.now ?? Date.now;
+  const queue = opts.tracks
+    .map((t) => ({ t, p: opts.store.lookupPriority(t.sha, now()) }))
+    .filter((x): x is { t: LyricTarget; p: 0 | 1 } => x.p !== null)
+    .sort((a, b) => a.p - b.p)
+    .slice(0, limit);
   let found = 0;
   let none = 0;
-  let asked = 0;
+  let upgraded = 0;
   let failedInARow = 0;
-  for (const t of opts.tracks) {
-    if (asked >= limit) break;
-    if (!opts.store.needsLookup(t.sha, now())) continue;
-    if (asked > 0) await sleep(gap);
-    asked += 1;
-
-    // LRCLIB answers "503 the server is busy, retry in a moment" to ordinary
-    // requests now and then, and the next one is fine. Giving up on the first
-    // would have left most of a library unasked; a few patient tries each get
-    // through, and only a service that keeps failing stops the pass.
-    let result: Awaited<ReturnType<LrclibClient["find"]>> = null;
-    let answered = false;
+  for (const [n, { t, p }] of queue.entries()) {
+    if (n > 0) await sleep(gap);
+    let answer: ChainAnswer = { found: null, complete: false };
     for (let attempt = 0; attempt < attempts; attempt++) {
-      try {
-        result = await opts.client.find({
-          title: t.title,
-          artist: t.artist,
-          album: t.album,
-          durationMs: t.durationMs,
-        });
-        answered = true;
-        break;
-      } catch (e) {
-        if (!(e instanceof LyricsUnavailable)) throw e;
-        if (attempt < attempts - 1) await sleep(retryGap * (attempt + 1));
-      }
+      answer = await opts.client.find({
+        title: t.title,
+        artist: t.artist,
+        album: t.album,
+        durationMs: t.durationMs,
+      });
+      if (answer.found || answer.complete) break;
+      // LRCLIB in particular answers "503, retry in a moment" now and then,
+      // and the next request is fine.
+      if (attempt < attempts - 1) await sleep(retryGap * (attempt + 1));
     }
-    if (!answered) {
-      // Not recorded: an outage must not mark a track as lyric-less.
+    if (!answer.found && !answer.complete) {
       failedInARow += 1;
-      if (failedInARow >= 2) return { found, none, stoppedEarly: true };
+      if (failedInARow >= 2) return { found, none, upgraded, stoppedEarly: true };
       continue;
     }
     failedInARow = 0;
-    const text = result?.synced ?? result?.plain ?? null;
-    await opts.store.setFetched(
-      t.sha,
-      text ? { text, id: result?.id ?? null } : null,
-      new Date(now()),
-    );
-    if (text) found += 1;
+    const before = opts.store.get(t.sha)?.text ?? null;
+    await opts.store.setFetched(t.sha, answer.found, new Date(now()));
+    const after = opts.store.get(t.sha)?.text ?? null;
+    if (p === 1) {
+      if (after !== before) upgraded += 1;
+    } else if (after) found += 1;
     else none += 1;
   }
-  return { found, none, stoppedEarly: false };
+  return { found, none, upgraded, stoppedEarly: false };
 }

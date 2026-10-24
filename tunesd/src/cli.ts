@@ -28,6 +28,7 @@ import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
 import { LyricStore, runLyricPass, type LyricTarget } from "./lyricstore.js";
 import { LrclibClient } from "./lyrics.js";
+import { GeniusClient, LyricChain, NeteaseClient } from "./lyricsources.js";
 import { extractEmbeddedArt, PROBE_VERSION, probeFile } from "./probe.js";
 import type { ProbeResult } from "./probe.js";
 import { ManifestServer } from "./serve.js";
@@ -334,6 +335,7 @@ async function main(): Promise<void> {
     // phone through the manifest (see lyricstore.ts).
     const lyricStore = await new LyricStore(join(env.dataDir, "lyrics.json")).load();
     const lrclib = new LrclibClient();
+    const lyricChain = new LyricChain(lrclib, new NeteaseClient(), new GeniusClient());
 
     const artistMetaFile = join(env.dataDir, "artist-meta.json");
     const artistMeta = new Map<string, { tags: string[]; listeners: number | null; fetchedAt: string }>();
@@ -1659,10 +1661,10 @@ async function main(): Promise<void> {
         const r = await runLyricPass({
           tracks: targets,
           store: lyricStore,
-          client: lrclib,
+          client: lyricChain,
           limit: 40,
         });
-        if (r.found > 0 || r.none > 0 || r.stoppedEarly) {
+        if (r.found > 0 || r.none > 0 || r.upgraded > 0 || r.stoppedEarly) {
           log.info({ event: "LYRICS_PASS", ...r });
         }
       } catch (e) {
