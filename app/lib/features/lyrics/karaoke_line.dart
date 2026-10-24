@@ -1,10 +1,14 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../../core/lyrics/adlib_kinds.dart';
+import '../../core/lyrics/adlib_motion.dart';
 import '../../core/lyrics/adlibs.dart';
+import 'adlib_style.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/word_motion.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/cover_tint.dart' show AccentScope;
 
 /// One lyric line rendered word by word, with the highlight sweeping across
 /// the word currently being sung.
@@ -58,6 +62,8 @@ class KaraokeLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final line = lrc.lines[lineIndex];
     final base = (style ?? TypeScale.title).copyWith(height: 1.3);
+    // Sound effects are drawn in the song's own colour.
+    final accent = AccentScope.of(context);
 
     // A line that is not the one being sung has nothing to sweep: it is either
     // wholly behind us or wholly ahead. Rendering it as plain text keeps the
@@ -78,12 +84,17 @@ class KaraokeLine extends StatelessWidget {
       // Still static (no playhead), just in tappable words.
       return _rows(
         line,
-        (i, adlib, last) => GestureDetector(
+        (i, kind, last) => GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => tap(line.words[i].start),
-          child: Text(
-            last ? line.words[i].text : '${line.words[i].text} ',
-            style: adlib ? _adlibStyle(rest) : rest,
+          child: _fx(
+            kind,
+            kind == null ? null : restingLook(kind),
+            Text(
+              last ? line.words[i].text : '${line.words[i].text} ',
+              style: kind == null ? rest : _adlibStyle(rest, kind, accent),
+            ),
+            accent,
           ),
         ),
       );
@@ -93,26 +104,30 @@ class KaraokeLine extends StatelessWidget {
       valueListenable: playhead,
       builder: (context, position, _) {
         final style = base.copyWith(fontWeight: FontWeight.w600);
-        return _rows(
-          line,
-          (i, adlib, last) => _tappable(
+        return _rows(line, (i, kind, last) {
+          final start = line.words[i].start;
+          final end = lrc.wordEndOf(lineIndex, i, trackEnd: trackEnd);
+          return _tappable(
             i,
-            _Word(
-              // The trailing space belongs to the word so wrapping breaks in
-              // the right places; a separate spacing gap would let a line
-              // wrap before a space instead of after it.
-              text: last ? line.words[i].text : '${line.words[i].text} ',
-              style: adlib ? _adlibStyle(style) : style,
-              // Each word by its own time, not by "the latest to start": an
-              // ad-lib under the main vocal lights while the vocal does.
-              motion: wordMotion(
-                start: line.words[i].start,
-                end: lrc.wordEndOf(lineIndex, i, trackEnd: trackEnd),
-                position: position,
+            _fx(
+              kind,
+              kind == null
+                  ? null
+                  : adlibLook(kind, start: start, end: end, position: position),
+              _Word(
+                // The trailing space belongs to the word so wrapping breaks
+                // in the right places; a separate spacing gap would let a
+                // line wrap before a space instead of after it.
+                text: last ? line.words[i].text : '${line.words[i].text} ',
+                style: kind == null ? style : _adlibStyle(style, kind, accent),
+                // Each word by its own time, not by "the latest to start":
+                // an ad-lib under the main vocal lights while the vocal does.
+                motion: wordMotion(start: start, end: end, position: position),
               ),
+              accent,
             ),
-          ),
-        );
+          );
+        });
       },
     );
   }
@@ -121,21 +136,46 @@ class KaraokeLine extends StatelessWidget {
 extension on KaraokeLine {
   /// The main words on one row and the ad-libs, smaller, on a row of their
   /// own beneath (see adlibs.dart). A line with no ad-libs is one row.
+  ///
+  /// [word] gets the ad-lib's kind (adlib_kinds.dart), or null for a main
+  /// word. "[?]" placeholders are not shown at all.
   Widget _rows(
     LrcLine line,
-    Widget Function(int i, bool adlib, bool last) word,
+    Widget Function(int i, AdlibKind? kind, bool last) word,
   ) {
-    final mask = adlibMask([for (final w in line.words) w.text]);
+    final tokens = [for (final w in line.words) w.text];
+    // A line that is nothing but an ad-lib is one, all of it.
+    final whole = wholeLineAdlib(tokens);
+    if (whole != null) {
+      return Wrap(
+        alignment: wrapAlignment,
+        runSpacing: 2,
+        children: [
+          for (final i in whole.words)
+            if (!isPlaceholder(tokens[i]))
+              word(i, whole.kind, i == whole.words.last),
+        ],
+      );
+    }
+    final mask = adlibMask(tokens);
+    final kindOf = <int, AdlibKind>{
+      for (final g in adlibGroups(tokens, mask))
+        for (final i in g.words) i: g.kind,
+    };
+    final shown = [
+      for (var i = 0; i < tokens.length; i++)
+        if (!isPlaceholder(tokens[i])) i,
+    ];
     final mainAt = [
-      for (var i = 0; i < mask.length; i++)
+      for (final i in shown)
         if (!mask[i]) i,
     ];
     final adlibAt = [
-      for (var i = 0; i < mask.length; i++)
+      for (final i in shown)
         if (mask[i]) i,
     ];
-    final main = [for (final i in mainAt) word(i, false, i == mainAt.last)];
-    if (main.length == line.words.length) {
+    final main = [for (final i in mainAt) word(i, null, i == mainAt.last)];
+    if (adlibAt.isEmpty) {
       return Wrap(alignment: wrapAlignment, runSpacing: 2, children: main);
     }
     // Stretched, so the ad-lib row spans the line and can sit at its far side.
@@ -154,7 +194,8 @@ extension on KaraokeLine {
                 : WrapAlignment.end,
             runSpacing: 2,
             children: [
-              for (final i in adlibAt) word(i, true, i == adlibAt.last),
+              for (final i in adlibAt)
+                word(i, kindOf[i] ?? AdlibKind.plain, i == adlibAt.last),
             ],
           ),
         ),
@@ -162,10 +203,19 @@ extension on KaraokeLine {
     );
   }
 
-  TextStyle _adlibStyle(TextStyle s) => s.copyWith(
-    fontSize: (s.fontSize ?? 20) * 0.72,
-    fontStyle: FontStyle.italic,
-  );
+  TextStyle _adlibStyle(TextStyle s, AdlibKind kind, Color accent) =>
+      adlibTextStyle(s, kind, accent);
+
+  Widget _fx(AdlibKind? kind, AdlibLook? look, Widget child, Color accent) =>
+      kind == null || look == null
+      ? child
+      : AdlibFx(
+          look: look,
+          burstColor: accent,
+          // The ad-lib row sits at the far side from the lead.
+          trailLeft: wrapAlignment != WrapAlignment.end,
+          child: child,
+        );
 
   Widget _tappable(int i, Widget child) {
     final tap = onWordTap;

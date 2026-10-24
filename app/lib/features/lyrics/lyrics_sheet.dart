@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
+import '../../core/lyrics/adlib_kinds.dart';
+import '../../core/lyrics/adlib_motion.dart';
 import '../../core/lyrics/adlibs.dart';
+import 'adlib_style.dart';
 import 'share_moment.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/reading.dart';
@@ -883,22 +887,88 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
 
   /// A line-timed line with its ad-libs on a smaller row beneath (see
   /// adlibs.dart), on the side away from the lead.
-  static Widget _withAdlibs(String text, TextAlign align, double size) {
-    final split = splitAdlibText(text);
-    if (split == null) return Text(text, textAlign: align);
+  /// A line-timed line with its ad-libs on a smaller row beneath (see
+  /// adlibs.dart), each in its kind's voice (adlib_kinds.dart). On the line
+  /// being sung ([live]) they move when they are most likely heard: at the
+  /// line's end, or its start for one written first (estimatedAdlibTimes).
+  static Widget _withAdlibs(
+    String text,
+    TextAlign align,
+    double size, {
+    ({
+      ValueListenable<Duration> playhead,
+      Duration lineStart,
+      Duration? nextStart,
+    })?
+    live,
+  }) {
+    final tokens = text
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty && !isPlaceholder(t))
+        .toList();
+    final whole = wholeLineAdlib(tokens);
+    final mask = whole == null ? adlibMask(tokens) : const <bool>[];
+    final groups = whole != null ? [whole] : adlibGroups(tokens, mask);
+    if (groups.isEmpty) return Text(text, textAlign: align);
+    final times = live == null
+        ? null
+        : estimatedAdlibTimes(live.lineStart, live.nextStart, [
+            for (final g in groups) whole != null || g.words.first == 0,
+          ]);
     final end = align == TextAlign.end;
-    // Stretched, so the ad-lib row spans the line and can sit at its far side.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(split.main, textAlign: align),
-        Text(
-          split.adlibs,
-          textAlign: end ? TextAlign.start : TextAlign.end,
-          style: TextStyle(fontSize: size * 0.72, fontStyle: FontStyle.italic),
-        ),
-      ],
+    return Builder(
+      builder: (context) {
+        final accent = AccentScope.of(context);
+        // A whole-line ad-lib at the line's own size, not a step down.
+        final base = DefaultTextStyle.of(context).style
+            .copyWith(fontSize: whole != null ? size * 1.15 : size);
+        Widget row(Duration? pos) => Wrap(
+          alignment: whole != null
+              ? (end ? WrapAlignment.end : WrapAlignment.start)
+              : (end ? WrapAlignment.start : WrapAlignment.end),
+          spacing: 10,
+          runSpacing: 4,
+          children: [
+            for (var k = 0; k < groups.length; k++)
+              adlibChip(
+                tokens,
+                groups[k],
+                base,
+                accent,
+                trailLeft: whole == null && !end,
+                look: pos == null || times == null
+                    ? null
+                    : adlibLook(
+                        groups[k].kind,
+                        start: times[k].start,
+                        end: times[k].end,
+                        position: pos,
+                      ),
+              ),
+          ],
+        );
+        final adlibs = live == null
+            ? row(null)
+            : ValueListenableBuilder<Duration>(
+                valueListenable: live.playhead,
+                builder: (context, pos, _) => row(pos),
+              );
+        if (whole != null) return adlibs;
+        final main = [
+          for (var i = 0; i < tokens.length; i++)
+            if (!mask[i]) tokens[i],
+        ].join(' ').replaceAll(RegExp(r'\s+([,.!?;:])'), r'$1');
+        // Stretched, so the ad-lib row spans the line and can sit at its
+        // far side.
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(main, textAlign: align),
+            adlibs,
+          ],
+        );
+      },
     );
   }
 
@@ -1025,7 +1095,21 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                           height: 1.25,
                         ),
                         textAlign: align,
-                        child: _withAdlibs(voice.text, align, size),
+                        child: _withAdlibs(
+                          voice.text,
+                          align,
+                          size,
+                          // Only the line being sung animates its ad-libs.
+                          live: isActive
+                              ? (
+                                  playhead: _playhead,
+                                  lineStart: line.timestamp,
+                                  nextStart: i + 1 < lrc.lines.length
+                                      ? lrc.lines[i + 1].timestamp
+                                      : null,
+                                )
+                              : null,
+                        ),
                       ),
               ),
             ),
