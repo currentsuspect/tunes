@@ -250,6 +250,24 @@ async function main(): Promise<void> {
     const discographyFile = join(env.dataDir, "discography.json");
     const discographies = await loadDiscographies(discographyFile);
     let lastDiscographySweep = 0;
+    // When each album's track list was last asked for, and how many of its
+    // songs there were then (see the order pass in runEnrichPass).
+    const orderCheckedFile = join(env.dataDir, "release-order.json");
+    const orderChecked = new Map<string, { at: string; songs: number }>();
+    try {
+      const raw = JSON.parse(await readFile(orderCheckedFile, "utf8")) as {
+        checked?: Record<string, { at: string; songs: number }>;
+      };
+      for (const [k, v] of Object.entries(raw.checked ?? {})) orderChecked.set(k, v);
+    } catch {
+      // None yet.
+    }
+    const persistOrderChecked = async () => {
+      const tmp = join(env.dataDir, `.release-order-${process.pid}.tmp`);
+      await writeFile(tmp, JSON.stringify({ checked: Object.fromEntries(orderChecked) }));
+      await rename(tmp, orderCheckedFile);
+    };
+
     const releaseGroupShas = (): Map<string, string[]> => {
       const groups = new Map<string, string[]>();
       for (const e of enrich.values()) {
@@ -458,10 +476,18 @@ async function main(): Promise<void> {
       for (const name of names) {
         if (name === "unknown artist") continue;
         const havePicture = artists.has(name);
-        const haveMeta = artistMeta.has(name);
+        // Last.fm's answer is remembered as missed apart from the picture:
+        // a name with a photo whose Last.fm row never matched ("Beyoncé
+        // Knowles" answers as Beyoncé) was asked again every pass, 27 names
+        // ~600 times a day each (24 Oct).
+        const metaMissedAt = artistMisses.get(`lastfm:${name}`);
+        const metaMissed =
+          metaMissedAt != null && Date.now() - Date.parse(metaMissedAt) < WEEK_MS;
+        const haveMeta = artistMeta.has(name) || metaMissed || !lastfm;
         if (havePicture && haveMeta) continue;
         const missedAt = artistMisses.get(name);
-        if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS) continue;
+        if (missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS && haveMeta) continue;
+        const pictureMissed = missedAt != null && Date.now() - Date.parse(missedAt) < WEEK_MS;
 
         let resolved = havePicture;
         let couldNotLook = false;
@@ -482,7 +508,12 @@ async function main(): Promise<void> {
                 metaChanged = true;
               } else {
                 log.info({ event: "ARTIST_NAME_MISMATCH", source: "lastfm", asked: name, got: info.name });
+                artistMisses.set(`lastfm:${name}`, new Date().toISOString());
+                missed = true;
               }
+            } else {
+              artistMisses.set(`lastfm:${name}`, new Date().toISOString());
+              missed = true;
             }
           } catch (e) {
             if (!(e instanceof LastfmUnavailable)) throw e;
@@ -493,6 +524,9 @@ async function main(): Promise<void> {
             couldNotLook = true;
           }
         }
+
+        // The picture was looked for this week and nobody had one.
+        if (!resolved && pictureMissed) continue;
 
         if (!resolved && spotify) {
           try {
@@ -1032,11 +1066,25 @@ async function main(): Promise<void> {
       const releaseGroups = releaseGroupShas();
       for (const [releaseId, shas] of releaseGroups) {
         if (!releaseId.startsWith("mb:")) continue;
+        // Each album's track list is asked for once a week, or sooner when a
+        // song of it arrives. Every pass used to ask for all of them, a second
+        // apart, and one MusicBrainz could not answer was retried (12 s wait
+        // each time) 217 times in a day (24 Oct).
+        const checked = orderChecked.get(releaseId);
+        if (
+          checked != null &&
+          checked.songs === shas.length &&
+          Date.now() - Date.parse(checked.at) < WEEK_MS
+        ) {
+          continue;
+        }
         let release = await mb.releaseWithRecordings(releaseId.slice(3));
         if (!release) {
           await sleep(12_000);
           release = await mb.releaseWithRecordings(releaseId.slice(3));
         }
+        orderChecked.set(releaseId, { at: new Date().toISOString(), songs: shas.length });
+        await persistOrderChecked();
         if (!release) {
           log.warn({ event: "ENRICH_ORDER_SKIP", release: releaseId.slice(0, 12) });
           continue;
