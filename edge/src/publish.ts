@@ -402,13 +402,23 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * rather than streamed: nothing in the library is near the cap, and a
  * truncated object is worse than a missing one. */
 export async function handleAudioPut(req: Request, pathname: string, env: PublishEnv): Promise<Response> {
-  if (req.method !== "PUT") return error(405);
+  if (req.method !== "PUT" && req.method !== "GET") return error(405);
   if (!checkAuth(req, env)) return error(401);
   const m = AUDIO_PATH.exec(pathname);
   if (!m?.[1]) return error(404);
   const sha = m[1]!;
   const cache = env.CACHE;
   if (!cache) return error(500);
+  // The box reading its own backup back, with the same service key: songs
+  // it no longer holds are read from here for their drop moments (tunesd
+  // beats.ts), not fetched again from Telegram.
+  if (req.method === "GET") {
+    const obj = await cache.get(sha);
+    if (!obj) return error(404);
+    return new Response(obj.body, {
+      headers: { "content-type": obj.httpMetadata?.contentType ?? "application/octet-stream" },
+    });
+  }
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(await req.arrayBuffer());
