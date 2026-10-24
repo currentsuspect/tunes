@@ -2057,6 +2057,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       TunesPanels.artist(artist),
       () => ArtistPage(
         artist: artist,
+        history: widget.history,
         manifest: manifest,
         client: widget.client,
         player: widget.player,

@@ -137,12 +137,15 @@ class CreditsCard extends StatelessWidget {
 
   final List<Widget> rows;
 
+  /// A Material, not a decorated box, so a row that is a ListTile shows
+  /// its tap.
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: Tones.surfaceRaised,
+  Widget build(BuildContext context) => Material(
+    color: Tones.surfaceRaised,
+    clipBehavior: Clip.antiAlias,
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(16),
-      border: Border.all(
+      side: BorderSide(
         color: _crayon ? Tones.text : Tones.hairline,
         width: _crayon ? 2 : 1,
       ),
@@ -169,7 +172,9 @@ class CreditRow extends StatelessWidget {
 
   final String role;
   final List<String> names;
-  final void Function(String name) onName;
+
+  /// Null: names that are not people (a label) and open nothing.
+  final void Function(String name)? onName;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -188,7 +193,17 @@ class CreditRow extends StatelessWidget {
           child: Wrap(
             spacing: 10,
             children: [
-              for (final n in names) NameLink(name: n, onTap: () => onName(n)),
+              for (final n in names)
+                if (onName case final open?)
+                  NameLink(name: n, onTap: () => open(n))
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      n,
+                      style: TypeScale.title.copyWith(fontSize: 15),
+                    ),
+                  ),
             ],
           ),
         ),
@@ -385,4 +400,71 @@ class VersionTile extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Songs per year as crayon bars, the years under them (an artist's
+/// "Through the years").
+class YearBars extends StatelessWidget {
+  const YearBars({super.key, required this.counts});
+
+  /// Year → songs, oldest first.
+  final Map<int, int> counts;
+
+  @override
+  Widget build(BuildContext context) {
+    final most = counts.values.fold<int>(1, (a, b) => a > b ? a : b);
+    final crayons = Looks.current.crayons;
+    final years = counts.keys.toList();
+    return Column(
+      children: [
+        Container(
+          height: 96,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Tones.text, width: _crayon ? 2 : 1),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (final (i, y) in years.indexed)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Tooltip(
+                      message: '${counts[y]} in $y',
+                      child: Container(
+                        height: 8 + 84 * counts[y]! / most,
+                        decoration: BoxDecoration(
+                          color: crayons[i % crayons.length],
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(4),
+                          ),
+                          border: _crayon
+                              ? Border.all(color: Tones.text, width: 1.5)
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            for (final y in years)
+              Expanded(
+                child: Text(
+                  years.length > 8 ? "'${y % 100}" : '$y',
+                  textAlign: TextAlign.center,
+                  style: TypeScale.caption.copyWith(fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }
