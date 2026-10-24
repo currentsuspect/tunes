@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,11 +9,11 @@ import { State } from "../src/state.js";
 const log = { info: () => {}, warn: (...a: unknown[]) => void a, error: () => {}, debug: () => {} } as any;
 
 describe("publishCloud", () => {
-  it("sends the rows as JSON, then the manifest raw to its own route", async () => {
+  it("sends the rows as JSON, then the manifest gzipped to its own route", async () => {
     const seen: { url: string; init: any }[] = [];
     const fetchFn = vi.fn(async (url: string, init: any) => {
       seen.push({ url, init });
-      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, encoding: "gzip" }) };
     });
     const res = await publishCloud({
       url: "https://edge/internal/publish",
@@ -37,12 +38,26 @@ describe("publishCloud", () => {
         { sha: "b", chat: -1, msg: 8 },
       ],
     });
-    // The manifest as built, not wrapped or re-encoded by the edge.
+    // The manifest as built, gzipped, and said to be.
+    expect(seen[1]!.init.headers["x-tunes-encoding"]).toBe("gzip");
+    expect(gunzipSync(seen[1]!.init.body).toString()).toBe('{"schema":3}');
+  });
+
+  it("an edge from before gzip is sent the manifest plain at once", async () => {
+    const seen: { url: string; init: any }[] = [];
+    const fetchFn = vi.fn(async (url: string, init: any) => {
+      seen.push({ url, init });
+      return { ok: true, status: 200, json: async () => ({ ok: true, manifestBytes: 12 }) };
+    });
+    const res = await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: { schema: 3 }, rows: [], log, fetchFn: fetchFn as any });
+    expect(res).not.toBeNull();
+    expect(seen.length).toBe(2);
+    expect(seen[1]!.init.headers["x-tunes-encoding"]).toBeUndefined();
     expect(seen[1]!.init.body).toBe('{"schema":3}');
   });
 
   it("with no new rows, only the manifest goes", async () => {
-    const fetchFn = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    const fetchFn = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ encoding: "gzip" }) }));
     await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: {}, rows: [], log, fetchFn: fetchFn as any });
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });

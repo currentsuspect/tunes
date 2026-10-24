@@ -3,6 +3,7 @@ import {
   handleArtGet,
   handleArtPut,
   handleAudioPut,
+  handleManifestGet,
   handleManifestPut,
   handlePublish,
   handleTrackGet,
@@ -380,5 +381,69 @@ describe("track get from R2", () => {
     expect(await handleTrackGet(`/track/${SHA}`, get(`/track/${SHA}`), fakeEnv({ CACHE: undefined }).env)).toBeNull();
     const post = new Request(`${HOST}/track/${SHA}`, { method: "POST" });
     expect(await handleTrackGet(`/track/${SHA}`, post, env)).toBeNull();
+  });
+});
+
+describe("the manifest gzipped (24 Oct: 16 MB re-sent ~500 times a day)", () => {
+  /** An R2 that keeps what it is given, as bytes. */
+  function memoryR2() {
+    const objects = new Map<string, Uint8Array>();
+    return {
+      objects,
+      put: vi.fn(async (key: string, value: ReadableStream | string) => {
+        objects.set(key, new Uint8Array(await new Response(value).arrayBuffer()));
+      }),
+      get: vi.fn(async (key: string) => {
+        const b = objects.get(key);
+        return b ? { body: new Response(b).body! } : null;
+      }),
+      delete: vi.fn(async (key: string) => {
+        objects.delete(key);
+      }),
+    };
+  }
+  const gzip = async (text: string) =>
+    new Uint8Array(
+      await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(),
+    );
+  const text = JSON.stringify({ schema: 4, tracks: [{ sha: "a", lyrics: "la la" }] });
+
+  it("keeps a gzipped upload as such, and the old plain copy goes", async () => {
+    const r2 = memoryR2();
+    r2.objects.set("manifest.json", new TextEncoder().encode("{\"old\":1}"));
+    const body = await gzip(text);
+    const res = await handleManifestPut(
+      new Request(`${HOST}/internal/manifest`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${KEY}`, "content-length": String(body.length), "x-tunes-encoding": "gzip" },
+        body,
+      }),
+      { INTERNAL_PUBLISH_KEY: KEY, CACHE: r2 } as any,
+    );
+    expect(await res.json()).toMatchObject({ ok: true, encoding: "gzip" });
+    expect(r2.objects.has("manifest.json.gz")).toBe(true);
+    expect(r2.objects.has("manifest.json")).toBe(false);
+  });
+
+  it("hands a client that takes gzip the gzip, and one that does not the JSON", async () => {
+    const r2 = memoryR2();
+    r2.objects.set("manifest.json.gz", await gzip(text));
+    const env = { CACHE: r2 } as any;
+    const zipped = await handleManifestGet(
+      new Request(`${HOST}/manifest`, { headers: { "accept-encoding": "gzip, deflate" } }),
+      env,
+    );
+    expect(zipped?.headers.get("content-encoding")).toBe("gzip");
+    const plain = await handleManifestGet(new Request(`${HOST}/manifest`), env);
+    expect(plain?.headers.get("content-encoding")).toBeNull();
+    expect(await plain!.text()).toBe(text);
+  });
+
+  it("serves the plain copy from a box that has not started gzipping, else nothing", async () => {
+    const r2 = memoryR2();
+    expect(await handleManifestGet(new Request(`${HOST}/manifest`), { CACHE: r2 } as any)).toBeNull();
+    r2.objects.set("manifest.json", new TextEncoder().encode(text));
+    const res = await handleManifestGet(new Request(`${HOST}/manifest`), { CACHE: r2 } as any);
+    expect(await res!.text()).toBe(text);
   });
 });
