@@ -278,13 +278,44 @@ export function releaseArtKey(act: string, album: string): string {
   return `${normalizeArtistName(act)}|${normalizeArtistName(album)}`;
 }
 
+/**
+ * An album's name without its edition note, for its cover: "ADL (Deluxe)",
+ * "ADL [Expanded Edition]" and "ADL - Deluxe" are "ADL". Deezer files many
+ * deluxe editions under the plain name only, so Yeat's "Griddlë" (tagged
+ * ADL (Deluxe)) got no cover while the box held ADL's (24 Oct). The same
+ * string back when there is no such note.
+ */
+export function albumEditionBase(album: string): string {
+  const edition =
+    /deluxe|expanded|edition|remaster(ed)?|anniversary|bonus|special|extended|complete|version|explicit|clean/i;
+  let out = album.trim();
+  for (;;) {
+    const bracket = /\s*[([]([^)\]]*)[)\]]\s*$/.exec(out);
+    if (bracket && edition.test(bracket[1] ?? "")) {
+      out = out.slice(0, bracket.index).trim();
+      continue;
+    }
+    const dash = /\s+[-–—]\s+([^-–—]+)$/.exec(out);
+    if (dash && edition.test(dash[1] ?? "")) {
+      out = out.slice(0, dash.index).trim();
+      continue;
+    }
+    break;
+  }
+  return out === "" ? album.trim() : out;
+}
+
 function releaseArtSha_(
   byKey: Map<string, string>,
   act: string,
   album: string | null
 ): string | null {
   if (album == null || album === "") return null;
-  return byKey.get(releaseArtKey(act, album)) ?? null;
+  const exact = byKey.get(releaseArtKey(act, album));
+  if (exact != null) return exact;
+  // A deluxe wears the standard edition's cover when it has none of its own.
+  const base = albumEditionBase(album);
+  return base === album.trim() ? null : (byKey.get(releaseArtKey(act, base)) ?? null);
 }
 
 export function buildManifest(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildManifest, isPlaylistAlbum, releaseArtKey } from "../src/manifest.js";
+import { albumEditionBase, buildManifest, isPlaylistAlbum, releaseArtKey } from "../src/manifest.js";
 import type { TrackEnrichment } from "../src/manifest.js";
 import type { ProbeResult } from "../src/probe.js";
 
@@ -1079,6 +1079,24 @@ describe("release cover fallback", () => {
     expect(m.releases[0]?.artSha).toBe(cover);
   });
 
+  it("gives a deluxe edition its standard edition's cover when it has none", () => {
+    // Yeat's "Griddlë", 24 Oct: tagged ADL (Deluxe), which Deezer files as ADL.
+    const art = new Map([[releaseArtKey("Yeat", "ADL"), cover]]);
+    const m = buildManifest(
+      [probe({ sha: sha("a"), tags: { album: "ADL (Deluxe)", artist: "Yeat", albumArtist: "Yeat" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), art
+    );
+    expect(m.tracks[0]?.artSha).toBe(cover);
+    // Its own cover, when it has one, still wins.
+    const own = "f".repeat(64);
+    art.set(releaseArtKey("Yeat", "ADL (Deluxe)"), own);
+    const m2 = buildManifest(
+      [probe({ sha: sha("a"), tags: { album: "ADL (Deluxe)", artist: "Yeat", albumArtist: "Yeat" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), art
+    );
+    expect(m2.tracks[0]?.artSha).toBe(own);
+  });
+
   it("settles an album with no official cover on the picture most songs carry", () => {
     const scan = "9".repeat(64);
     const real = "e".repeat(64);
@@ -1258,5 +1276,21 @@ describe("isPlaylistAlbum", () => {
   });
   it.each(["Bad", "2014 Forest Hills Drive", "Death Race for Love", "1989", "Thriller 25", "Graduation"])("%s is a record", (t) => {
     expect(isPlaylistAlbum(t)).toBe(false);
+  });
+});
+
+describe("an album's name without its edition note", () => {
+  it("takes off deluxe, expanded, anniversary and remaster notes", () => {
+    expect(albumEditionBase("ADL (Deluxe)")).toBe("ADL");
+    expect(albumEditionBase("ADL [Expanded Edition]")).toBe("ADL");
+    expect(albumEditionBase("Thriller - 25th Anniversary Edition")).toBe("Thriller");
+    expect(albumEditionBase("Rumours (Super Deluxe) [Remastered]")).toBe("Rumours");
+  });
+
+  it("leaves a title that is not an edition note alone", () => {
+    expect(albumEditionBase("ADL")).toBe("ADL");
+    expect(albumEditionBase("Section.80 (Live)")).toBe("Section.80 (Live)");
+    expect(albumEditionBase("good kid, m.A.A.d city")).toBe("good kid, m.A.A.d city");
+    expect(albumEditionBase("(Deluxe)")).toBe("(Deluxe)");
   });
 });
