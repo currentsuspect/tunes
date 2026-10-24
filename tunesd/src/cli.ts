@@ -357,6 +357,8 @@ async function main(): Promise<void> {
     // catalogue at once, and the negative cache means a run that finds
     // nothing does not repeat for a week.
     const MISSING_ART_PER_CYCLE = 12;
+    // Official covers for albums held, looked up per pass.
+    const RELEASE_ART_PER_CYCLE = 40;
     const artistsFile = join(env.dataDir, "artists.json");
     const artists = new Map<string, string>();
     try {
@@ -596,17 +598,18 @@ async function main(): Promise<void> {
           bytes: bytes.length,
         });
       }
-      // Releases whose files carry no picture at all need one from somewhere.
-      // One lookup per release, not per track, and only when every track in it
-      // is bare.
+      // Every album the files name gets its official cover, one lookup per
+      // album. Not only bare ones: files of one album carry whatever picture
+      // their uploader had, and HARDSTONE PSYCHO wore seven, one a scan of a
+      // library CD (24 Oct). Archived songs count too, so the probe cache is
+      // read rather than the store. Bounded per pass; the rest follow.
       const bareReleases = new Map<string, { artist: string; album: string }>();
-      for (const obj of objects) {
-        const probe = probeCache.get(obj.sha);
-        if (probe == null) continue;
-        if (embeddedArt.has(obj.sha)) continue;
+      for (const probe of probeCache.values()) {
+        if (bareReleases.size >= RELEASE_ART_PER_CYCLE) break;
         const album = probe.tags.album?.trim();
         const artist = probe.tags.artist?.trim();
         if (!album || !artist) continue;
+        if (isPlaylistAlbum(album) || isCategoryRelease(album)) continue;
         const act = releaseArtistOf(probe.tags.albumArtist ?? null, artist);
         if (act === "") continue;
         const key = releaseArtKey(act, album);

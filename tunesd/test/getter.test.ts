@@ -150,6 +150,19 @@ describe("grouping answers into songs", () => {
     expect(s.durationMs).toBe(312_000);
   });
 
+  it("shows and fetches the explicit copy, not a clean one shared faster", () => {
+    const songs = groupSongs(
+      [
+        resp("clean", [{ filename: "Don Toliver/HARDSTONE PSYCHO (Clean)/01 - KRYPTONITE.flac" }]),
+        resp("dirty", [{ filename: "Don Toliver/HARDSTONE PSYCHO/01 - KRYPTONITE.mp3", bitRate: 320 }], false),
+      ],
+      "kryptonite",
+      () => null,
+    );
+    expect(songs).toHaveLength(1);
+    expect(songs[0]!.username).toBe("dirty");
+  });
+
   it("a song listed artist-first and title-first is one song", () => {
     const songs = groupSongs(
       [

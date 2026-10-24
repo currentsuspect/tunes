@@ -883,6 +883,35 @@ describe("joint albums", () => {
     expect(m.releases[0]?.artist).toBe("Fimiguerrero, Lancey Foux, Len");
   });
 
+  it("gives a record to the act that leads most of it, a guest-first credit included", () => {
+    // we owe you an explanation, 24 Oct: one song tagged guest-first, and a
+    // bare year beside a full date, split it off as Jadagrace's.
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "we owe you an explanation", artist: "PARTYOF2, Jadagrace, Swim", year: "2025-03-14" } }),
+      probe({ sha: sha(2), tags: { album: "we owe you an explanation", artist: "PARTYOF2", year: "2025-03-14" } }),
+      probe({ sha: sha(3), tags: { album: "we owe you an explanation", artist: "Jadagrace, PARTYOF2, SWIM", year: "2025" } }),
+    ]);
+    expect(m.releases).toHaveLength(1);
+    expect(m.releases[0]?.artist).toBe("PARTYOF2");
+    expect(m.releases[0]?.trackShas).toHaveLength(3);
+  });
+
+  it("one album when only the apostrophes differ", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "AMERIKA’S NEXT TOP PARTY!", artist: "PARTYOF2", year: "2025-10-17" } }),
+      probe({ sha: sha(2), tags: { album: "AMERIKA'S NEXT TOP PARTY!", artist: "PARTYOF2", year: "2025-10-17" } }),
+    ]);
+    expect(m.releases).toHaveLength(1);
+  });
+
+  it("keeps a same-year edition with its own date apart", () => {
+    const m = buildManifest([
+      probe({ sha: sha(1), tags: { album: "God Does Like Ugly", artist: "JID", year: "2025-08-08" } }),
+      probe({ sha: sha(2), tags: { album: "God Does Like Ugly (Preluxe Edition)", artist: "JID", year: "2025-08-09" } }),
+    ]);
+    expect(m.releases).toHaveLength(2);
+  });
+
   it("still keeps same-titled albums by unrelated acts apart", () => {
     const m = buildManifest([
       probe({ sha: sha(1), tags: { album: "Untitled", artist: "Alpha" } }),
@@ -1032,14 +1061,38 @@ describe("release cover fallback", () => {
     expect(m.releases[0]?.artSha).toBe(cover);
   });
 
-  it("prefers the file's own embedded art over the release cover", () => {
-    const embedded = new Map([[sha("a"), "e".repeat(64)]]);
+  it("puts the album's official cover over each file's own picture", () => {
+    // HARDSTONE PSYCHO, 24 Oct: one batch carried a scan of a library CD.
+    const embedded = new Map([
+      [sha("a"), "e".repeat(64)],
+      [sha("b"), "d".repeat(64)],
+    ]);
     const art = new Map([[releaseArtKey("Yeat", "LYFESTYLE"), cover]]);
     const m = buildManifest(
-      [probe({ sha: sha("a"), tags: { album: "LYFESTYLE", artist: "Yeat" } })],
+      [
+        probe({ sha: sha("a"), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+        probe({ sha: sha("b"), tags: { album: "LYFESTYLE", artist: "Yeat" } }),
+      ],
       new Map(), new Map(), [], [], new Map(), new Map(), embedded, art
     );
-    expect(m.tracks[0]?.artSha).toBe("e".repeat(64));
+    expect(m.tracks.map((t) => t.artSha)).toEqual([cover, cover]);
+    expect(m.releases[0]?.artSha).toBe(cover);
+  });
+
+  it("settles an album with no official cover on the picture most songs carry", () => {
+    const scan = "9".repeat(64);
+    const real = "e".repeat(64);
+    const embedded = new Map([
+      [sha("a"), real],
+      [sha("b"), real],
+      [sha("c"), scan],
+    ]);
+    const m = buildManifest(
+      ["a", "b", "c"].map((x) => probe({ sha: sha(x), tags: { album: "LYFESTYLE", artist: "Yeat" } })),
+      new Map(), new Map(), [], [], new Map(), new Map(), embedded, new Map()
+    );
+    expect(m.tracks.map((t) => t.artSha)).toEqual([real, real, real]);
+    expect(m.releases[0]?.artSha).toBe(real);
   });
 
   it("does not apply a release cover when the file named no album", () => {
@@ -1167,6 +1220,23 @@ describe("a song ripped from a playlist", () => {
     expect(t.artist).toBe("Juice WRLD");
     // The playlist's baked-in picture loses to the record's sleeve.
     expect(t.artSha).toBe("d".repeat(64));
+  });
+
+  it("credits the song's artist, not the playlist's album artist, and drops its numbering", () => {
+    // Make Believe kept "Разные исполнители" after its album was put right.
+    const tagged = probe({
+      tags: {
+        title: "Make Believe", artist: "Juice Wrld", album: "Rap 2020", year: "2020",
+        albumArtist: "Разные исполнители", trackNumber: 21, totalTracks: 23,
+      },
+    });
+    const m = buildManifest([tagged], new Map(), new Map([[sha, { ...record, trackNumber: 18, totalTracks: 22 }]]));
+    const t = m.tracks[0]!;
+    expect(t.primaryArtist).toBe("Juice WRLD");
+    expect(t.trackNumber).toBe(18);
+    expect(t.totalTracks).toBe(22);
+    expect(m.releases[0]?.artist).toBe("Juice WRLD");
+    expect(m.releases[0]?.totalTracks).not.toBe(23);
   });
 
   it("leaves a real compilation alone when it is held whole", () => {

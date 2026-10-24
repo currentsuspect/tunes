@@ -197,6 +197,16 @@ export interface Candidate {
  * then advertised speed. Live, remix, instrumental and similar versions are
  * dropped unless the title asks for them.
  */
+/** Words in a path that mark a clean (censored) copy. */
+const CLEAN = ["clean", "edited", "censored"];
+
+/** How far down a clean copy goes: below any explicit copy, lossy ones
+ * included, but still taken when nothing else is shared. Not when the ask
+ * names it, or the word is the act's own ("Clean Bandit"). */
+export function cleanPenalty(pathWords: Set<string>, asked: Set<string>): number {
+  return CLEAN.some((w) => pathWords.has(w) && !asked.has(w)) ? 1500 : 0;
+}
+
 export function rankCandidates(responses: SlskResponse[], w: Wanted): Candidate[] {
   const titleWords = words(w.title.replace(/\(.*?\)|\[.*?\]/g, " "));
   const artistWords = words(w.artist).filter((x) => x.length > 1 && x !== "feat" && x !== "ft");
@@ -222,9 +232,12 @@ export function rankCandidates(responses: SlskResponse[], w: Wanted): Candidate[
         if (diff > 8) continue;
         lengthPenalty = diff;
       }
+      // A clean copy is not the song: Soulseek holds both and the clean one
+      // was as likely to win on speed alone.
       const score =
         (lossless ? 1000 : 0) + (r.hasFreeUploadSlot ? 200 : 0) - lengthPenalty * 5 - Math.min(r.queueLength, 50) +
-        Math.min(r.uploadSpeed / 1e6, 20);
+        Math.min(r.uploadSpeed / 1e6, 20) -
+        cleanPenalty(pathWords, new Set([...wantedAll, ...words(w.artist)]));
       out.push({
         username: r.username,
         file: f,

@@ -149,12 +149,38 @@ export function isPlaylistAlbum(title: string): boolean {
  * album the listener holds and is left alone. */
 export const PLAYLIST_ALBUM_MAX = 2;
 
+/** The cover an album shows: the one most of its songs carry. A tie keeps
+ * [current] when it is among the leaders, else the lowest sha, so the
+ * answer does not change from one build to the next. */
+export function albumCover(arts: Array<string | null>, current: string | null): string | null {
+  const votes = new Map<string, number>();
+  for (const a of arts) if (a != null) votes.set(a, (votes.get(a) ?? 0) + 1);
+  if (votes.size === 0) return current;
+  const top = Math.max(...votes.values());
+  const leaders = [...votes].filter(([, n]) => n === top).map(([a]) => a).sort();
+  return current != null && leaders.includes(current) ? current : leaders[0]!;
+}
+
 export function isCategoryRelease(title: string): boolean {
   return CATEGORY_RELEASES.has(norm(title));
 }
 
+/** A title for comparing: curly and straight quotes are one character, so
+ * "AMERIKA’S NEXT TOP PARTY!" and "AMERIKA'S NEXT TOP PARTY!" are one album. */
+function sameTitle(title: string): string {
+  return norm(title).replace(/[‘’ʼ`´]/g, "'").replace(/[“”]/g, '"');
+}
+
+/** Two release dates that can be the same record: equal, or one is only the
+ * year of the other ("2025" and "2025-03-14"). Two full dates that differ
+ * stay apart, which keeps a same-year deluxe off its standard edition. */
+function sameYear(a: string | null, b: string | null): boolean {
+  if (a == null || b == null || a === b) return true;
+  return (a.length === 4 || b.length === 4) && a.slice(0, 4) === b.slice(0, 4);
+}
+
 function titleTokens(title: string): string[] {
-  return norm(title)
+  return sameTitle(title)
     .split(/[\/\-\s]+/)
     .filter((t) => t.length > 0);
 }
@@ -301,6 +327,9 @@ export function buildManifest(
     const a = p.tags.album?.trim();
     if (a) perAlbumTag.set(norm(a), (perAlbumTag.get(norm(a)) ?? 0) + 1);
   }
+  // Playlist rips put right from MusicBrainz: their album, numbering and
+  // album artist are the playlist's, so they stay out of every file vote.
+  const playlistRips = new Set<string>();
   const tracks: ManifestTrack[] = allProbes
     .map((p) => {
       const meta = metaBySha.get(p.sha);
@@ -314,6 +343,7 @@ export function buildManifest(
         enrich?.album != null &&
         isPlaylistAlbum(tagAlbum) &&
         (perAlbumTag.get(norm(tagAlbum)) ?? 0) <= PLAYLIST_ALBUM_MAX;
+      if (playlistTag) playlistRips.add(p.sha);
       const tagged = Boolean(p.tags.title) || Boolean(p.tags.artist) || Boolean(p.tags.album);
       // Filename parse is the last-resort seed for both title and artist
       // when no embedded tags and no enrich hit. Available even when
@@ -361,7 +391,10 @@ export function buildManifest(
       for (const name of titleCredits.featured) {
         if (!featured.some((f) => f.toLowerCase() === name.toLowerCase())) featured.push(name);
       }
-      const releaseArtist = releaseArtistOf(p.tags.albumArtist ?? null, artist);
+      // A playlist rip's album artist is the playlist's ("Various Artists",
+      // "Разные исполнители"), not the record's: Make Believe kept the
+      // Russian one after its album was put right (24 Oct).
+      const releaseArtist = releaseArtistOf(playlistTag ? null : p.tags.albumArtist ?? null, artist);
       // A genre-compilation match ("Trap", "Phonk") is not a real album, so we
       // drop it — but only when it is the *only* thing we have. The file's own
       // ALBUM tag is ground truth and outranks any network guess about it.
@@ -395,8 +428,14 @@ export function buildManifest(
         artist,
         album: categoryRelease ? "unknown album" : album,
         year,
+        // An album the files name gets that album's own cover first: each
+        // file's picture is whatever its uploader scanned or cropped, and one
+        // album showed seven of them, a library CD case among them (24 Oct).
         artSha:
-          (categoryRelease ? null : enrich?.artSha ?? null) ?? embeddedArtSha ?? releaseArtSha,
+          (fileNamedAlbum ? releaseArtSha : null) ??
+          (categoryRelease ? null : enrich?.artSha ?? null) ??
+          embeddedArtSha ??
+          releaseArtSha,
         // The id of the release this track is actually grouped into. Keeping a
         // provider id here while grouping by the file's album would leave a
         // track pointing at a release that does not contain it.
@@ -412,9 +451,10 @@ export function buildManifest(
         // Track/disc position decides running order inside a release, so the
         // tagger's own numbering wins over a position we inferred from a
         // provider's tracklist.
-        trackNumber: p.tags.trackNumber ?? enrich?.trackNumber ?? null,
-        discNumber: p.tags.discNumber ?? enrich?.discNumber ?? null,
-        totalTracks: p.tags.totalTracks ?? enrich?.totalTracks ?? null,
+        // A playlist rip's numbers are its place in the playlist.
+        trackNumber: playlistTag ? enrich?.trackNumber ?? null : p.tags.trackNumber ?? enrich?.trackNumber ?? null,
+        discNumber: playlistTag ? enrich?.discNumber ?? null : p.tags.discNumber ?? enrich?.discNumber ?? null,
+        totalTracks: playlistTag ? enrich?.totalTracks ?? null : p.tags.totalTracks ?? enrich?.totalTracks ?? null,
         primaryArtist: releaseArtist,
         featured,
         dupeShas: [],
@@ -489,7 +529,7 @@ export function buildManifest(
 
   // Tracks whose album came from the file itself, not from a provider.
   const fileStatedAlbum = new Set(
-    allProbes.filter((p) => Boolean(p.tags.album?.trim())).map((p) => p.sha)
+    allProbes.filter((p) => Boolean(p.tags.album?.trim()) && !playlistRips.has(p.sha)).map((p) => p.sha)
   );
   // What the tagger said the release holds, straight from the tags. Read from
   // the probe rather than from ManifestTrack.totalTracks, which already falls
@@ -498,6 +538,7 @@ export function buildManifest(
   const fileStatedTotal = new Map<string, number>();
   for (const p of allProbes) {
     const n = p.tags.totalTracks;
+    if (playlistRips.has(p.sha)) continue;
     if (typeof n === "number" && Number.isInteger(n) && n > 0) {
       fileStatedTotal.set(p.sha, n);
     }
@@ -600,6 +641,7 @@ export function buildManifest(
   // Absorbed release id -> surviving release id. Merging without this leaves
   // the absorbed release's tracks naming an id that no longer exists.
   const redirected = new Map<string, string>();
+  const leadBySha = new Map(tracks.map((t) => [t.sha, t.primaryArtist || t.artist]));
   let mergedAnything = true;
   while (mergedAnything) {
     mergedAnything = false;
@@ -616,16 +658,16 @@ export function buildManifest(
         // two different albums that happen to share a title are unaffected.
         const sameAct = other.artist === r.artist;
         const sharedCast = [...creditsOf(r.id)].some((n) => creditsOf(other.id).has(n));
-        const jointAlbum = norm(other.title) === norm(r.title) && sharedCast;
+        const jointAlbum = sameTitle(other.title) === sameTitle(r.title) && sharedCast;
         if (!sameAct && !jointAlbum) continue;
-        if (other.year !== r.year && other.year != null && r.year != null) continue;
+        if (!sameYear(other.year, r.year)) continue;
         const rSmaller = r.trackShas.length <= other.trackShas.length;
         const small = rSmaller ? r : other;
         const big = rSmaller ? other : r;
         if (small.trackShas.length === 0) continue;
         const bothUnknown =
           small.title === "unknown album" && big.title === "unknown album";
-        const exactTitle = norm(small.title) === norm(big.title);
+        const exactTitle = sameTitle(small.title) === sameTitle(big.title);
         if (small.trackShas.length > 8 && !bothUnknown && !exactTitle) continue;
         if (!bothUnknown && !tokenSubset(small.title, big.title)) continue;
         for (const sha of small.trackShas) {
@@ -642,14 +684,27 @@ export function buildManifest(
         const bigCast = creditsOf(big.id);
         for (const n of creditsOf(small.id)) bigCast.add(n);
         if (jointAlbum && !sameAct) {
-          // Credit the whole cast, deterministically, so the card does not
-          // claim a joint record belongs to whichever name sorted first.
-          const names = new Set<string>();
-          for (const part of [...big.artist.split(", "), ...small.artist.split(", ")]) {
-            const name = part.trim();
-            if (name !== "") names.add(name);
+          // The act that leads most of its songs owns it: "all 4 the best"
+          // is tagged "Jadagrace, PARTYOF2, SWIM" on a PARTYOF2 record, and
+          // was split off as hers (24 Oct). With no such act, credit the
+          // whole cast, deterministically, so the card does not claim a
+          // joint record belongs to whichever name sorted first.
+          const leads = new Map<string, number>();
+          for (const sha of big.trackShas) {
+            const lead = leadBySha.get(sha);
+            if (lead) leads.set(lead, (leads.get(lead) ?? 0) + 1);
           }
-          big.artist = [...names].sort((x, y) => x.localeCompare(y)).join(", ");
+          const [top, n] = [...leads].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] ?? ["", 0];
+          if (n * 2 > big.trackShas.length) {
+            big.artist = top;
+          } else {
+            const names = new Set<string>();
+            for (const part of [...leads.keys(), ...big.artist.split(", "), ...small.artist.split(", ")]) {
+              const name = part.trim();
+              if (name !== "") names.add(name);
+            }
+            big.artist = [...names].sort((x, y) => x.localeCompare(y)).join(", ");
+          }
         }
         redirected.set(small.id, big.id);
         merged.delete(small.id);
@@ -673,20 +728,25 @@ export function buildManifest(
       t.releaseIds = [...new Set(t.releaseIds.map(resolve))];
     }
   }
+  // One album, one cover: the one most of its songs wear. Songs fetched at
+  // different times from different people carry different crops and scans
+  // of the same sleeve, and the album, the player and Home each showed a
+  // different one (HARDSTONE PSYCHO, 24 Oct). An album the files name has
+  // its official cover on every song already (above), so this settles the
+  // ones where no official cover was found.
+  const trackBySha = new Map(tracks.map((t) => [t.sha, t]));
   for (const r of merged.values()) {
-    if (r.artSha == null) {
-      for (const t of tracks) {
-        if (r.trackShas.includes(t.sha) && t.artSha != null) {
-          r.artSha = t.artSha;
-          break;
-        }
-      }
-    }
+    const own = r.trackShas
+      .map((sha) => trackBySha.get(sha))
+      .filter((t): t is ManifestTrack => t != null && t.releaseId === r.id);
+    const art = albumCover(own.map((t) => t.artSha), r.artSha);
+    if (art == null) continue;
+    r.artSha = art;
+    for (const t of own) t.artSha = art;
   }
   // A track with no cover of its own wears its release's. Files of one
   // album often carry art on only some tracks (The Carters' EVERYTHING IS
   // LOVE: 1 of 9), and the phone drew blank squares for the rest.
-  const trackBySha = new Map(tracks.map((t) => [t.sha, t]));
   for (const r of merged.values()) {
     if (r.artSha == null) continue;
     for (const sha of r.trackShas) {

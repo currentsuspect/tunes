@@ -26,7 +26,7 @@ import type { ProbeResult } from "./probe.js";
 import { acquire, findDownloaded, type AcquireOptions } from "./resource.js";
 import { matchAlbum, norm } from "./complete.js";
 import { sleep } from "./telegram/ports.js";
-import { words, type SlskdApi, type SlskFile, type SlskResponse, type Wanted } from "./soulseek.js";
+import { cleanPenalty, words, type SlskdApi, type SlskFile, type SlskResponse, type Wanted } from "./soulseek.js";
 
 const AUDIO = /\.(flac|mp3|m4a|ogg|opus|wav|aiff?)$/i;
 const LOSSLESS = /\.(flac|wav|aiff?)$/i;
@@ -174,11 +174,14 @@ export function groupSongs(
       // featuring credit and a clean/explicit label are not.
       const key = songKey(read.artist, read.title);
       if (key.startsWith("|") || key.endsWith("|")) continue;
+      // Clean and explicit copies are one song here, and the copy shown and
+      // fetched is the best scored: a clean one must not win it.
       const score =
         (lossless ? 1000 : Math.min(f.bitRate ?? 0, 320)) +
         (r.hasFreeUploadSlot ? 200 : 0) -
         Math.min(r.queueLength, 50) +
-        Math.min(r.uploadSpeed / 1e6, 20);
+        Math.min(r.uploadSpeed / 1e6, 20) -
+        cleanPenalty(path, new Set(askedWords));
       const g = groups.get(key);
       const song = {
         key,

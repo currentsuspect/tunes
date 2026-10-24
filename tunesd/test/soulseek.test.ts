@@ -47,6 +47,25 @@ describe("rankCandidates", () => {
     );
     expect(r.map((c) => c.username)).toEqual(["freeflac", "busyflac", "mp3guy"]);
   });
+  it("puts a clean copy below any explicit one, lossy ones too", () => {
+    const r = rankCandidates(
+      [
+        resp("cleanflac", "Terror Squad - True Story (Clean)\\Lean Back.flac"),
+        resp("editedflac", "Terror Squad - Lean Back (Edited).flac"),
+        resp("mp3", "Terror Squad - Lean Back.mp3"),
+      ],
+      w
+    );
+    expect(r[0]?.username).toBe("mp3");
+    expect(r).toHaveLength(3);
+  });
+  it("leaves the word alone when it is the act's own", () => {
+    const r = rankCandidates(
+      [resp("flac", "Clean Bandit - Rather Be.flac"), resp("mp3", "Clean Bandit - Rather Be.mp3")],
+      { artist: "Clean Bandit", title: "Rather Be", durationMs: 247000 }
+    );
+    expect(r[0]?.username).toBe("flac");
+  });
   it("drops other versions, other songs and wrong lengths", () => {
     const r = rankCandidates(
       [
