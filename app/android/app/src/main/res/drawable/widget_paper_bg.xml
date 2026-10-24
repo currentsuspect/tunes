@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Crayon's paper: cream, an ink outline, round corners (the approved
+     widget boards, 24 Oct). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFBF2"/>
+    <stroke android:width="3dp" android:color="#FF22201C"/>
+    <corners android:radius="26dp"/>
+</shape>

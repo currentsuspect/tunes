@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="WidgetTitle">
+        <item name="android:textColor">#FF22201C</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:fontFamily">@font/shantell_sans</item>
+    </style>
+    <style name="WidgetBody">
+        <item name="android:textColor">#FF6E675C</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:fontFamily">@font/shantell_sans</item>
+    </style>
+</resources>
