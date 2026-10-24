@@ -22,7 +22,7 @@ import type { EnrichAttempt, EnrichmentEntry } from "./enrich.js";
 import { FetchEngine } from "./fetch.js";
 import type { ChannelConfig } from "./fetch.js";
 import { makeLogger } from "./logger.js";
-import { albumEditionBase, buildManifest, isCategoryRelease, isPlaylistAlbum, normalize, PLAYLIST_ALBUM_MAX, releaseArtKey } from "./manifest.js";
+import { albumEditionBase, buildManifest, isCategoryRelease, leanManifest, isPlaylistAlbum, normalize, PLAYLIST_ALBUM_MAX, releaseArtKey } from "./manifest.js";
 import type { ManifestV3, ReleaseLinkMeta, TrackEnrichment } from "./manifest.js";
 import { DeezerClient, DeezerUnavailable } from "./deezer.js";
 import { LastfmClient, LastfmUnavailable } from "./lastfm.js";
@@ -1478,6 +1478,7 @@ async function main(): Promise<void> {
           url: env.publishUrl,
           key: env.publishKey,
           manifest,
+          lean: leanManifest(manifest),
           rows,
           log,
         });

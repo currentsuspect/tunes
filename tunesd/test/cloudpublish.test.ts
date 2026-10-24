@@ -257,4 +257,19 @@ describe("publishAudioFile URL", () => {
     expect(ok).toBe(true);
     expect(urls).toEqual([`https://t.example/internal/audio/${"a".repeat(64)}`]);
   });
+
+  it("sends the lean copy only to an edge that keeps it apart", async () => {
+    const urls: string[] = [];
+    const edge = (answer: object) =>
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return { ok: true, status: 200, json: async () => answer };
+      });
+    await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: { a: 1 }, lean: { a: 2 }, rows: [], log, fetchFn: edge({ encoding: "gzip", lean: "supported" }) as any });
+    expect(urls).toEqual(["https://edge/internal/manifest", "https://edge/internal/manifest?lean=1"]);
+    urls.length = 0;
+    await publishCloud({ url: "https://edge/internal/publish", key: "k", manifest: { a: 1 }, lean: { a: 2 }, rows: [], log, fetchFn: edge({ encoding: "gzip" }) as any });
+    expect(urls).toEqual(["https://edge/internal/manifest"]);
+  });
 });
+

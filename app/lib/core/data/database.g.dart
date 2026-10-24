@@ -294,6 +294,17 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _lyricsRevMeta = const VerificationMeta(
+    'lyricsRev',
+  );
+  @override
+  late final GeneratedColumn<String> lyricsRev = GeneratedColumn<String>(
+    'lyrics_rev',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     sha,
@@ -323,6 +334,7 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
     embeddedYear,
     lyrics,
     lyricsSource,
+    lyricsRev,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -530,6 +542,12 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
         ),
       );
     }
+    if (data.containsKey('lyrics_rev')) {
+      context.handle(
+        _lyricsRevMeta,
+        lyricsRev.isAcceptableOrUnknown(data['lyrics_rev']!, _lyricsRevMeta),
+      );
+    }
     return context;
   }
 
@@ -647,6 +665,10 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
         DriftSqlType.string,
         data['${effectivePrefix}lyrics_source'],
       ),
+      lyricsRev: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}lyrics_rev'],
+      ),
     );
   }
 
@@ -684,6 +706,10 @@ class Track extends DataClass implements Insertable<Track> {
   final String? embeddedYear;
   final String? lyrics;
   final String? lyricsSource;
+
+  /// The box's stamp of [lyrics] (v14): which words these are, so a lean
+  /// manifest's changed ones are all that is fetched.
+  final String? lyricsRev;
   const Track({
     required this.sha,
     required this.size,
@@ -712,6 +738,7 @@ class Track extends DataClass implements Insertable<Track> {
     this.embeddedYear,
     this.lyrics,
     this.lyricsSource,
+    this.lyricsRev,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -781,6 +808,9 @@ class Track extends DataClass implements Insertable<Track> {
     if (!nullToAbsent || lyricsSource != null) {
       map['lyrics_source'] = Variable<String>(lyricsSource);
     }
+    if (!nullToAbsent || lyricsRev != null) {
+      map['lyrics_rev'] = Variable<String>(lyricsRev);
+    }
     return map;
   }
 
@@ -849,6 +879,9 @@ class Track extends DataClass implements Insertable<Track> {
       lyricsSource: lyricsSource == null && nullToAbsent
           ? const Value.absent()
           : Value(lyricsSource),
+      lyricsRev: lyricsRev == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lyricsRev),
     );
   }
 
@@ -885,6 +918,7 @@ class Track extends DataClass implements Insertable<Track> {
       embeddedYear: serializer.fromJson<String?>(json['embeddedYear']),
       lyrics: serializer.fromJson<String?>(json['lyrics']),
       lyricsSource: serializer.fromJson<String?>(json['lyricsSource']),
+      lyricsRev: serializer.fromJson<String?>(json['lyricsRev']),
     );
   }
   @override
@@ -918,6 +952,7 @@ class Track extends DataClass implements Insertable<Track> {
       'embeddedYear': serializer.toJson<String?>(embeddedYear),
       'lyrics': serializer.toJson<String?>(lyrics),
       'lyricsSource': serializer.toJson<String?>(lyricsSource),
+      'lyricsRev': serializer.toJson<String?>(lyricsRev),
     };
   }
 
@@ -949,6 +984,7 @@ class Track extends DataClass implements Insertable<Track> {
     Value<String?> embeddedYear = const Value.absent(),
     Value<String?> lyrics = const Value.absent(),
     Value<String?> lyricsSource = const Value.absent(),
+    Value<String?> lyricsRev = const Value.absent(),
   }) => Track(
     sha: sha ?? this.sha,
     size: size ?? this.size,
@@ -985,6 +1021,7 @@ class Track extends DataClass implements Insertable<Track> {
     embeddedYear: embeddedYear.present ? embeddedYear.value : this.embeddedYear,
     lyrics: lyrics.present ? lyrics.value : this.lyrics,
     lyricsSource: lyricsSource.present ? lyricsSource.value : this.lyricsSource,
+    lyricsRev: lyricsRev.present ? lyricsRev.value : this.lyricsRev,
   );
   Track copyWithCompanion(TracksCompanion data) {
     return Track(
@@ -1043,6 +1080,7 @@ class Track extends DataClass implements Insertable<Track> {
       lyricsSource: data.lyricsSource.present
           ? data.lyricsSource.value
           : this.lyricsSource,
+      lyricsRev: data.lyricsRev.present ? data.lyricsRev.value : this.lyricsRev,
     );
   }
 
@@ -1075,7 +1113,8 @@ class Track extends DataClass implements Insertable<Track> {
           ..write('embeddedAlbum: $embeddedAlbum, ')
           ..write('embeddedYear: $embeddedYear, ')
           ..write('lyrics: $lyrics, ')
-          ..write('lyricsSource: $lyricsSource')
+          ..write('lyricsSource: $lyricsSource, ')
+          ..write('lyricsRev: $lyricsRev')
           ..write(')'))
         .toString();
   }
@@ -1109,6 +1148,7 @@ class Track extends DataClass implements Insertable<Track> {
     embeddedYear,
     lyrics,
     lyricsSource,
+    lyricsRev,
   ]);
   @override
   bool operator ==(Object other) =>
@@ -1140,7 +1180,8 @@ class Track extends DataClass implements Insertable<Track> {
           other.embeddedAlbum == this.embeddedAlbum &&
           other.embeddedYear == this.embeddedYear &&
           other.lyrics == this.lyrics &&
-          other.lyricsSource == this.lyricsSource);
+          other.lyricsSource == this.lyricsSource &&
+          other.lyricsRev == this.lyricsRev);
 }
 
 class TracksCompanion extends UpdateCompanion<Track> {
@@ -1171,6 +1212,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
   final Value<String?> embeddedYear;
   final Value<String?> lyrics;
   final Value<String?> lyricsSource;
+  final Value<String?> lyricsRev;
   final Value<int> rowid;
   const TracksCompanion({
     this.sha = const Value.absent(),
@@ -1200,6 +1242,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     this.embeddedYear = const Value.absent(),
     this.lyrics = const Value.absent(),
     this.lyricsSource = const Value.absent(),
+    this.lyricsRev = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TracksCompanion.insert({
@@ -1230,6 +1273,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     this.embeddedYear = const Value.absent(),
     this.lyrics = const Value.absent(),
     this.lyricsSource = const Value.absent(),
+    this.lyricsRev = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : sha = Value(sha);
   static Insertable<Track> custom({
@@ -1260,6 +1304,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     Expression<String>? embeddedYear,
     Expression<String>? lyrics,
     Expression<String>? lyricsSource,
+    Expression<String>? lyricsRev,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1290,6 +1335,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
       if (embeddedYear != null) 'embedded_year': embeddedYear,
       if (lyrics != null) 'lyrics': lyrics,
       if (lyricsSource != null) 'lyrics_source': lyricsSource,
+      if (lyricsRev != null) 'lyrics_rev': lyricsRev,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1322,6 +1368,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     Value<String?>? embeddedYear,
     Value<String?>? lyrics,
     Value<String?>? lyricsSource,
+    Value<String?>? lyricsRev,
     Value<int>? rowid,
   }) {
     return TracksCompanion(
@@ -1352,6 +1399,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
       embeddedYear: embeddedYear ?? this.embeddedYear,
       lyrics: lyrics ?? this.lyrics,
       lyricsSource: lyricsSource ?? this.lyricsSource,
+      lyricsRev: lyricsRev ?? this.lyricsRev,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1440,6 +1488,9 @@ class TracksCompanion extends UpdateCompanion<Track> {
     if (lyricsSource.present) {
       map['lyrics_source'] = Variable<String>(lyricsSource.value);
     }
+    if (lyricsRev.present) {
+      map['lyrics_rev'] = Variable<String>(lyricsRev.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1476,6 +1527,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
           ..write('embeddedYear: $embeddedYear, ')
           ..write('lyrics: $lyrics, ')
           ..write('lyricsSource: $lyricsSource, ')
+          ..write('lyricsRev: $lyricsRev, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4988,6 +5040,7 @@ typedef $$TracksTableCreateCompanionBuilder = TracksCompanion Function({
   Value<String?> embeddedYear,
   Value<String?> lyrics,
   Value<String?> lyricsSource,
+  Value<String?> lyricsRev,
   Value<int> rowid,
 });
 typedef $$TracksTableUpdateCompanionBuilder = TracksCompanion Function({
@@ -5018,6 +5071,7 @@ typedef $$TracksTableUpdateCompanionBuilder = TracksCompanion Function({
   Value<String?> embeddedYear,
   Value<String?> lyrics,
   Value<String?> lyricsSource,
+  Value<String?> lyricsRev,
   Value<int> rowid,
 });
 
@@ -5162,6 +5216,11 @@ class $$TracksTableFilterComposer
 
   ColumnFilters<String> get lyricsSource => $composableBuilder(
     column: $table.lyricsSource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lyricsRev => $composableBuilder(
+    column: $table.lyricsRev,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5309,6 +5368,11 @@ class $$TracksTableOrderingComposer
     column: $table.lyricsSource,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get lyricsRev => $composableBuilder(
+    column: $table.lyricsRev,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$TracksTableAnnotationComposer
@@ -5428,6 +5492,9 @@ class $$TracksTableAnnotationComposer
     column: $table.lyricsSource,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get lyricsRev =>
+      $composableBuilder(column: $table.lyricsRev, builder: (column) => column);
 }
 
 class $$TracksTableTableManager
@@ -5485,6 +5552,7 @@ class $$TracksTableTableManager
                 Value<String?> embeddedYear = const Value.absent(),
                 Value<String?> lyrics = const Value.absent(),
                 Value<String?> lyricsSource = const Value.absent(),
+                Value<String?> lyricsRev = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TracksCompanion(
                 sha: sha,
@@ -5514,6 +5582,7 @@ class $$TracksTableTableManager
                 embeddedYear: embeddedYear,
                 lyrics: lyrics,
                 lyricsSource: lyricsSource,
+                lyricsRev: lyricsRev,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5545,6 +5614,7 @@ class $$TracksTableTableManager
                 Value<String?> embeddedYear = const Value.absent(),
                 Value<String?> lyrics = const Value.absent(),
                 Value<String?> lyricsSource = const Value.absent(),
+                Value<String?> lyricsRev = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TracksCompanion.insert(
                 sha: sha,
@@ -5574,6 +5644,7 @@ class $$TracksTableTableManager
                 embeddedYear: embeddedYear,
                 lyrics: lyrics,
                 lyricsSource: lyricsSource,
+                lyricsRev: lyricsRev,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

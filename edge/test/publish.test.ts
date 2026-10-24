@@ -447,3 +447,49 @@ describe("the manifest gzipped (24 Oct: 16 MB re-sent ~500 times a day)", () => 
     expect(await res!.text()).toBe(text);
   });
 });
+
+describe("the lean manifest (24 Oct: lyrics were 87% of it)", () => {
+  function r2() {
+    const objects = new Map<string, Uint8Array>();
+    return {
+      objects,
+      put: vi.fn(async (k: string, v: ReadableStream | string) => {
+        objects.set(k, new Uint8Array(await new Response(v).arrayBuffer()));
+      }),
+      get: vi.fn(async (k: string) => {
+        const b = objects.get(k);
+        return b ? { body: new Response(b).body! } : null;
+      }),
+      delete: vi.fn(async (k: string) => {
+        objects.delete(k);
+      }),
+    };
+  }
+  const putReq = (lean: boolean, body = "x") =>
+    new Request(`${HOST}/internal/manifest${lean ? "?lean=1" : ""}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${KEY}`, "content-length": String(body.length), "x-tunes-encoding": "gzip" },
+      body,
+    });
+
+  it("is kept apart from the full one, which says it can be", async () => {
+    const cache = r2();
+    const full = await handleManifestPut(putReq(false, "full"), { INTERNAL_PUBLISH_KEY: KEY, CACHE: cache } as any);
+    expect(await full.json()).toMatchObject({ lean: "supported" });
+    await handleManifestPut(putReq(true, "lean"), { INTERNAL_PUBLISH_KEY: KEY, CACHE: cache } as any);
+    expect(new TextDecoder().decode(cache.objects.get("manifest.json.gz"))).toBe("full");
+    expect(new TextDecoder().decode(cache.objects.get("manifest-lean.json.gz"))).toBe("lean");
+  });
+
+  it("goes to whoever asks for it, the full one to the rest and until it exists", async () => {
+    const cache = r2();
+    cache.objects.set("manifest.json.gz", new TextEncoder().encode("full"));
+    const ask = (q: string) =>
+      handleManifestGet(new Request(`${HOST}/manifest${q}`, { headers: { "accept-encoding": "gzip" } }), { CACHE: cache } as any);
+    expect(await (await ask("?lean=1"))!.text()).toBe("full");
+    cache.objects.set("manifest-lean.json.gz", new TextEncoder().encode("lean"));
+    expect(await (await ask("?lean=1"))!.text()).toBe("lean");
+    expect(await (await ask(""))!.text()).toBe("full");
+  });
+});
+

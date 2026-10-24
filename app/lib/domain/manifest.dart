@@ -26,6 +26,7 @@ class ManifestTrack {
     this.embeddedYear,
     this.lyrics,
     this.lyricsSource,
+    this.lyricsRev,
     this.primaryArtist,
     this.featured = const [],
   });
@@ -61,6 +62,11 @@ class ManifestTrack {
   final String? lyrics;
   final String? lyricsSource;
 
+  /// The box's stamp of the lyrics' words (tunesd lyricsRev): the same
+  /// stamp, the same words. A lean manifest carries only this, and the
+  /// words that changed are fetched by it (ManifestStore.staleLyrics).
+  final String? lyricsRev;
+
   /// The same song with [text] as its lyrics, for filling lyrics in after
   /// the library is already on screen (ManifestStore, slim read).
   ManifestTrack withLyrics(String text, String? source) => ManifestTrack(
@@ -88,6 +94,7 @@ class ManifestTrack {
     embeddedYear: embeddedYear,
     lyrics: text,
     lyricsSource: source,
+    lyricsRev: lyricsRev,
     primaryArtist: primaryArtist,
     featured: featured,
   );
@@ -180,6 +187,7 @@ class ManifestTrack {
       embeddedYear: json['embeddedYear'] as String?,
       lyrics: json['lyrics'] as String?,
       lyricsSource: json['lyricsSource'] as String?,
+      lyricsRev: json['lyricsRev'] as String?,
       primaryArtist: json['primaryArtist'] as String?,
       featured: (json['featured'] as List<dynamic>? ?? const [])
           .map((s) => s as String)
@@ -396,7 +404,12 @@ class TunesManifest {
     this.integrity,
     this.generatedAt,
     this.pointers = const {},
+    this.lean = false,
   });
+
+  /// The box left the lyrics' words out (tunesd leanManifest): what is
+  /// stored stays, and the words that changed are fetched by stamp.
+  final bool lean;
 
   final List<ManifestTrack> tracks;
 
@@ -496,6 +509,7 @@ class TunesManifest {
         integrity: json['integrity'] as String?,
         generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
         pointers: pointers,
+        lean: json['lean'] == true,
       );
     }
     return TunesManifest(
@@ -505,6 +519,7 @@ class TunesManifest {
       integrity: json['integrity'] as String?,
       generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
       pointers: pointers,
+      lean: json['lean'] == true,
     );
   }
 

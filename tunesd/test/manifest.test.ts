@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { albumEditionBase, buildManifest, isPlaylistAlbum, releaseArtKey } from "../src/manifest.js";
+import { albumEditionBase, buildManifest, leanManifest, lyricsRev, isPlaylistAlbum, releaseArtKey } from "../src/manifest.js";
 import type { TrackEnrichment } from "../src/manifest.js";
 import type { ProbeResult } from "../src/probe.js";
 
@@ -1294,3 +1294,27 @@ describe("an album's name without its edition note", () => {
     expect(albumEditionBase("(Deluxe)")).toBe("(Deluxe)");
   });
 });
+
+describe("the lean manifest", () => {
+  it("leaves the words out and keeps each song's stamp of them", () => {
+    const m = buildManifest(
+      [probe({ sha: "a".repeat(64), tags: { album: "ADL", artist: "Yeat" } })],
+      new Map(), new Map(), [], [], new Map(), new Map(), new Map(), new Map(),
+      new Map([["a".repeat(64), { lyrics: "[00:01.00] I-I-I", source: "user" }]])
+    );
+    expect(m.tracks[0]?.lyricsRev).toBe(lyricsRev("[00:01.00] I-I-I"));
+    const lean = leanManifest(m);
+    expect(lean.lean).toBe(true);
+    expect("lyrics" in lean.tracks[0]!).toBe(false);
+    expect(lean.tracks[0]?.lyricsRev).toBe(m.tracks[0]?.lyricsRev);
+    expect(lean.tracks[0]?.lyricsSource).toBe("user");
+  });
+
+  it("stamps the same words the same, other words otherwise, none as none", () => {
+    expect(lyricsRev("la")).toBe(lyricsRev("la"));
+    expect(lyricsRev("la")).not.toBe(lyricsRev("lo"));
+    expect(lyricsRev(null)).toBeNull();
+    expect(lyricsRev("")).toBeNull();
+  });
+});
+
