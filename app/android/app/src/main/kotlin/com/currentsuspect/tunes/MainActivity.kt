@@ -147,6 +147,41 @@ class MainActivity : FlutterActivity() {
                             result.error("share_failed", e.message, null)
                         }
                     }
+                    // Any file the app made to share: a moment of a song as
+                    // a short video, today. Same folder and provider as the
+                    // card above.
+                    "file" -> {
+                        val path = call.argument<String>("path")
+                        val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                        if (path.isNullOrEmpty()) {
+                            result.error("no_path", "file needs a path", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                this,
+                                "$packageName.updates",
+                                java.io.File(path),
+                            )
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = mime
+                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                call.argument<String>("text")?.let {
+                                    putExtra(android.content.Intent.EXTRA_TEXT, it)
+                                }
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(
+                                android.content.Intent.createChooser(
+                                    send,
+                                    call.argument<String>("title"),
+                                ),
+                            )
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("share_failed", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }

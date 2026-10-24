@@ -5,6 +5,7 @@ import '../../core/audio/playhead_clock.dart';
 import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/adlibs.dart';
+import 'share_moment.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/reading.dart';
 import '../../core/lyrics/voices.dart';
@@ -35,7 +36,13 @@ class LyricsSheet extends StatefulWidget {
     required this.player,
     required this.onSave,
     this.embedded = false,
+    this.clip,
+    this.artUrlFor,
   });
+
+  /// Cuts a moment on the box, for "Share this moment". Null hides it.
+  final MomentClipper? clip;
+  final String Function(String sha)? artUrlFor;
 
   /// Set when the lyrics sit in a pane of a wide window instead of a sheet: no
   /// drag handle, no sheet, and a header that is only the menu (the player
@@ -53,6 +60,8 @@ class LyricsSheet extends StatefulWidget {
     required ManifestTrack track,
     required TunePlayer player,
     required Future<void> Function(ManifestTrack track, String lyrics) onSave,
+    MomentClipper? clip,
+    String Function(String sha)? artUrlFor,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -63,7 +72,13 @@ class LyricsSheet extends StatefulWidget {
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => LyricsSheet(track: track, player: player, onSave: onSave),
+      builder: (_) => LyricsSheet(
+        track: track,
+        player: player,
+        onSave: onSave,
+        clip: clip,
+        artUrlFor: artUrlFor,
+      ),
     );
   }
 
@@ -285,6 +300,17 @@ class _LyricsSheetState extends State<LyricsSheet> {
                             scrollController: scrollController,
                             onAddLyrics: _startEdit,
                             onLineVoice: _setLineVoice,
+                            onShareMoment: widget.clip == null
+                                ? null
+                                : (words, from, to) => shareMoment(
+                                    context,
+                                    track: _track,
+                                    words: words,
+                                    from: from,
+                                    to: to,
+                                    clip: widget.clip!,
+                                    artUrlFor: widget.artUrlFor,
+                                  ),
                           ),
                   ),
                 ],
@@ -481,6 +507,7 @@ class _View extends StatefulWidget {
     required this.scrollController,
     required this.onAddLyrics,
     required this.onLineVoice,
+    this.onShareMoment,
   });
 
   final String lyrics;
@@ -490,6 +517,9 @@ class _View extends StatefulWidget {
 
   /// Puts line [index] on the left (1), the right (2), or back to unlabelled.
   final Future<void> Function(Lrc lrc, int index, int? voice) onLineVoice;
+
+  /// Shares a stored line as a short video, from its first word to its last.
+  final void Function(String words, Duration from, Duration to)? onShareMoment;
   final TunePlayer player;
   final ScrollController scrollController;
   final VoidCallback onAddLyrics;
@@ -543,14 +573,12 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     }
   }
 
-  void _toggleLoop(int i) {
+  /// The stored line shown at [i]: its words, when its first word starts
+  /// and when its last ends. One line shown in two halves is one line here.
+  ({String words, Duration from, Duration to})? _spanOf(int i) {
     final lrc = _lrc;
-    if (lrc == null) return;
+    if (lrc == null) return null;
     final origin = _origin[i];
-    if (_loop?.origin == origin) {
-      setState(() => _loop = null);
-      return;
-    }
     final shown = [
       for (var k = 0; k < lrc.lines.length; k++)
         if (_origin[k] == origin) k,
@@ -563,19 +591,46 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
         : first.words.map((w) => w.start).reduce((a, b) => a < b ? a : b);
     final Duration to;
     if (last.words.isNotEmpty) {
-      // A breath after the last word, so the loop does not clip it.
-      to =
-          lrc.wordEndOf(
-            lastIndex,
-            last.words.length - 1,
-            trackEnd: widget.player.duration,
-          ) +
-          const Duration(milliseconds: 250);
+      to = lrc.wordEndOf(
+        lastIndex,
+        last.words.length - 1,
+        trackEnd: widget.player.duration,
+      );
     } else if (lastIndex + 1 < lrc.lines.length) {
       to = lrc.lines[lastIndex + 1].timestamp;
     } else {
       to = last.timestamp + const Duration(seconds: 5);
     }
+    final words = LyricVoices.plain(_source!.lines[origin].text);
+    return (words: words, from: from, to: to);
+  }
+
+  void _shareMoment(int i) {
+    final span = _spanOf(i);
+    final share = widget.onShareMoment;
+    if (span == null || share == null) return;
+    // A breath either side, so neither the first nor the last word is cut.
+    final from = span.from - const Duration(milliseconds: 200);
+    share(
+      span.words,
+      from.isNegative ? Duration.zero : from,
+      span.to + const Duration(milliseconds: 400),
+    );
+  }
+
+  void _toggleLoop(int i) {
+    final lrc = _lrc;
+    if (lrc == null) return;
+    final origin = _origin[i];
+    if (_loop?.origin == origin) {
+      setState(() => _loop = null);
+      return;
+    }
+    final span = _spanOf(i);
+    if (span == null) return;
+    final from = span.from;
+    // A breath after the last word, so the loop does not clip it.
+    final to = span.to + const Duration(milliseconds: 250);
     // A little before the line, so its first word is heard whole.
     final lead = from - const Duration(milliseconds: 150);
     setState(() {
@@ -1018,6 +1073,17 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
                 _toggleLoop(i);
               },
             ),
+            if (widget.onShareMoment != null && line.words.isNotEmpty ||
+                widget.onShareMoment != null && lrc.lines.length > 1)
+              ListTile(
+                leading: const Icon(Icons.ios_share_rounded, size: 20),
+                title: const Text('Share this moment'),
+                subtitle: const Text('The line, with the song under it'),
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  _shareMoment(i);
+                },
+              ),
             // A label inside a word-timed line would be swept as a word, so
             // those lines keep the side they were given.
             if (!line.hasWordTiming && !voice.backing) ...[

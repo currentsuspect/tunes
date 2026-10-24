@@ -2084,6 +2084,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         manifestStore: widget.manifestStore,
         queueStore: widget.queueStore,
         shareLyrics: _lyricSharing.save,
+        clipMoment: widget.client.clip,
       ),
     );
   }
@@ -2336,6 +2337,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               track: track!,
               player: widget.player,
               onSave: (saved, text) => _lyricSharing.save(saved.sha, text),
+              clip: widget.client.clip,
+              artUrlFor: _artUrlFor,
             ),
           ),
         ],

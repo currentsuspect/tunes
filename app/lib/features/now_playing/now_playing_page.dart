@@ -32,6 +32,7 @@ import '../../domain/manifest.dart';
 import '../album/album_page.dart';
 import '../artist/artist_page.dart';
 import '../lyrics/lyrics_sheet.dart';
+import '../lyrics/share_moment.dart' show MomentClipper;
 import '../playlists/add_to_playlist_sheet.dart';
 import '../queue/queue_sheet.dart';
 import 'lyric_preview.dart';
@@ -51,12 +52,16 @@ class NowPlayingPage extends StatefulWidget {
     this.queueStore,
     this.reachability,
     this.shareLyrics,
+    this.clipMoment,
   });
 
   /// Saves a listener's lyrics and shares them with everyone. Without it they
   /// are kept on this phone only, which is all a screen outside the app shell
   /// (a test) can do.
   final Future<void> Function(String sha, String text)? shareLyrics;
+
+  /// Cuts a moment of a song on the box, for sharing a lyric line.
+  final MomentClipper? clipMoment;
 
   /// Live, so the source tag follows the connection rather than what it was
   /// when the page opened. Falls back to [offline] when absent.
@@ -132,6 +137,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       context,
       track: track,
       player: widget.player,
+      clip: widget.clipMoment,
+      artUrlFor: widget.artUrlFor,
       onSave: (saved, text) async {
         final share = widget.shareLyrics;
         if (share != null) {

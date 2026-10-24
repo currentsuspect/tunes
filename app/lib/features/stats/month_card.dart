@@ -350,7 +350,7 @@ class MonthShareCard extends StatelessWidget {
       child: Container(
         color: ground,
         child: CustomPaint(
-          painter: crayon ? const _PaperDots() : null,
+          painter: crayon ? const PaperDots() : null,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(24, 26, 24, 26),
             child: Column(
@@ -484,8 +484,8 @@ class MonthShareCard extends StatelessWidget {
   }
 }
 
-class _PaperDots extends CustomPainter {
-  const _PaperDots();
+class PaperDots extends CustomPainter {
+  const PaperDots();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -501,7 +501,7 @@ class _PaperDots extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_PaperDots old) => false;
+  bool shouldRepaint(PaperDots old) => false;
 }
 
 /// Draws the card off screen at 1080 by 1920 and hands it to the phone's

@@ -37,6 +37,13 @@ const MEDIA_PATH = /^\/(track|art|t)\/[0-9a-f]{64}$/;
  */
 const LYRICS_PATH = /^\/lyrics\/[0-9a-f]{64}$/;
 
+/**
+ * A moment of a song cut to share (tunesd clip.ts): POST, with the lyric card
+ * as the body, and only with a bearer token. It reads, never writes, but it
+ * makes the box do work, so it is not open to a signed media URL.
+ */
+const CLIP_PATH = /^\/clip\/[0-9a-f]{64}$/;
+
 function deny(reason: string, status = 403): Response {
   // The reason is for our own logs and the app's error surface; it names the
   // check that failed, never whether the object exists. A 403 for a bad
@@ -97,6 +104,19 @@ export async function handleMedia(
   if (url.pathname.startsWith("/update/")) return null;
 
   if (API_PATHS.has(url.pathname)) {
+    const header = req.headers.get("authorization");
+    if (!header?.startsWith("Bearer ")) return deny("no-token", 401);
+    const claims = await verifyAccessToken(
+      header.slice(7),
+      env.ACCESS_SECRET,
+      nowSec,
+    );
+    if (!claims) return deny("bad-token", 401);
+    return null;
+  }
+
+  if (CLIP_PATH.test(url.pathname)) {
+    if (req.method !== "POST") return deny("method", 405);
     const header = req.headers.get("authorization");
     if (!header?.startsWith("Bearer ")) return deny("no-token", 401);
     const claims = await verifyAccessToken(

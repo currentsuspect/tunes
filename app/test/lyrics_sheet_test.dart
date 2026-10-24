@@ -318,6 +318,46 @@ void main() {
     },
   );
 
+  testWidgets('a line is shared as its moment, first word to last', (
+    tester,
+  ) async {
+    const lyrics =
+        '[00:01.00]<00:01.00>hello <00:02.50>world<00:03.10>\n'
+        '[00:08.00]<00:08.00>next <00:08.50>line';
+    final cuts = <(Duration, Duration, bool)>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LyricsSheet(
+            track: _track(lyrics: lyrics),
+            player: _StubPlayer(),
+            onSave: (_, _) async {},
+            clip: (sha, from, to, {card}) async {
+              cuts.add((from, to, card != null));
+              return null;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('hello '));
+    await tester.pumpAndSettle();
+    expect(find.text('Share this moment'), findsOneWidget);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Share this moment'));
+      // The card is drawn off screen and captured before the cut is asked for.
+      for (var i = 0; i < 20 && cuts.isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    });
+    // 200 ms before "hello", 400 ms after the end of "world" (3.10 s).
+    expect(cuts.single.$1, const Duration(milliseconds: 800));
+    expect(cuts.single.$2, const Duration(milliseconds: 3500));
+    expect(cuts.single.$3, isTrue, reason: 'the lyric card goes with it');
+  });
+
   group('word timing in the sheet', () {
     const lyrics =
         '[00:01.00]<00:01.00>hello <00:02.50>world<00:03.10>\n'
