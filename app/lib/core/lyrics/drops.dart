@@ -104,9 +104,9 @@ class DropMoment {
   final List<Duration> steps;
 }
 
-const _bloom = Duration(milliseconds: 350);
-const _reveal = Duration(milliseconds: 260);
-const _stagger = Duration(milliseconds: 90);
+const _bloom = Duration(milliseconds: 250);
+const _reveal = Duration(milliseconds: 180);
+const _stagger = Duration(milliseconds: 50);
 const _ramp = Duration(milliseconds: 400);
 
 /// The moments in a song, from its [lines] (as shown) and [beats].
@@ -248,7 +248,6 @@ class DropFrame {
   const DropFrame({
     this.moment,
     this.dim = 0,
-    this.blur = 0,
     this.grow = 0,
     this.punch = 0,
     this.wordOpacity = 0,
@@ -261,7 +260,6 @@ class DropFrame {
 
   /// How far the lines are faded out, 0 not at all to 1 gone.
   final double dim;
-  final double blur;
 
   /// The ad-lib's size, 0 its own to 1 filling the sheet (grow).
   final double grow;
@@ -290,7 +288,6 @@ class DropFrame {
       other is DropFrame &&
       identical(other.moment, moment) &&
       other.dim == dim &&
-      other.blur == blur &&
       other.grow == grow &&
       other.punch == punch &&
       other.wordOpacity == wordOpacity &&
@@ -298,7 +295,7 @@ class DropFrame {
 
   @override
   int get hashCode =>
-      Object.hash(moment, dim, blur, grow, punch, wordOpacity, revealFrom);
+      Object.hash(moment, dim, grow, punch, wordOpacity, revealFrom);
 }
 
 double _ease(double t) {
@@ -333,7 +330,6 @@ DropFrame dropFrame(List<DropMoment> moments, Duration pos) {
       return DropFrame(
         moment: m,
         dim: gone,
-        blur: 6 * gone,
         revealFrom: m.hit + const Duration(milliseconds: 200),
       );
     case DropKind.grow:
@@ -343,7 +339,6 @@ DropFrame dropFrame(List<DropMoment> moments, Duration pos) {
           moment: m,
           grow: g,
           dim: 0.85 * g,
-          blur: 5 * g,
           wordOpacity: math.min(1, g * 4),
         );
       }
@@ -366,8 +361,6 @@ DropFrame dropFrame(List<DropMoment> moments, Duration pos) {
         grow: g.toDouble(),
         punch: punch,
         dim: 0.85,
-        // Clears faster than the word shrinks, so the lines read again.
-        blur: 5 * g * g,
         wordOpacity: fade,
         revealFrom: m.hit,
       );
