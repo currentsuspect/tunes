@@ -10,6 +10,7 @@ import '../../core/data/gets.dart';
 import '../../core/data/playlist_store.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/net/tunes_client.dart';
+import '../../core/search/search_worker.dart';
 import '../../core/theme/looks.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/crayon_marks.dart';
@@ -92,16 +93,31 @@ class _SearchViewState extends State<SearchView> {
   /// Readings tapped off for this query.
   Set<FacetKind> _off = {};
 
-  SearchIndex? _index;
+  /// The search itself, on its own thread (see [SearchWorker]).
+  SearchWorker? _worker;
   List<ManifestTrack>? _indexedTracks;
   Map<String, int>? _indexedPlays;
+  Set<String> _artistNames = const {};
+  bool _lyricsReady = false;
+  int _workerGen = 0;
+
+  /// The question last sent to the worker; an answer to any older one is
+  /// dropped when it lands.
+  int? _askedKey;
 
   // Soulseek (board 3): asked by itself when the library has nothing for the
   // query, else on request. Slow -- the box waits on peers -- so it has its
   // own, longer pause after typing and its own state.
   Timer? _slskTimer;
   String? _slskFor;
-  bool _slskBusy = false;
+
+  /// The query Soulseek is being asked about right now. Per query, not a
+  /// bare flag: a flag set for "drake" was cleared only if the box was still
+  /// on "drake" when the answer came, so typing on meanwhile left it set
+  /// and every later ask returned early (owner, 24 Oct: "sometimes Soulseek
+  /// works, and sometimes it doesn't").
+  String? _slskAsking;
+  bool get _slskBusy => _slskAsking != null && _slskAsking == _slskFor;
   bool _slskFailed = false;
   List<FoundSong> _slsk = const [];
 
@@ -133,35 +149,63 @@ class _SearchViewState extends State<SearchView> {
     _slskTimer?.cancel();
     _typing?.cancel();
     _remember?.cancel();
+    _worker?.dispose();
     _playlistStore?.removeListener(_loadPlaylists);
     _controller.dispose();
     super.dispose();
   }
 
-  /// Built once per library (a third of a second for two thousand songs),
-  /// not once per keystroke.
-  SearchIndex get _idx {
-    if (_index == null ||
-        !identical(_indexedTracks, widget.tracks) ||
-        !identical(_indexedPlays, widget.plays)) {
-      _indexedTracks = widget.tracks;
-      _indexedPlays = widget.plays;
-      final index = SearchIndex(
-        tracks: widget.tracks,
-        releases: widget.releases,
-        artists: widget.artists,
-        plays: widget.plays,
-      );
-      _index = index;
+  /// Started once per library, not once per keystroke. Until it is up the
+  /// screen shows what it had; the first answer follows.
+  void _ensureWorker() {
+    if (identical(_indexedTracks, widget.tracks) &&
+        identical(_indexedPlays, widget.plays)) {
+      return;
+    }
+    _indexedTracks = widget.tracks;
+    _indexedPlays = widget.plays;
+    _artistNames = {
+      for (final t in widget.tracks) ...[t.artistKey, ...t.featured],
+    };
+    _worker?.dispose();
+    _worker = null;
+    _lyricsReady = false;
+    _askedKey = null;
+    final gen = ++_workerGen;
+    void ready(SearchWorker w) {
       // Lyric search gets ready in the background; a query typed meanwhile
       // picks the lyrics up when they land.
-      index.warmLyrics().then((_) {
-        if (mounted && identical(_index, index) && _query.trim().isNotEmpty) {
-          setState(() {});
+      w.lyricsReady.addListener(() {
+        if (mounted && identical(_worker, w)) {
+          setState(() => _lyricsReady = true);
         }
       });
+      _worker = w;
     }
-    return _index!;
+
+    if (SearchWorker.inline) {
+      ready(
+        SearchWorker.local(
+          tracks: widget.tracks,
+          releases: widget.releases,
+          artists: widget.artists,
+          plays: widget.plays,
+        ),
+      );
+      return;
+    }
+    SearchWorker.start(
+      tracks: widget.tracks,
+      releases: widget.releases,
+      artists: widget.artists,
+      plays: widget.plays,
+    ).then((w) {
+      if (!mounted || gen != _workerGen) {
+        w.dispose();
+        return;
+      }
+      setState(() => ready(w));
+    });
   }
 
   /// Typing has to feel like typing (owner, 23 Oct: "heavy and slow").
@@ -191,16 +235,9 @@ class _SearchViewState extends State<SearchView> {
     _typing = Timer(const Duration(milliseconds: 110), () {
       if (!mounted) return;
       setState(() => _query = v);
-      final r = _current();
-      // Nothing here by that name: look out there once typing settles.
-      if (!widget.offline &&
-          v.trim().length >= 3 &&
-          GetsScope.maybeOf(context) != null &&
-          (r == null || r.isEmpty)) {
-        _slskTimer = Timer(const Duration(milliseconds: 800), () {
-          if (mounted && _controller.text.trim() == v.trim()) _askSoulseek();
-        });
-      }
+      // Asked now, not at the next frame: the answer, and the Soulseek
+      // look-out if it finds nothing, start from here.
+      _current();
       // Kept in Recent once it has settled on something that found things.
       _remember = Timer(const Duration(seconds: 2), () {
         if (mounted && _controller.text.trim() == v.trim()) _keep(v);
@@ -225,10 +262,15 @@ class _SearchViewState extends State<SearchView> {
   }
 
   /// One search per distinct question; a rebuild for any other reason (the
-  /// player, a download, the theme) reuses it.
+  /// player, a download, the theme) reuses it. The question goes to the
+  /// worker and this returns what is on screen until the answer lands, so a
+  /// keystroke never waits on the library.
   LibrarySearchResults? _current() {
     final q = _query.trim();
     if (q.isEmpty) return null;
+    _ensureWorker();
+    final worker = _worker;
+    if (worker == null) return _cached;
     final key = Object.hashAll([
       _query,
       Object.hashAllUnordered(_off),
@@ -237,19 +279,72 @@ class _SearchViewState extends State<SearchView> {
       widget.offline,
       identityHashCode(_server),
       identityHashCode(_playlists),
-      identityHashCode(_idx),
-      _idx.lyricsReady,
+      identityHashCode(worker),
+      _lyricsReady,
       widget.store.shas.length,
     ]);
-    if (key != _cachedKey || _cached == null) {
+    if (key == _askedKey) return _cached;
+    _askedKey = key;
+    final query = _query;
+    final server = _server;
+    // Offline, only what is here can play.
+    final only = _onPhone || widget.offline ? widget.store.shas.toSet() : null;
+    final playlists = [
+      for (final p in _playlists)
+        SearchPlaylist(id: p.id, name: p.name, count: p.trackCount),
+    ];
+    if (worker.isInline) {
+      final r = worker.searchNow(
+        query,
+        off: _off,
+        sort: _sort,
+        onlyShas: only,
+        playlists: playlists,
+      );
+      _cached = _withBox(r, server);
       _cachedKey = key;
-      _cached = _withBox(_results(), _server);
+      _afterResults(query, _cached!);
+      return _cached;
     }
+    worker
+        .search(
+          query,
+          off: _off,
+          sort: _sort,
+          onlyShas: only,
+          playlists: playlists,
+        )
+        .then((r) {
+          if (!mounted || _askedKey != key) return;
+          setState(() {
+            _cached = _withBox(r, server);
+            _cachedKey = key;
+          });
+          _afterResults(query, _cached!);
+        }, onError: (Object _) {});
     return _cached;
   }
 
+  /// The library's answer to [query] is in: if it has nothing by that name,
+  /// look out there once typing settles.
+  void _afterResults(String query, LibrarySearchResults r) {
+    final v = query.trim();
+    if (widget.offline ||
+        v.length < 3 ||
+        !r.isEmpty ||
+        _slskFor == v ||
+        _slskAsking == v ||
+        GetsScope.maybeOf(context) == null) {
+      return;
+    }
+    _slskTimer?.cancel();
+    _slskTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted && _controller.text.trim() == v) _askSoulseek();
+    });
+  }
+
   void _keep(String q) {
-    final r = _current();
+    final r = _cachedKey == _askedKey ? _cached : null;
     final settings = SettingsScope.maybeOf(context);
     if (settings == null || q.trim().length < 2) return;
     if ((r == null || r.isEmpty) && _slsk.isEmpty) return;
@@ -264,10 +359,12 @@ class _SearchViewState extends State<SearchView> {
 
   Future<void> _askSoulseek() async {
     final q = _query.trim();
-    if (q.length < 2 || _slskBusy) return;
+    // Asking again about what is already being asked would only queue a
+    // second search on the box; any other query goes ahead.
+    if (q.length < 2 || _slskAsking == q) return;
     setState(() {
       _slskFor = q;
-      _slskBusy = true;
+      _slskAsking = q;
       _slskFailed = false;
       _slsk = const [];
     });
@@ -278,7 +375,11 @@ class _SearchViewState extends State<SearchView> {
     } catch (_) {
       if (mounted && _slskFor == q) setState(() => _slskFailed = true);
     } finally {
-      if (mounted && _slskFor == q) setState(() => _slskBusy = false);
+      // Only the newest ask clears it; an older one finishing late must not.
+      if (_slskAsking == q) {
+        _slskAsking = null;
+        if (mounted) setState(() {});
+      }
     }
   }
 
@@ -288,18 +389,6 @@ class _SearchViewState extends State<SearchView> {
   }
 
   bool _held(ManifestTrack t) => widget.store.pathFor(t.sha) != null;
-
-  LibrarySearchResults _results() => _idx.search(
-    _query,
-    off: _off,
-    sort: _sort,
-    // Offline, only what is here can play.
-    onlyWhere: _onPhone || widget.offline ? _held : null,
-    playlists: [
-      for (final p in _playlists)
-        SearchPlaylist(id: p.id, name: p.name, count: p.trackCount),
-    ],
-  );
 
   PlaylistSummary? _summary(int id) {
     for (final p in _playlists) {
@@ -321,7 +410,7 @@ class _SearchViewState extends State<SearchView> {
     ];
     final artists = [
       for (final a in box.artists)
-        if (!names.contains(a.name) && !_idx.artistNames.contains(a.name))
+        if (!names.contains(a.name) && !_artistNames.contains(a.name))
           SearchArtist(
             name: a.name,
             songs: 0,
