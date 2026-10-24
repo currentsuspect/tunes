@@ -19,12 +19,21 @@ class SyncDraft {
     : lineStarts = List<Duration?>.filled(lines.length, null),
       wordStarts = [
         for (final l in lines) List<Duration?>.filled(_wordsOf(l).length, null),
+      ],
+      wordEnds = [
+        for (final l in lines) List<Duration?>.filled(_wordsOf(l).length, null),
       ];
 
   /// Source lyrics, one entry per line, already split into words for timing.
   final List<String> lines;
   final List<Duration?> lineStarts;
   final List<List<Duration?>> wordStarts;
+
+  /// Where each word stops being sung, when it was marked. Optional: null
+  /// reads as "until the next word", as before. A held note, a breath before
+  /// the next word, a word cut short: only an end says which, and the timing
+  /// model needs to know.
+  final List<List<Duration?>> wordEnds;
 
   static List<String> _wordsOf(String line) =>
       line.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
@@ -120,6 +129,8 @@ class SyncDraft {
       for (var w = 0; w < wordStarts[i].length; w++) {
         final v = wordStarts[i][w];
         if (v != null) wordStarts[i][w] = _atLeastZero(v + by);
+        final e = wordEnds[i][w];
+        if (e != null) wordEnds[i][w] = _atLeastZero(e + by);
       }
     }
   }
@@ -172,7 +183,15 @@ class SyncDraft {
           words: complete
               ? [
                   for (var w = 0; w < words.length; w++)
-                    LrcWord(text: words[w], start: stamps[w]!),
+                    LrcWord(
+                      text: words[w],
+                      start: stamps[w]!,
+                      // An end before its own start is a slip, not a word.
+                      end:
+                          wordEnds[i][w] != null && wordEnds[i][w]! > stamps[w]!
+                          ? wordEnds[i][w]
+                          : null,
+                    ),
                 ]
               : const [],
         ),

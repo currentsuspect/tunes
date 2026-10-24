@@ -96,6 +96,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       if (words.length == draft.wordStarts[i].length) {
         for (var w = 0; w < words.length; w++) {
           draft.wordStarts[i][w] = words[w].start;
+          draft.wordEnds[i][w] = words[w].end;
         }
       }
     }
@@ -104,6 +105,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 
   @override
   void dispose() {
+    _preview?.cancel();
     _playhead.dispose();
     _scroll.dispose();
     super.dispose();
@@ -111,11 +113,51 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 
   Duration get _now => _playhead.value;
 
-  /// The moment being recorded: where the playhead is, less the tap offset,
-  /// never before the start of the track.
+  /// The moment being recorded.
+  ///
+  /// Playing, it is a tap along to the music, so the tap offset takes off the
+  /// reaction time. Paused, the playhead was put there on purpose -- scrubbed
+  /// to the exact start or end -- and the mark is that spot, to the
+  /// millisecond. Taking the offset off a scrubbed position moved every mark
+  /// a quarter of a second away from where it was found (24 Oct).
   Duration get _markAt {
+    if (!widget.player.playing) return _now;
     final t = _now + _tapOffset;
     return t.isNegative ? Duration.zero : t;
+  }
+
+  /// The word an End mark closes: the one last started, or picked.
+  int? _lastStarted;
+
+  void _stampEnd() {
+    final words = _draft.wordStarts[_selectedLine];
+    final w = _lastStarted ?? _draft.lastMarkedWord(_selectedLine);
+    if (w == null || w >= words.length || words[w] == null) return;
+    final at = _markAt;
+    if (at <= words[w]!) return;
+    _dirty = true;
+    setState(() => _draft.wordEnds[_selectedLine][w] = at);
+  }
+
+  /// Plays a moment from [at] and comes back to it, so a scrubbed spot can be
+  /// heard before it is marked: is this the start of the word, or just before?
+  Timer? _preview;
+  void _hearFrom(Duration at) {
+    _preview?.cancel();
+    widget.player.seek(at);
+    if (!widget.player.playing) widget.player.play();
+    _preview = Timer(const Duration(milliseconds: 350), () {
+      widget.player.pause();
+      widget.player.seek(at);
+    });
+  }
+
+  /// Moves the playhead by a fine step, paused, so the next mark is exact.
+  void _step(Duration by) {
+    _preview?.cancel();
+    if (widget.player.playing) widget.player.pause();
+    final t = _now + by;
+    widget.player.seek(t.isNegative ? Duration.zero : t);
   }
 
   void _stamp() {
@@ -132,6 +174,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         final w = _selectedWord ?? _draft.nextUntimedWord(_selectedLine);
         if (w == null) return;
         words[w] = _markAt;
+        _lastStarted = w;
         // Walk on so a run-through keeps working, and stop at the end rather
         // than wrapping round and overwriting the first word.
         _selectedWord = w + 1 < words.length ? w + 1 : null;
@@ -148,7 +191,11 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
     final at =
         _draft.wordStarts[_selectedLine][index] ??
         _draft.lineStarts[_selectedLine];
-    setState(() => _selectedWord = index);
+    setState(() {
+      _selectedWord = index;
+      // An End mark now closes this word: pick it, scrub, mark its end.
+      if (_draft.wordStarts[_selectedLine][index] != null) _lastStarted = index;
+    });
     if (at == null) return;
     widget.player.seek(at > leadIn ? at - leadIn : Duration.zero);
     if (!widget.player.playing) widget.player.play();
@@ -204,6 +251,13 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         final w = _targetWord();
         if (w == null) return;
         _dirty = true;
+        // An end goes first: undoing a slipped End must not lose the start
+        // that was found by ear.
+        if (_draft.wordEnds[_selectedLine][w] != null) {
+          _draft.wordEnds[_selectedLine][w] = null;
+          _selectedWord = w;
+          return;
+        }
         _draft.wordStarts[_selectedLine][w] = null;
         // Leave the cursor on the word just cleared, so undo then re-tap
         // fixes one word without disturbing the rest.
@@ -422,6 +476,11 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
           children: [
             _Transport(player: widget.player, playhead: _playhead),
             _Scrubber(player: widget.player, playhead: _playhead),
+            _FineScrub(
+              playhead: _playhead,
+              onStep: _step,
+              onRelease: () => _hearFrom(_now),
+            ),
             Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             _ModeBar(
               mode: _mode,
@@ -461,6 +520,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
                   ? _draft.nextUntimedLine == null
                   : _draft.nextUntimedWord(_selectedLine) == null,
               onStamp: _stamp,
+              onStampEnd: _stampEnd,
               onUndo: _undo,
               onNudge: _nudge,
               onShiftAll: _shiftAll,
@@ -484,8 +544,8 @@ class _Transport extends StatelessWidget {
   String _fmt(Duration d) {
     final m = d.inMinutes;
     final s = d.inSeconds % 60;
-    final cs = (d.inMilliseconds.remainder(1000) ~/ 10);
-    return '$m:${s.toString().padLeft(2, '0')}.${cs.toString().padLeft(2, '0')}';
+    final ms = d.inMilliseconds.remainder(1000);
+    return '$m:${s.toString().padLeft(2, '0')}.${ms.toString().padLeft(3, '0')}';
   }
 
   @override
@@ -526,8 +586,8 @@ class _Transport extends StatelessWidget {
             icon: Icon(Icons.forward_5_rounded, color: Tones.text),
           ),
           const SizedBox(width: Space.sm),
-          // Centiseconds, because that is the resolution being recorded and a
-          // whole-second readout would hide the thing being corrected.
+          // Milliseconds, because that is the resolution being recorded and a
+          // coarser readout would hide the thing being corrected.
           ValueListenableBuilder<Duration>(
             valueListenable: playhead,
             builder: (context, pos, _) => Text(
@@ -777,13 +837,15 @@ class _WordList extends StatelessWidget {
                   children: [
                     Text(words[i], style: TypeScale.body),
                     Text(
-                      draft.wordStarts[lineIndex][i] == null
-                          ? '--'
-                          : '${(draft.wordStarts[lineIndex][i]!.inMilliseconds / 1000).toStringAsFixed(2)}s',
+                      _span(
+                        draft.wordStarts[lineIndex][i],
+                        draft.wordEnds[lineIndex][i],
+                      ),
                       style: TypeScale.caption.copyWith(
                         color: draft.wordStarts[lineIndex][i] == null
                             ? Tones.textMuted
                             : Tones.primary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -796,11 +858,151 @@ class _WordList extends StatelessWidget {
   }
 }
 
+/// "12.345" or "12.345–12.610": a word's start, and its end once marked.
+String _span(Duration? start, Duration? end) {
+  String s(Duration d) => (d.inMilliseconds / 1000).toStringAsFixed(3);
+  if (start == null) return '--';
+  return end == null ? s(start) : '${s(start)}–${s(end)}';
+}
+
+/// Fine scrubbing: drag along the strip and the playhead moves 5 ms per
+/// pixel, paused, so the exact first sound of a word can be found by ear. Let
+/// go and a moment plays from there and comes back, which is how you hear
+/// whether you are on the word or just before it. The arrows step 10 ms.
+///
+/// The track scrubber above is half a second per pixel on a phone: fine for
+/// getting near a line, useless for the start of a syllable.
+class _FineScrub extends StatefulWidget {
+  const _FineScrub({
+    required this.playhead,
+    required this.onStep,
+    required this.onRelease,
+  });
+
+  final ValueListenable<Duration> playhead;
+  final ValueChanged<Duration> onStep;
+  final VoidCallback onRelease;
+
+  @override
+  State<_FineScrub> createState() => _FineScrubState();
+}
+
+class _FineScrubState extends State<_FineScrub> {
+  static const _msPerPixel = 5.0;
+  double _carry = 0;
+  double _offset = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Space.md),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Back 10 ms',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => widget.onStep(const Duration(milliseconds: -10)),
+            icon: Icon(Icons.chevron_left_rounded, color: Tones.text),
+          ),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (d) {
+                _carry += d.delta.dx * _msPerPixel;
+                final whole = _carry.truncate();
+                if (whole != 0) {
+                  _carry -= whole;
+                  widget.onStep(Duration(milliseconds: whole));
+                }
+                setState(() => _offset += d.delta.dx);
+              },
+              onHorizontalDragEnd: (_) {
+                _carry = 0;
+                widget.onRelease();
+              },
+              child: SizedBox(
+                height: 36,
+                child: CustomPaint(
+                  painter: _TicksPainter(
+                    offset: _offset,
+                    color: Tones.textMuted,
+                    accent: Tones.primary,
+                  ),
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Text(
+                      'drag to fine-tune',
+                      style: TypeScale.caption.copyWith(
+                        color: Tones.textMuted.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Forward 10 ms',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => widget.onStep(const Duration(milliseconds: 10)),
+            icon: Icon(Icons.chevron_right_rounded, color: Tones.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A ruler that slides under the finger: ticks every 10 px, a taller one
+/// every 50, and a fixed centre line marking the playhead.
+class _TicksPainter extends CustomPainter {
+  _TicksPainter({
+    required this.offset,
+    required this.color,
+    required this.accent,
+  });
+
+  final double offset;
+  final Color color;
+  final Color accent;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final tick = Paint()
+      ..color = color.withValues(alpha: 0.35)
+      ..strokeWidth = 1;
+    final shift = offset % 50;
+    for (var x = shift - 50; x < size.width + 50; x += 10) {
+      final major = ((x - shift) / 10).round() % 5 == 0;
+      final h = major ? size.height * 0.5 : size.height * 0.25;
+      canvas.drawLine(Offset(x, size.height - h), Offset(x, size.height), tick);
+    }
+    canvas.drawLine(
+      Offset(size.width / 2, 0),
+      Offset(size.width / 2, size.height),
+      Paint()
+        ..color = accent
+        ..strokeWidth = 2,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_TicksPainter old) => old.offset != offset;
+}
+
+/// Buttons for the nudge row: four have to sit side by side on a phone.
+final ButtonStyle _compact = TextButton.styleFrom(
+  visualDensity: VisualDensity.compact,
+  padding: const EdgeInsets.symmetric(horizontal: 8),
+  minimumSize: const Size(0, 36),
+);
+
 class _Controls extends StatelessWidget {
   const _Controls({
     required this.mode,
     required this.done,
     required this.onStamp,
+    required this.onStampEnd,
     required this.onUndo,
     required this.onNudge,
     required this.onShiftAll,
@@ -812,6 +1014,7 @@ class _Controls extends StatelessWidget {
   final SyncMode mode;
   final bool done;
   final VoidCallback onStamp;
+  final VoidCallback onStampEnd;
   final VoidCallback onUndo;
   final ValueChanged<Duration> onNudge;
   final ValueChanged<Duration> onShiftAll;
@@ -840,7 +1043,8 @@ class _Controls extends StatelessWidget {
                 // decoder earlier still. Shown as a number because it is the
                 // one setting worth tuning once and then trusting.
                 _Stepper(
-                  label: 'Tap',
+                  // Only taps made while playing; a paused mark is exact.
+                  label: 'Tap delay',
                   value:
                       '${(tapOffset.inMilliseconds / 1000).toStringAsFixed(2)}s',
                   onLess: () => onTapOffset(const Duration(milliseconds: -50)),
@@ -859,20 +1063,23 @@ class _Controls extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                TextButton.icon(
-                  onPressed: () => onNudge(const Duration(milliseconds: -100)),
-                  icon: const Icon(Icons.remove_rounded, size: 16),
-                  label: const Text('100ms'),
+                // The selected mark, 10 ms at a time: marks are exact now, so
+                // a correction is a hair, not a tenth of a second. Text only,
+                // which also keeps the row inside a 412-wide phone.
+                TextButton(
+                  style: _compact,
+                  onPressed: () => onNudge(const Duration(milliseconds: -10)),
+                  child: const Text('−10 ms'),
                 ),
-                TextButton.icon(
+                TextButton(
+                  style: _compact,
                   onPressed: onReplay,
-                  icon: const Icon(Icons.replay_rounded, size: 16),
-                  label: const Text('Replay'),
+                  child: const Text('Replay'),
                 ),
-                TextButton.icon(
-                  onPressed: () => onNudge(const Duration(milliseconds: 100)),
-                  icon: const Icon(Icons.add_rounded, size: 16),
-                  label: const Text('100ms'),
+                TextButton(
+                  style: _compact,
+                  onPressed: () => onNudge(const Duration(milliseconds: 10)),
+                  child: const Text('+10 ms'),
                 ),
                 IconButton(
                   tooltip: 'Undo last mark',
@@ -882,6 +1089,22 @@ class _Controls extends StatelessWidget {
               ],
             ),
             const SizedBox(height: Space.xs),
+            // Words get a start and an end. Tapping along live, Start is all
+            // there is time for; scrubbing paused, mark the start, scrub to
+            // where the word stops, and mark the end.
+            if (mode == SyncMode.words)
+              Padding(
+                padding: const EdgeInsets.only(bottom: Space.xs),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    onPressed: onStampEnd,
+                    icon: const Icon(Icons.last_page_rounded, size: 18),
+                    label: const Text('Mark the end of the word'),
+                  ),
+                ),
+              ),
             SizedBox(
               width: double.infinity,
               height: 64,
@@ -898,7 +1121,7 @@ class _Controls extends StatelessWidget {
                       ? 'All ${mode == SyncMode.lines ? 'lines' : 'words'} timed'
                       : mode == SyncMode.lines
                       ? 'Tap on the line'
-                      : 'Tap on the word',
+                      : 'Mark the start of the word',
                   style: TypeScale.title,
                 ),
               ),

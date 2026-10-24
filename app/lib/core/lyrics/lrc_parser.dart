@@ -17,20 +17,28 @@
 ///
 /// Output: ordered list of [LrcLine] sorted by timestamp.
 class LrcWord {
-  const LrcWord({required this.text, required this.start});
+  const LrcWord({required this.text, required this.start, this.end});
 
   final String text;
   final Duration start;
 
-  /// Words carry only a start. The end is whatever comes next -- the following
-  /// word, or the following line -- so a correction to one timestamp cannot
-  /// leave a stale end behind it. [Lrc.wordEndOf] resolves it.
-  @override
-  bool operator ==(Object other) =>
-      other is LrcWord && other.text == text && other.start == start;
+  /// When the word stops being sung, when the lyric says so: a tag straight
+  /// after the word (`<00:12.10>word<00:12.48>`). NetEase's word timing and
+  /// the editor both write it. Null means "until whatever comes next", which
+  /// [Lrc.wordEndOf] resolves; that is still how most enhanced lyrics read.
+  final Duration? end;
+
+  LrcWord withEnd(Duration? end) => LrcWord(text: text, start: start, end: end);
 
   @override
-  int get hashCode => Object.hash(text, start);
+  bool operator ==(Object other) =>
+      other is LrcWord &&
+      other.text == text &&
+      other.start == start &&
+      other.end == end;
+
+  @override
+  int get hashCode => Object.hash(text, start, end);
 }
 
 class LrcLine {
@@ -84,6 +92,10 @@ class Lrc {
   Duration wordEndOf(int lineIndex, int wordIndex, {Duration? trackEnd}) {
     final line = lines[lineIndex];
     final start = line.words[wordIndex].start;
+    // A stated end is the truth: a held note and the breath after it are
+    // different things, and only the lyric knows which.
+    final stated = line.words[wordIndex].end;
+    if (stated != null && stated > start) return stated;
 
     // The next word by TIME, not by position. On a line that interleaves an
     // ad-lib with the main vocal the following token can start earlier, and
@@ -267,9 +279,23 @@ class LrcParser {
       final from = tags[i].end;
       final to = i + 1 < tags.length ? tags[i + 1].start : body.length;
       final text = body.substring(from, to).trim();
-      // A tag with nothing after it is a timing mark with no word -- drop it
-      // rather than rendering an empty highlight.
-      if (text.isEmpty) continue;
+      if (text.isEmpty) {
+        // A tag with no word after it, written straight against the word
+        // before it, is that word's end: `<00:12.10>word<00:12.48> <…>next`.
+        // Any other empty tag is a stray mark, dropped rather than rendered
+        // as an empty highlight.
+        final before = i > 0
+            ? body.substring(tags[i - 1].end, tags[i].start)
+            : body.substring(0, tags[i].start);
+        final against = before.isNotEmpty && !RegExp(r'\s$').hasMatch(before);
+        if (against && words.isNotEmpty && words.last.end == null) {
+          final end = _durationOf(tags[i]);
+          if (end > words.last.start) {
+            words[words.length - 1] = words.last.withEnd(end);
+          }
+        }
+        continue;
+      }
       words.add(LrcWord(text: text, start: _durationOf(tags[i])));
     }
     return words;
@@ -369,7 +395,13 @@ class LrcParser {
         buf.writeln(l.text);
       } else {
         buf.writeln(
-          l.words.map((w) => '<${_stamp(w.start)}>${w.text}').join(' '),
+          l.words
+              .map(
+                (w) =>
+                    '<${_stamp(w.start)}>${w.text}'
+                    '${w.end == null ? '' : '<${_stamp(w.end!)}>'}',
+              )
+              .join(' '),
         );
       }
     }
@@ -400,11 +432,13 @@ class LrcParser {
     final totalSeconds = d.inSeconds;
     final mm = (totalSeconds ~/ 60).toString().padLeft(2, '0');
     final ss = (totalSeconds % 60).toString().padLeft(2, '0');
-    // Match the LRC convention of 2 fractional digits ("12.34"), not 3.
-    final cs = (d.inMilliseconds.remainder(1000) ~/ 10).toString().padLeft(
-      2,
-      '0',
-    );
+    // The LRC convention is 2 fractional digits ("12.34"). A mark made to the
+    // millisecond keeps all 3 ("12.345"): the timing model learns from these,
+    // and rounding would throw away the precision the editor exists to get.
+    // Every reader here (and most elsewhere) takes either.
+    final ms = d.inMilliseconds.remainder(1000);
+    if (ms % 10 != 0) return '$mm:$ss.${ms.toString().padLeft(3, '0')}';
+    final cs = (ms ~/ 10).toString().padLeft(2, '0');
     return '$mm:$ss.$cs';
   }
 }
