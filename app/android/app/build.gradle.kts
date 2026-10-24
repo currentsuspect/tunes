@@ -53,11 +53,16 @@ android {
         }
     }
 
-    // `--target-platform android-arm64` only bounds what Flutter itself
-    // compiles -- libflutter.so and libapp.so, which it does correctly. Plugin
-    // libraries never pass through that step: they ship prebuilt inside AARs,
-    // so mpv, sqlite3, dartjni and the media_kit helper were still packaged for
-    // x86_64 and armeabi-v7a. 16.5 MB no device this installs on can load.
+    // `--target-platform` only bounds what Flutter itself compiles --
+    // libflutter.so and libapp.so, which it does correctly. Plugin libraries
+    // never pass through that step: they ship prebuilt inside AARs, so mpv,
+    // sqlite3, dartjni and the media_kit helper were still packaged for x86
+    // too, which no phone this installs on can load.
+    //
+    // 32-bit ARM is kept (24 Oct): budget Samsungs (Galaxy A/J) run a 32-bit
+    // Android even on 64-bit chips, and an arm64-only APK told one "not
+    // supported". It costs ~13 MB for everyone, in one APK so the in-app
+    // updater still serves a single file.
     //
     // `ndk.abiFilters` on the release build type was tried first and changed
     // nothing -- build 268 came out byte-identical in size to 267. AGP merges
@@ -75,7 +80,6 @@ android {
             excludes += listOf(
                 "lib/x86/**",
                 "lib/x86_64/**",
-                "lib/armeabi-v7a/**",
             )
         }
     }
