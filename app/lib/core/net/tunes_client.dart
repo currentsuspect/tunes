@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import '../../domain/discography.dart';
 import '../sync/sync_models.dart';
@@ -114,8 +115,7 @@ class TunesClient {
           .transform(utf8.decoder)
           .join()
           .timeout(_bodyTimeout);
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final manifest = TunesManifest.fromJson(json);
+      final manifest = await decodeManifestOffMain(body);
       await _writeCache(body);
       return manifest;
     } on SocketException catch (e) {
@@ -663,10 +663,22 @@ class TunesClient {
     if (f == null) return null;
     try {
       if (!await f.exists()) return null;
-      final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      return TunesManifest.fromJson(json);
+      return await decodeManifestOffMain(await f.readAsString());
     } catch (_) {
       return null;
     }
   }
 }
+
+/// Turns the library file into a [TunesManifest] on another isolate.
+///
+/// It is about 8 MB and 2,400 songs. Decoding it took 230-350 ms on the
+/// laptop (24 Oct) and several times that on a phone, all on the thread that
+/// draws the screen, so every sync that brought a new song froze the app for
+/// a moment. Here the screen keeps moving; only the finished objects are
+/// copied back.
+Future<TunesManifest> decodeManifestOffMain(String body) =>
+    Isolate.run(() => _decodeManifest(body), debugName: 'manifest');
+
+TunesManifest _decodeManifest(String body) =>
+    TunesManifest.fromJson(jsonDecode(body) as Map<String, dynamic>);

@@ -226,6 +226,51 @@ class ManifestStore {
     });
   }
 
+  /// Every song, without lyrics: what the library needs to be drawn.
+  ///
+  /// Lyrics are most of the table (4.2 MB for 1,961 songs on 24 Oct), and
+  /// reading them with everything else made a cold start spend about half a
+  /// second in this one query before anything was on screen; without them
+  /// it is about 20 ms. [lyricsBySha] fills them in a moment later. Lyrics
+  /// someone added on this phone come with the edits, as before.
+  Future<List<ManifestTrack>> allTracksNewestFirstSlim({
+    int limit = 200000,
+  }) async {
+    final columns = [
+      for (final c in _db.tracks.$columns)
+        if (c.name != 'lyrics') c.name,
+    ].join(', ');
+    final rows = await _db
+        .customSelect(
+          'SELECT $columns, NULL AS lyrics FROM tracks '
+          'ORDER BY added_at DESC, sha DESC LIMIT ?',
+          variables: [Variable.withInt(limit)],
+          readsFrom: {_db.tracks},
+        )
+        .get();
+    return _rowsToResolvedTracks([
+      for (final r in rows) _db.tracks.map(r.data),
+    ]);
+  }
+
+  /// The lyrics the slim read left out, by song.
+  Future<Map<String, (String, String?)>> lyricsBySha() async {
+    final rows = await _db
+        .customSelect(
+          'SELECT sha, lyrics, lyrics_source FROM tracks '
+          'WHERE lyrics IS NOT NULL',
+          readsFrom: {_db.tracks},
+        )
+        .get();
+    return {
+      for (final r in rows)
+        r.read<String>('sha'): (
+          r.read<String>('lyrics'),
+          r.readNullable<String>('lyrics_source'),
+        ),
+    };
+  }
+
   Future<List<ManifestTrack>> allTracksNewestFirst({int limit = 200000}) async {
     final rows =
         await (_db.select(_db.tracks)

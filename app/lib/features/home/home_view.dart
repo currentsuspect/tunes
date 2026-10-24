@@ -113,57 +113,18 @@ class HomeView extends StatelessWidget {
       );
     }
 
-    // Group by the act, not the raw credit line. A guest also gets their own
-    // entry so tapping them finds the tracks they appear on -- the "Featured
-    // on" section will hang off this later.
-    final artists = <String, List<ManifestTrack>>{};
-    for (final t in tracks) {
-      artists.putIfAbsent(t.artistKey, () => []).add(t);
-      for (final guest in t.featured) {
-        if (guest != t.artistKey) artists.putIfAbsent(guest, () => []).add(t);
-      }
-    }
-    final artistList = artists.entries.toList()
-      ..sort((a, b) {
-        final byCount = b.value.length.compareTo(a.value.length);
-        if (byCount != 0) return byCount;
-        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
-      });
+    final shelves = _Shelves.of(manifest);
+    final artistList = shelves.artistList;
     final releases = manifest.releases;
-
     final now = DateTime.now();
-    final justAdded = <ManifestTrack>[];
-    final cutoff = now.subtract(const Duration(hours: 24));
-    for (final t in tracks) {
-      if (t.addedAt == null) continue;
-      if (t.addedAt!.isAfter(cutoff)) justAdded.add(t);
-    }
     // A song in Just got is not shown again a shelf lower.
     final gotShas = {for (final (t, _) in justGot) t.sha};
     final justAddedSorted = [
-      for (final t in justAdded)
+      for (final t in shelves.justAdded)
         if (!gotShas.contains(t.sha)) t,
-    ]..sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
-    final missing =
-        releases
-            .where(
-              (r) =>
-                  r.totalTracks != null && r.trackShas.length < r.totalTracks!,
-            )
-            .toList()
-          ..sort(
-            (a, b) =>
-                ((b.totalTracks ?? 0) - b.trackShas.length) -
-                ((a.totalTracks ?? 0) - a.trackShas.length),
-          );
-    // By the year in the date, not the whole string. The box sends a full date
-    // ("2026-09-08") for almost everything, and comparing it to "2026" matched
-    // only the handful stored as a bare year, so this list was a stock three
-    // that never changed however much new music arrived. ISO dates sort as
-    // text, so newest first is a plain comparison.
-    final fresh =
-        releases.where((r) => (r.year ?? '').startsWith('${now.year}')).toList()
-          ..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
+    ];
+    final missing = shelves.missing;
+    final fresh = shelves.fresh;
 
     return TunesRefreshList(
       onRefresh: onRefresh,
@@ -1191,5 +1152,91 @@ class _AlbumsRail extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+/// What Home's shelves are made of, worked out once per library rather than
+/// on every rebuild of the screen. Home rebuilds whenever anything above it
+/// changes (a sync starting, a download, the connection), and grouping 2,400
+/// songs by artist each time cost most of a 90 ms rebuild (24 Oct). Kept
+/// per library object, and redone after an hour for the time-based shelves.
+class _Shelves {
+  _Shelves._(
+    this.at,
+    this.artistList,
+    this.justAdded,
+    this.missing,
+    this.fresh,
+  );
+
+  final DateTime at;
+  final List<MapEntry<String, List<ManifestTrack>>> artistList;
+
+  /// Newest first.
+  final List<ManifestTrack> justAdded;
+  final List<ManifestRelease> missing;
+  final List<ManifestRelease> fresh;
+
+  static final _byLibrary = Expando<_Shelves>('shelves');
+
+  static _Shelves of(TunesManifest manifest) {
+    final now = DateTime.now();
+    final kept = _byLibrary[manifest];
+    if (kept != null && now.difference(kept.at) < const Duration(hours: 1)) {
+      return kept;
+    }
+    final made = _make(manifest, now);
+    _byLibrary[manifest] = made;
+    return made;
+  }
+
+  static _Shelves _make(TunesManifest manifest, DateTime now) {
+    final tracks = manifest.tracks;
+    final releases = manifest.releases;
+    // Group by the act, not the raw credit line. A guest also gets their own
+    // entry so tapping them finds the tracks they appear on -- the "Featured
+    // on" section will hang off this later.
+    final artists = <String, List<ManifestTrack>>{};
+    for (final t in tracks) {
+      artists.putIfAbsent(t.artistKey, () => []).add(t);
+      for (final guest in t.featured) {
+        if (guest != t.artistKey) artists.putIfAbsent(guest, () => []).add(t);
+      }
+    }
+    final artistList = artists.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.length.compareTo(a.value.length);
+        if (byCount != 0) return byCount;
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
+
+    final justAdded = <ManifestTrack>[];
+    final cutoff = now.subtract(const Duration(hours: 24));
+    for (final t in tracks) {
+      if (t.addedAt == null) continue;
+      if (t.addedAt!.isAfter(cutoff)) justAdded.add(t);
+    }
+    justAdded.sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
+    final missing =
+        releases
+            .where(
+              (r) =>
+                  r.totalTracks != null && r.trackShas.length < r.totalTracks!,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                ((b.totalTracks ?? 0) - b.trackShas.length) -
+                ((a.totalTracks ?? 0) - a.trackShas.length),
+          );
+    // By the year in the date, not the whole string. The box sends a full date
+    // ("2026-09-08") for almost everything, and comparing it to "2026" matched
+    // only the handful stored as a bare year, so this list was a stock three
+    // that never changed however much new music arrived. ISO dates sort as
+    // text, so newest first is a plain comparison.
+    final fresh =
+        releases.where((r) => (r.year ?? '').startsWith('${now.year}')).toList()
+          ..sort((a, b) => (b.year ?? '').compareTo(a.year ?? ''));
+    return _Shelves._(now, artistList, justAdded, missing, fresh);
   }
 }

@@ -43,8 +43,12 @@ class GetsController extends ChangeNotifier {
   Future<List<GetJob>> refreshRecent() async {
     try {
       final jobs = await client.soulseekJobs(days: 7);
+      final changed =
+          jobs.length != _recent.length ||
+          [for (var i = 0; i < jobs.length; i++) _same(jobs[i], _recent[i])]
+              .contains(false);
       _recent = jobs;
-      if (!_disposed) notifyListeners();
+      if (changed && !_disposed) notifyListeners();
     } catch (_) {
       // The box is out of reach; try again next time.
     }
@@ -154,6 +158,7 @@ class GetsController extends ChangeNotifier {
 
   void _take(List<GetJob> jobs) {
     final landed = <GetJob>[];
+    var changed = false;
     for (final j in jobs) {
       final before = _bySong[j.songKey];
       if (j.state == GetState.done &&
@@ -161,10 +166,14 @@ class GetsController extends ChangeNotifier {
           before.state != GetState.done) {
         landed.add(j);
       }
+      if (before == null || !_same(before, j)) changed = true;
       _bySong[j.songKey] = j;
     }
     if (_disposed) return;
-    notifyListeners();
+    // Only when something moved. Every check used to tell every listener,
+    // Home among them, so Home was rebuilt every two seconds while a song
+    // was coming (24 Oct).
+    if (changed) notifyListeners();
     if (landed.isNotEmpty) {
       onLanded();
       for (final j in landed) {
@@ -181,6 +190,14 @@ class GetsController extends ChangeNotifier {
       _poll = null;
     }
   }
+
+  static bool _same(GetJob a, GetJob b) =>
+      a.id == b.id &&
+      a.state == b.state &&
+      a.position == b.position &&
+      a.sha == b.sha &&
+      // Whole percents: the bar shows no finer.
+      ((a.progress ?? -1) * 100).round() == ((b.progress ?? -1) * 100).round();
 
   Future<void> _check() async {
     try {

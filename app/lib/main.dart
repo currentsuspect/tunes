@@ -1481,8 +1481,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _hydrateFromStore() async {
     try {
+      final sw = Stopwatch()..start();
       final manifest = await _manifestFromStore();
+      // Cold start, step by step, in the diagnostics log: what a slow open
+      // spent its time on, without a profiler attached.
+      DiagLog.log(
+        'startup: library from store, ${manifest.tracks.length} songs in '
+        '${sw.elapsedMilliseconds} ms',
+      );
       if (mounted) setState(() => _manifest = manifest);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => DiagLog.log(
+          'startup: library on screen ${sw.elapsedMilliseconds} ms after load began',
+        ),
+      );
       await _restoreQueue(manifest);
     } catch (_) {
       // cold start with empty db is fine; _sync will fill it.
@@ -1584,12 +1596,55 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) unawaited(_updates.check());
   }
 
+  /// The library as the phone holds it, without lyrics, which follow a
+  /// moment later ([_fillLyrics]): reading them too kept a cold start off
+  /// the screen for about half a second on the laptop (24 Oct).
   Future<TunesManifest> _manifestFromStore() async {
-    final tracks = await widget.manifestStore.allTracksNewestFirst();
-    final releases = await widget.manifestStore.allReleases();
-    final artists = await widget.manifestStore.allArtists();
+    // Together, not one after another: the database answers on its own
+    // isolate while this one turns the last answer into songs.
+    final (tracks, releases, artists) = await (
+      widget.manifestStore.allTracksNewestFirstSlim(),
+      widget.manifestStore.allReleases(),
+      widget.manifestStore.allArtists(),
+    ).wait;
     widget.library?.update(tracks);
-    return TunesManifest(tracks: tracks, releases: releases, artists: artists);
+    final manifest = TunesManifest(
+      tracks: tracks,
+      releases: releases,
+      artists: artists,
+    );
+    unawaited(_fillLyrics(manifest));
+    return manifest;
+  }
+
+  /// Puts the lyrics into [m] once it is the library on screen. A newer
+  /// library arriving first makes this one moot; that one fills its own.
+  Future<void> _fillLyrics(TunesManifest m) async {
+    final Map<String, (String, String?)> lyrics;
+    try {
+      lyrics = await widget.manifestStore.lyricsBySha();
+    } catch (_) {
+      return;
+    }
+    // The load that asked may not have put m on screen yet.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !identical(_manifest, m) || lyrics.isEmpty) return;
+    final tracks = [
+      for (final t in m.tracks)
+        if (t.lyrics == null && lyrics[t.sha] != null)
+          t.withLyrics(lyrics[t.sha]!.$1, lyrics[t.sha]!.$2)
+        else
+          t,
+    ];
+    widget.library?.update(tracks);
+    setState(
+      () => _manifest = TunesManifest(
+        tracks: tracks,
+        releases: m.releases,
+        artists: m.artists,
+      ),
+    );
+    unawaited(_refreshPlayerTracks());
   }
 
   /// When the sync in flight began, so one that never comes back can be told

@@ -429,4 +429,46 @@ void main() {
       expect(await store.searchTracks('   '), isEmpty);
     });
   });
+
+  group('the slim read', () {
+    ManifestTrack sung(String sha, String lyrics, {DateTime? addedAt}) {
+      final t = _track(sha, addedAt: addedAt);
+      return t.withLyrics(lyrics, 'lrclib');
+    }
+
+    test(
+      'matches the full read but for lyrics, which come separately',
+      () async {
+        final db = _newDb();
+        addTearDown(db.close);
+        final store = ManifestStore(db);
+        await store.apply(
+          _manifest(
+            tracks: [
+              sung('a' * 64, 'la la', addedAt: DateTime(2026, 10, 1)),
+              _track('b' * 64, addedAt: DateTime(2026, 10, 2)),
+              _track('c' * 64),
+            ],
+          ),
+        );
+        final full = await store.allTracksNewestFirst();
+        final slim = await store.allTracksNewestFirstSlim();
+        expect(slim.map((t) => t.sha), full.map((t) => t.sha));
+        expect(slim.map((t) => t.title), full.map((t) => t.title));
+        expect(slim.every((t) => t.lyrics == null), isTrue);
+        final lyrics = await store.lyricsBySha();
+        expect(lyrics, {'a' * 64: ('la la', 'lrclib')});
+      },
+    );
+
+    test('lyrics added on this phone are there from the start', () async {
+      final db = _newDb();
+      addTearDown(db.close);
+      final store = ManifestStore(db);
+      await store.apply(_manifest(tracks: [sung('a' * 64, 'from the box')]));
+      await store.setEdit('a' * 64, 'lyrics', 'mine');
+      final slim = await store.allTracksNewestFirstSlim();
+      expect(slim.single.lyrics, 'mine');
+    });
+  });
 }

@@ -55,4 +55,40 @@ void main() {
     expect(g.jobFor('Skyte', 'In Need')?.state, GetState.failed);
     g.dispose();
   });
+
+  test('a check that finds nothing new tells no one', () async {
+    final box = _Box();
+    final g = GetsController(client: box, onLanded: () {});
+    box.jobs = const [
+      GetJob(
+        id: 'a',
+        title: 'Wings',
+        artist: 'Little Mix',
+        state: GetState.done,
+      ),
+    ];
+    await g.refreshRecent();
+    var told = 0;
+    g.addListener(() => told++);
+    await g.refreshRecent();
+    await g.refreshRecent();
+    expect(told, 0);
+    box.jobs = const [
+      GetJob(
+        id: 'b',
+        title: 'Touch',
+        artist: 'Little Mix',
+        state: GetState.done,
+      ),
+      GetJob(
+        id: 'a',
+        title: 'Wings',
+        artist: 'Little Mix',
+        state: GetState.done,
+      ),
+    ];
+    await g.refreshRecent();
+    expect(told, 1);
+    g.dispose();
+  });
 }

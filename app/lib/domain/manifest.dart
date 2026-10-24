@@ -60,6 +60,37 @@ class ManifestTrack {
   // source identifier.
   final String? lyrics;
   final String? lyricsSource;
+
+  /// The same song with [text] as its lyrics, for filling lyrics in after
+  /// the library is already on screen (ManifestStore, slim read).
+  ManifestTrack withLyrics(String text, String? source) => ManifestTrack(
+    sha: sha,
+    size: size,
+    codec: codec,
+    sampleRate: sampleRate,
+    channels: channels,
+    bitrate: bitrate,
+    durationMs: durationMs,
+    title: title,
+    artist: artist,
+    album: album,
+    year: year,
+    artSha: artSha,
+    releaseId: releaseId,
+    trackNumber: trackNumber,
+    discNumber: discNumber,
+    releaseIds: releaseIds,
+    addedAt: addedAt,
+    totalTracks: totalTracks,
+    embeddedTitle: embeddedTitle,
+    embeddedArtist: embeddedArtist,
+    embeddedAlbum: embeddedAlbum,
+    embeddedYear: embeddedYear,
+    lyrics: text,
+    lyricsSource: source,
+    primaryArtist: primaryArtist,
+    featured: featured,
+  );
   // The act this track belongs to, with guest credits separated out by the
   // daemon. `artist` stays exactly as the tagger wrote it, so it is what we
   // display; `primaryArtist` is what we group by, otherwise one album lands
