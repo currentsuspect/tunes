@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -596,9 +595,17 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
   final ValueNotifier<DropFrame> _drop = ValueNotifier(DropFrame.none);
   final GlobalKey _stackKey = GlobalKey();
 
+  /// The setting, read when it changes rather than on every frame.
+  bool _dropsOn = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _dropsOn = SettingsScope.maybeOf(context)?.dropMoments ?? true;
+  }
+
   void _tickDrop() {
-    final on = mounted && (SettingsScope.maybeOf(context)?.dropMoments ?? true);
-    _drop.value = !on || _moments.isEmpty
+    _drop.value = !_dropsOn || _moments.isEmpty
         ? DropFrame.none
         : dropFrame(_moments, _playhead.value);
   }
@@ -922,19 +929,12 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     }
     // The no-timed-lines case is already handled above, against lrc.untimed
     // rather than a re-derived plain-text blob.
-    // Blurred under a drop moment. Always wrapped, blur or not, so the list
-    // is never remounted (which would reset its scroll).
-    final list = ValueListenableBuilder<DropFrame>(
-      valueListenable: _drop,
-      child: NotificationListener<ScrollNotification>(
-        onNotification: _onScrollNotification,
-        child: _timedList(lrc),
-      ),
-      builder: (context, f, child) => ImageFiltered(
-        enabled: f.blur > 0.05,
-        imageFilter: ImageFilter.blur(sigmaX: f.blur, sigmaY: f.blur),
-        child: child,
-      ),
+    // No blur under a drop moment: blurring the whole list every frame was
+    // what made it stutter on a phone. The lines fade instead (per line,
+    // below), which costs next to nothing.
+    final list = NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: _timedList(lrc),
     );
     final accent = AccentScope.of(context);
     final dropBase = TypeScale.display.copyWith(
