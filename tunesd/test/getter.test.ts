@@ -297,6 +297,18 @@ describe("getting a song", () => {
     expect(jobs.every((j) => j.release === "r1")).toBe(true);
   });
 
+  it("gets an album the library has none of, by its artist and title", async () => {
+    fakeAcquire();
+    const { deps: d, library } = deps();
+    library.add("STARGAZING");
+    const g = new Getter(d);
+    const jobs = await g.completeByName("Travis Scott", "ASTROWORLD");
+    // What is here already stays; the rest is asked for, under one name.
+    expect(jobs.map((j) => j.title)).toEqual(["CAROUSEL", "SICKO MODE"]);
+    expect(new Set(jobs.map((j) => j.release)).size).toBe(1);
+    expect(await g.completeByName("Travis Scott", "Not An Album")).toEqual([]);
+  });
+
   it("waits while a background pass has the downloads folder", async () => {
     const acq = fakeAcquire();
     let pass = true;

@@ -534,6 +534,17 @@ export class Getter {
   async tracklist(releaseId: string): Promise<TracklistEntry[] | null> {
     const r = this.deps.release(releaseId);
     if (!r) return null;
+    return this.tracklistOf(r);
+  }
+
+  private async tracklistOf(r: {
+    id: string;
+    title: string;
+    artist: string;
+    trackShas: string[];
+    totalTracks: number | null;
+  }): Promise<TracklistEntry[] | null> {
+    const releaseId = r.id;
     let cached = this.tracklists.get(releaseId);
     if (!cached || Date.now() - cached.at > 24 * 3600_000) {
       const match = matchAlbum(
@@ -560,6 +571,18 @@ export class Getter {
       ...t,
       have: this.deps.inLibrary({ artist: t.artist, title: t.title, durationMs: t.durationMs }),
     }));
+  }
+
+  /** Queues every song of an album the library holds none of, by its
+   *  artist and title (the artist page's "Get it", 24 Oct): the same track
+   *  list from Deezer and the same gets as completing a held one. */
+  async completeByName(artist: string, title: string, by: string | null = null): Promise<GetJob[]> {
+    const id = `name:${artist.toLowerCase()}|${title.toLowerCase()}`;
+    const list = await this.tracklistOf({ id, title, artist, trackShas: [], totalTracks: null });
+    if (!list) return [];
+    return list
+      .filter((t) => !t.have)
+      .map((t) => this.get({ title: t.title, artist: t.artist, album: title, durationMs: t.durationMs, release: id, by }));
   }
 
   /** Queues every song of an album the library lacks. */

@@ -691,6 +691,23 @@ class TunesClient {
     ];
   }
 
+  /// Gets an album the library has none of, by its artist and title.
+  Future<List<GetJob>> soulseekCompleteAlbum(
+    String artist,
+    String album,
+  ) async {
+    final j = await _json(
+      'POST',
+      '/soulseek/complete',
+      body: {'artist': artist, 'album': album},
+      timeout: const Duration(seconds: 30),
+    );
+    return [
+      for (final x in j['jobs'] as List<dynamic>? ?? const [])
+        GetJob.fromJson(x as Map<String, dynamic>),
+    ];
+  }
+
   /// An album's full track list, or null when the box does not know it.
   Future<List<TracklistEntry>?> tracklist(String releaseId) async {
     try {
