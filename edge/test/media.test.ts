@@ -223,4 +223,30 @@ describe("media edge", () => {
       expect(res?.status).toBe(404);
     });
   });
+
+  describe("a shared moment", () => {
+    const token = () =>
+      signAccessToken(
+        { sub: "acct-1", did: "dev-1", iat: NOW, exp: NOW + 600 },
+        ENV.ACCESS_SECRET,
+      );
+
+    it("passes a POST with a good bearer token through to origin", async () => {
+      expect(
+        await verdict(`/clip/${SHA}?from=1000&to=5000`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${await token()}` },
+        }),
+      ).toBeNull();
+    });
+
+    it("refuses one with no token, and anything but POST", async () => {
+      expect((await verdict(`/clip/${SHA}`, { method: "POST" }))?.status).toBe(401);
+      const res = await verdict(`/clip/${SHA}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${await token()}` },
+      });
+      expect(res?.status).toBe(405);
+    });
+  });
 });

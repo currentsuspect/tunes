@@ -37,6 +37,7 @@ import { publishAudioFile, selectAudioToBackfill, selectNewRows } from "./cloudp
 import { AudioPusher } from "./audiopush.js";
 import { coalesce, playableOnly, Wake } from "./ingest.js";
 import { OnDemandFetcher } from "./ondemand.js";
+import { ClipMaker } from "./clip.js";
 import { UpdateFeed } from "./updates.js";
 import { State } from "./state.js";
 import { ObjectStore } from "./store.js";
@@ -1815,7 +1816,8 @@ async function main(): Promise<void> {
         lyricStore,
         // A listener's lyrics go to the edge soon, not at the next scan.
         () => publishSoon.request(),
-        getter
+        getter,
+        new ClipMaker(join(env.dataDir, "tmp-clips"))
       );
       await server.start();
       // Lyrics are asked for on their own beat as well as after each scan: a

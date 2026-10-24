@@ -218,6 +218,14 @@ class _FakeClient implements TunesClient {
   Future<bool> putLyrics(String sha, String text) async => true;
 
   @override
+  Future<Uint8List?> clip(
+    String sha,
+    Duration from,
+    Duration to, {
+    Uint8List? card,
+  }) async => null;
+
+  @override
   Future<List<FoundSong>> soulseekSearch(String q) async => const [];
 
   @override

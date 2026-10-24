@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ObjectStore } from "./store.js";
 import type { Log } from "./logger.js";
 import type { OnDemandFetcher } from "./ondemand.js";
+import { kMaxCardBytes, parseSpan, type ClipMaker } from "./clip.js";
 import type { Getter, GetRequest } from "./getter.js";
 import type { ManifestV3 } from "./manifest.js";
 import { releaseArtKey } from "./manifest.js";
@@ -85,7 +86,10 @@ export class ManifestServer {
     private readonly onLyricsChanged: (() => void) | null = null,
     /// Soulseek search and gets on request (getter.ts), or null when slskd is
     /// not set up: those routes then answer 503.
-    private readonly getter: Getter | null = null
+    private readonly getter: Getter | null = null,
+    /// Cuts shareable moments of a song (clip.ts), or null: POST /clip then
+    /// answers 503.
+    private readonly clips: ClipMaker | null = null
   ) {
     this.externalCache = new Map();
   }
@@ -226,6 +230,62 @@ export class ManifestServer {
           this.onLyricsChanged?.();
           res.writeHead(204);
           res.end();
+          return;
+        }
+
+        // A moment of a song to share: the span of a lyric line, as video over
+        // the card the phone drew (PNG body), or as audio alone (no body).
+        const clipMatch = /^\/clip\/([0-9a-f]{64})$/.exec(url.pathname);
+        if (clipMatch) {
+          if (req.method !== "POST") {
+            res.writeHead(405, { allow: "POST" });
+            res.end();
+            return;
+          }
+          if (!this.clips) {
+            res.writeHead(503, { "content-type": "text/plain" });
+            res.end("clips are not set up");
+            return;
+          }
+          const sha = clipMatch[1] ?? "";
+          const span = parseSpan(url.searchParams.get("from"), url.searchParams.get("to"));
+          if (typeof span === "string") {
+            res.writeHead(400, { "content-type": "text/plain" });
+            res.end(span);
+            return;
+          }
+          const card = await readBytes(req, kMaxCardBytes);
+          if (card === null) {
+            res.writeHead(413, { "content-type": "text/plain" });
+            res.end("card too large");
+            return;
+          }
+          if (this.onDemand && !this.store.has(sha)) {
+            if ((await this.onDemand.fetchTrack(sha)) === null) {
+              res.writeHead(404, { "content-type": "text/plain" });
+              res.end("not found");
+              return;
+            }
+          }
+          if (!this.store.has(sha)) {
+            res.writeHead(404, { "content-type": "text/plain" });
+            res.end("not found");
+            return;
+          }
+          const release = this.store.beginRead(sha);
+          let made: { path: string; mime: string } | null = null;
+          try {
+            made = await this.clips.make(this.store.pathOf(sha), span, card.length > 0 ? card : null);
+            const body = await readFile(made.path);
+            res.writeHead(200, { "content-type": made.mime, "content-length": body.length });
+            res.end(body);
+          } catch (e) {
+            res.writeHead(500, { "content-type": "text/plain" });
+            res.end(`clip failed: ${String(e).slice(0, 200)}`);
+          } finally {
+            release();
+            if (made) await this.clips.discard(made.path);
+          }
           return;
         }
 
@@ -559,6 +619,22 @@ export class ManifestServer {
 }
 
 /** The body of a request as text, or null when it is larger than [limit]. */
+/** A request body as bytes, or null when it is larger than [limit]. */
+async function readBytes(
+  req: import("node:http").IncomingMessage,
+  limit: number,
+): Promise<Uint8Array | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    size += buf.length;
+    if (size > limit) return null;
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
 async function readBody(
   req: import("node:http").IncomingMessage,
   limit: number,

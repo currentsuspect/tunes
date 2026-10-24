@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:isolate';
 
 import '../../domain/discography.dart';
@@ -433,6 +434,46 @@ class TunesClient {
       return res.statusCode == 204;
     } catch (_) {
       return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// A moment of [sha] from [from] to [to], cut by the box (tunesd clip.ts):
+  /// a short video over [card] (a PNG), or audio alone when [card] is null.
+  /// Null on any failure; never throws.
+  Future<Uint8List?> clip(
+    String sha,
+    Duration from,
+    Duration to, {
+    Uint8List? card,
+  }) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final req = await client.postUrl(
+        Uri.parse(
+          '$baseUrl/clip/$sha'
+          '?from=${from.inMilliseconds}&to=${to.inMilliseconds}',
+        ),
+      );
+      await _authorize(req);
+      if (card != null) {
+        req.headers.contentType = ContentType('image', 'png');
+        req.add(card);
+      }
+      // Cutting is quick, but an archived song is fetched first.
+      final res = await req.close().timeout(const Duration(seconds: 90));
+      if (res.statusCode != 200) {
+        await res.drain<void>();
+        return null;
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in res.timeout(const Duration(seconds: 90))) {
+        bytes.add(chunk);
+      }
+      return bytes.takeBytes();
+    } catch (_) {
+      return null;
     } finally {
       client.close(force: true);
     }
