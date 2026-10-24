@@ -35,9 +35,14 @@ export function joinDiscography(
 ): JoinedGroup[] {
   return groups.map((g) => {
     const byId = releases.find((r) => r.groupId != null && r.groupId === g.id);
+    // An edition held counts as the album: a song on "ADL (Deluxe)" is on
+    // ADL too, and "2093 (P2)" is 2093 with more songs. The artist page said
+    // both were missing while Discover (missingFromCollection) did not (24
+    // Oct). The exact title first, so an album held as itself wins.
     const byTitle =
       byId ??
-      releases.find((r) => r.groupId == null && normalize(r.title) === normalize(g.title));
+      releases.find((r) => r.groupId == null && normalize(r.title) === normalize(g.title)) ??
+      releases.find((r) => r.groupId == null && baseTitleKey(r.title) === baseTitleKey(g.title));
     return {
       ...g,
       owned: byTitle != null,

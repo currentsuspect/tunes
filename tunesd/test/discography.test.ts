@@ -34,6 +34,36 @@ describe("joinDiscography", () => {
     expect(bs?.ownedTracks).toBe(1);
   });
 
+  it("counts an edition held as its album: ADL (Deluxe) is ADL, 2093 (P2) is 2093", () => {
+    // Yeat, 24 Oct: the artist page called both missing.
+    const yeat: DiscographyGroup[] = [
+      { id: "y1", title: "ADL", type: "Album", year: "2026", date: null },
+      { id: "y2", title: "2093", type: "Album", year: "2024", date: null },
+      { id: "y3", title: "2 Alivë", type: "Album", year: "2022", date: null },
+    ];
+    const held = [
+      { id: "name:adl", groupId: null, title: "ADL (Deluxe)", trackShas: ["g"], totalTracks: 22 },
+      { id: "name:2093", groupId: null, title: "2093 (P2)", trackShas: ["a", "b"], totalTracks: 24 },
+      { id: "name:alive", groupId: null, title: "Alivë", trackShas: ["c"], totalTracks: 22 },
+    ];
+    const joined = joinDiscography(yeat, held);
+    expect(joined.find((g) => g.id === "y1")).toMatchObject({ owned: true, releaseId: "name:adl", ownedTracks: 1 });
+    expect(joined.find((g) => g.id === "y2")).toMatchObject({ owned: true, releaseId: "name:2093" });
+    // Not a loose match: Alivë is not 2 Alivë.
+    expect(joined.find((g) => g.id === "y3")?.owned).toBe(false);
+  });
+
+  it("prefers the album held as itself over an edition of it", () => {
+    const joined = joinDiscography(
+      [{ id: "y1", title: "ADL", type: "Album", year: null, date: null }],
+      [
+        { id: "name:deluxe", groupId: null, title: "ADL (Deluxe)", trackShas: ["g"], totalTracks: 22 },
+        { id: "name:adl", groupId: null, title: "ADL", trackShas: ["a", "b"], totalTracks: 21 },
+      ]
+    );
+    expect(joined[0]?.releaseId).toBe("name:adl");
+  });
+
   it("marks unmatched groups as not owned", () => {
     const joined = joinDiscography(groups, releases);
     const ls = joined.find((g) => g.id === "g4");
