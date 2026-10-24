@@ -64,6 +64,7 @@ class PlayheadClock extends ValueNotifier<Duration> {
       now: DateTime.now(),
       playing: player.playing,
       duration: player.duration,
+      rate: player.rate,
     );
   }
 

@@ -8,6 +8,7 @@ import '../../core/audio/tune_player.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../../core/lyrics/sync_draft.dart';
+import '../../core/lyrics/word_window.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
 
@@ -106,6 +107,8 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   @override
   void dispose() {
     _preview?.cancel();
+    // The speed belongs to the editor; the song plays on at its own.
+    if (_rate != 1) widget.player.setRate(1);
     _playhead.dispose();
     _scroll.dispose();
     super.dispose();
@@ -122,21 +125,102 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   /// a quarter of a second away from where it was found (24 Oct).
   Duration get _markAt {
     if (!widget.player.playing) return _now;
-    final t = _now + _tapOffset;
+    // Slowed down, a reaction costs less of the song.
+    final t = _now + _tapOffset * _rate;
     return t.isNegative ? Duration.zero : t;
   }
 
-  /// The word an End mark closes: the one last started, or picked.
-  int? _lastStarted;
+  /// Words are timed one at a time, in two steps: find the start, then the
+  /// end (word_window.dart). Nobody can tap word after word as fast as a
+  /// song sings them, so each step is a small window to scrub, paused.
+  WordPhase _phase = WordPhase.start;
 
-  void _stampEnd() {
-    final words = _draft.wordStarts[_selectedLine];
-    final w = _lastStarted ?? _draft.lastMarkedWord(_selectedLine);
-    if (w == null || w >= words.length || words[w] == null) return;
-    final at = _markAt;
-    if (at <= words[w]!) return;
-    _dirty = true;
-    setState(() => _draft.wordEnds[_selectedLine][w] = at);
+  /// How long a window to give a word's end. Picked by the listener, kept.
+  Duration _endRange = const Duration(milliseconds: 800);
+
+  /// Playback speed in the editor: slowed, a word can be caught by ear.
+  double _rate = 1;
+
+  /// The word being timed: the one picked, else the first without a start.
+  int get _word {
+    final n = _draft.wordStarts[_selectedLine].length;
+    final w = _selectedWord ?? _draft.nextUntimedWord(_selectedLine) ?? n - 1;
+    return w.clamp(0, n - 1);
+  }
+
+  /// Where the next line starts, the far edge of a start window.
+  Duration? get _lineEnd {
+    for (var i = _selectedLine + 1; i < _draft.lines.length; i++) {
+      final t = _draft.lineStarts[i];
+      if (t != null) return t;
+    }
+    return null;
+  }
+
+  ({Duration from, Duration to}) get _window => wordWindow(
+    _draft,
+    _selectedLine,
+    _word,
+    _phase,
+    endRange: _endRange,
+    lineEnd: _lineEnd,
+  );
+
+  /// Puts the playhead at the start of the window, paused: where the sound
+  /// being looked for can first be.
+  void _toWindow() {
+    _preview?.cancel();
+    if (widget.player.playing) widget.player.pause();
+    widget.player.seek(_window.from);
+  }
+
+  /// Plays the window once and comes back to where the playhead was, so a
+  /// spot found by scrubbing is not lost by listening.
+  void _hearWindow() {
+    final w = _window;
+    final back = _now;
+    _preview?.cancel();
+    widget.player.seek(w.from);
+    if (!widget.player.playing) widget.player.play();
+    final span = w.to - w.from;
+    _preview = Timer(
+      Duration(milliseconds: (span.inMilliseconds / _rate).round()),
+      () {
+        widget.player.pause();
+        widget.player.seek(back >= w.from && back <= w.to ? back : w.from);
+      },
+    );
+  }
+
+  /// Scrubbed within the window: paused, exactly there.
+  void _seekTo(Duration t) {
+    _preview?.cancel();
+    if (widget.player.playing) widget.player.pause();
+    widget.player.seek(t.isNegative ? Duration.zero : t);
+  }
+
+  void _setEndRange(Duration r) {
+    setState(() => _endRange = r);
+    unawaited(_settings?.setLyricsEndRange(r) ?? Future.value());
+    if (_phase == WordPhase.end) _toWindow();
+  }
+
+  void _cycleRate() {
+    const rates = [1.0, 0.75, 0.5];
+    final next = rates[(rates.indexOf(_rate) + 1) % rates.length];
+    setState(() => _rate = next);
+    widget.player.setRate(next);
+  }
+
+  /// Moves on without an end: the word then lasts until the next one starts.
+  void _skipEnd() {
+    final n = _draft.wordStarts[_selectedLine].length;
+    final w = _word;
+    setState(() {
+      _phase = WordPhase.start;
+      _selectedWord = w + 1 < n ? w + 1 : null;
+    });
+    _toWindow();
   }
 
   /// Plays a moment from [at] and comes back to it, so a scrubbed spot can be
@@ -171,34 +255,52 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
       } else {
         final words = _draft.wordStarts[_selectedLine];
         if (words.isEmpty) return;
-        final w = _selectedWord ?? _draft.nextUntimedWord(_selectedLine);
-        if (w == null) return;
-        words[w] = _markAt;
-        _lastStarted = w;
-        // Walk on so a run-through keeps working, and stop at the end rather
-        // than wrapping round and overwriting the first word.
-        _selectedWord = w + 1 < words.length ? w + 1 : null;
+        final w = _word;
+        final at = _markAt;
+        if (_phase == WordPhase.start) {
+          words[w] = at;
+          // An end left over from a different start would be wrong now.
+          final end = _draft.wordEnds[_selectedLine][w];
+          if (end != null && end <= at) {
+            _draft.wordEnds[_selectedLine][w] = null;
+          }
+          // Now its end, in a window from just after this start.
+          _selectedWord = w;
+          _phase = WordPhase.end;
+        } else {
+          final start = words[w];
+          if (start == null || at <= start) return;
+          _draft.wordEnds[_selectedLine][w] = at;
+          // Walk on, and stop at the line's end rather than wrapping round
+          // and overwriting the first word.
+          _selectedWord = w + 1 < words.length ? w + 1 : null;
+          _phase = WordPhase.start;
+        }
       }
     });
     _scrollToCursor();
+    // Paused, the next step's window is put in front of you. Playing, the
+    // music carries on: a live tap-along is still possible.
+    if (_mode == SyncMode.words && !widget.player.playing) _toWindow();
   }
 
   /// Puts the playhead just before a word so it can be heard and re-timed.
   /// Aiming at a word by eye is guesswork; this is the difference between
   /// correcting a mark and inventing one.
+  ///
+  /// Picking a word opens its start window; picking it again, once it has a
+  /// start, opens its end window. The playhead goes to the window, paused --
+  /// not back to the start of the line.
   void _auditionWord(int index) {
-    const leadIn = Duration(milliseconds: 700);
-    final at =
-        _draft.wordStarts[_selectedLine][index] ??
-        _draft.lineStarts[_selectedLine];
+    final hasStart = _draft.wordStarts[_selectedLine][index] != null;
     setState(() {
+      final again = _selectedWord == index;
       _selectedWord = index;
-      // An End mark now closes this word: pick it, scrub, mark its end.
-      if (_draft.wordStarts[_selectedLine][index] != null) _lastStarted = index;
+      _phase = again && hasStart && _phase == WordPhase.start
+          ? WordPhase.end
+          : WordPhase.start;
     });
-    if (at == null) return;
-    widget.player.seek(at > leadIn ? at - leadIn : Duration.zero);
-    if (!widget.player.playing) widget.player.play();
+    _toWindow();
   }
 
   /// Same idea for a whole line: select it and play from just before it.
@@ -256,9 +358,11 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         if (_draft.wordEnds[_selectedLine][w] != null) {
           _draft.wordEnds[_selectedLine][w] = null;
           _selectedWord = w;
+          _phase = WordPhase.end;
           return;
         }
         _draft.wordStarts[_selectedLine][w] = null;
+        _phase = WordPhase.start;
         // Leave the cursor on the word just cleared, so undo then re-tap
         // fixes one word without disturbing the rest.
         _selectedWord = w;
@@ -316,6 +420,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
   /// Replays from just before the selected line, which is how you check a
   /// timing rather than guessing at it.
   void _replayLine() {
+    if (_mode == SyncMode.words) return _hearWindow();
     final start = _draft.lineStarts[_selectedLine];
     if (start == null) return;
     const leadIn = Duration(milliseconds: 600);
@@ -399,6 +504,7 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
     if (settings != null && _settings == null) {
       _settings = settings;
       _tapOffset = settings.lyricsTapOffset;
+      _endRange = settings.lyricsEndRange;
     }
   }
 
@@ -474,13 +580,35 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
         ),
         body: Column(
           children: [
-            _Transport(player: widget.player, playhead: _playhead),
-            _Scrubber(player: widget.player, playhead: _playhead),
-            _FineScrub(
+            _Transport(
+              player: widget.player,
               playhead: _playhead,
-              onStep: _step,
-              onRelease: () => _hearFrom(_now),
+              rate: _rate,
+              onRate: _cycleRate,
             ),
+            _Scrubber(player: widget.player, playhead: _playhead),
+            if (_mode == SyncMode.words &&
+                _draft.wordStarts[_selectedLine].isNotEmpty)
+              _WindowScrub(
+                window: _window,
+                playhead: _playhead,
+                marks: [
+                  for (final t in [
+                    ..._draft.wordStarts[_selectedLine],
+                    ..._draft.wordEnds[_selectedLine],
+                  ])
+                    ?t,
+                ],
+                onSeek: _seekTo,
+                onStep: _step,
+                onRelease: () => _hearFrom(_now),
+              )
+            else
+              _FineScrub(
+                playhead: _playhead,
+                onStep: _step,
+                onRelease: () => _hearFrom(_now),
+              ),
             Divider(height: 1, thickness: 0.5, color: Tones.hairline),
             _ModeBar(
               mode: _mode,
@@ -518,9 +646,29 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
               mode: _mode,
               done: _mode == SyncMode.lines
                   ? _draft.nextUntimedLine == null
-                  : _draft.nextUntimedWord(_selectedLine) == null,
+                  : _draft.wordStarts[_selectedLine].isEmpty ||
+                        _selectedWord == null &&
+                            _draft.nextUntimedWord(_selectedLine) == null &&
+                            _phase == WordPhase.start,
+              primary: _mode == SyncMode.lines
+                  ? 'Tap on the line'
+                  : _draft.wordStarts[_selectedLine].isEmpty
+                  ? 'No words on this line'
+                  : _phase == WordPhase.start
+                  ? 'Mark the start of “${_draft.wordsOf(_selectedLine)[_word]}”'
+                  : 'Mark the end of “${_draft.wordsOf(_selectedLine)[_word]}”',
+              wordStep:
+                  _mode == SyncMode.words &&
+                      _draft.wordStarts[_selectedLine].isNotEmpty
+                  ? _WordStep(
+                      phase: _phase,
+                      endRange: _endRange,
+                      onHear: _hearWindow,
+                      onRange: _setEndRange,
+                      onSkipEnd: _skipEnd,
+                    )
+                  : null,
               onStamp: _stamp,
-              onStampEnd: _stampEnd,
               onUndo: _undo,
               onNudge: _nudge,
               onShiftAll: _shiftAll,
@@ -536,10 +684,17 @@ class _LyricsSyncPageState extends State<LyricsSyncPage>
 }
 
 class _Transport extends StatelessWidget {
-  const _Transport({required this.player, required this.playhead});
+  const _Transport({
+    required this.player,
+    required this.playhead,
+    required this.rate,
+    required this.onRate,
+  });
 
   final TunePlayer player;
   final ValueListenable<Duration> playhead;
+  final double rate;
+  final VoidCallback onRate;
 
   String _fmt(Duration d) {
     final m = d.inMinutes;
@@ -595,6 +750,21 @@ class _Transport extends StatelessWidget {
               style: TypeScale.body.copyWith(
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
+            ),
+          ),
+          // Slower, so a word can be caught. The pitch stays put.
+          TextButton(
+            onPressed: onRate,
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              minimumSize: const Size(44, 36),
+            ),
+            child: Text(
+              rate == 1
+                  ? '1×'
+                  : rate == 0.75
+                  ? '¾×'
+                  : '½×',
             ),
           ),
         ],
@@ -990,6 +1160,240 @@ class _TicksPainter extends CustomPainter {
   bool shouldRepaint(_TicksPainter old) => old.offset != offset;
 }
 
+/// The step being timed, and what helps with it: hear the window, choose how
+/// long an end window is (kept for next time), or move on without an end.
+class _WordStep extends StatelessWidget {
+  const _WordStep({
+    required this.phase,
+    required this.endRange,
+    required this.onHear,
+    required this.onRange,
+    required this.onSkipEnd,
+  });
+
+  final WordPhase phase;
+  final Duration endRange;
+  final VoidCallback onHear;
+  final ValueChanged<Duration> onRange;
+  final VoidCallback onSkipEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    String label(Duration d) =>
+        '${(d.inMilliseconds / 1000).toStringAsFixed(d.inMilliseconds % 1000 == 0 ? 0 : 1)}s';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.xs),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              TextButton.icon(
+                style: _compact,
+                onPressed: onHear,
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: const Text('Hear this bit'),
+              ),
+              const Spacer(),
+              if (phase == WordPhase.end)
+                TextButton(
+                  style: _compact,
+                  onPressed: onSkipEnd,
+                  child: const Text('No end, next word'),
+                ),
+            ],
+          ),
+          if (phase == WordPhase.end)
+            Row(
+              children: [
+                Text('End window', style: TypeScale.caption),
+                const SizedBox(width: Space.sm),
+                Expanded(
+                  child: Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final r in kEndRanges)
+                        ChoiceChip(
+                          label: Text(label(r)),
+                          selected: r == endRange,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => onRange(r),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The scrubber for one step of a word: the whole strip is the window (from
+/// the last mark to the end of the line for a start; a picked length after
+/// the start for an end), so a drag across it is fine-grained however long
+/// the song. Drag or tap anywhere to go there, paused; let go and a moment
+/// plays. Other marks on the line show as ticks.
+class _WindowScrub extends StatelessWidget {
+  const _WindowScrub({
+    required this.window,
+    required this.playhead,
+    required this.marks,
+    required this.onSeek,
+    required this.onStep,
+    required this.onRelease,
+  });
+
+  final ({Duration from, Duration to}) window;
+  final ValueListenable<Duration> playhead;
+  final List<Duration> marks;
+  final ValueChanged<Duration> onSeek;
+  final ValueChanged<Duration> onStep;
+  final VoidCallback onRelease;
+
+  String _s(Duration d) => (d.inMilliseconds / 1000).toStringAsFixed(2);
+
+  @override
+  Widget build(BuildContext context) {
+    final span = (window.to - window.from).inMilliseconds;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Space.md),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Back 10 ms',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => onStep(const Duration(milliseconds: -10)),
+            icon: Icon(Icons.chevron_left_rounded, color: Tones.text),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) {
+                Duration at(double x) =>
+                    window.from +
+                    Duration(
+                      milliseconds: (span * (x / box.maxWidth).clamp(0.0, 1.0))
+                          .round(),
+                    );
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => onSeek(at(d.localPosition.dx)),
+                  onTapUp: (_) => onRelease(),
+                  onHorizontalDragUpdate: (d) => onSeek(at(d.localPosition.dx)),
+                  onHorizontalDragEnd: (_) => onRelease(),
+                  child: ValueListenableBuilder<Duration>(
+                    valueListenable: playhead,
+                    builder: (context, pos, _) => SizedBox(
+                      height: 44,
+                      child: CustomPaint(
+                        painter: _WindowPainter(
+                          from: window.from,
+                          to: window.to,
+                          playhead: pos,
+                          marks: marks,
+                          color: Tones.textMuted,
+                          accent: Tones.primary,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(_s(window.from), style: TypeScale.caption),
+                              const Spacer(),
+                              Text(_s(window.to), style: TypeScale.caption),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: 'Forward 10 ms',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => onStep(const Duration(milliseconds: 10)),
+            icon: Icon(Icons.chevron_right_rounded, color: Tones.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WindowPainter extends CustomPainter {
+  _WindowPainter({
+    required this.from,
+    required this.to,
+    required this.playhead,
+    required this.marks,
+    required this.color,
+    required this.accent,
+  });
+
+  final Duration from;
+  final Duration to;
+  final Duration playhead;
+  final List<Duration> marks;
+  final Color color;
+  final Color accent;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final span = (to - from).inMilliseconds;
+    if (span <= 0) return;
+    double x(Duration t) => (t - from).inMilliseconds / span * size.width;
+    final base = size.height - 2;
+    final tick = Paint()
+      ..color = color.withValues(alpha: 0.35)
+      ..strokeWidth = 1;
+    // A tick every 50 ms, taller every 250: the ruler says how much a drag is.
+    final firstTick = (from.inMilliseconds ~/ 50 + 1) * 50;
+    for (var t = firstTick; t < to.inMilliseconds; t += 50) {
+      final major = t % 250 == 0;
+      final px = x(Duration(milliseconds: t));
+      canvas.drawLine(
+        Offset(px, base - (major ? 12 : 6)),
+        Offset(px, base),
+        tick,
+      );
+    }
+    canvas.drawLine(
+      Offset(0, base),
+      Offset(size.width, base),
+      tick..strokeWidth = 1.5,
+    );
+    final mark = Paint()
+      ..color = color.withValues(alpha: 0.8)
+      ..strokeWidth = 2;
+    for (final m in marks) {
+      if (m < from || m > to) continue;
+      canvas.drawLine(Offset(x(m), base - 18), Offset(x(m), base), mark);
+    }
+    if (playhead >= from && playhead <= to) {
+      final px = x(playhead);
+      canvas.drawLine(
+        Offset(px, 14),
+        Offset(px, size.height),
+        Paint()
+          ..color = accent
+          ..strokeWidth = 2.5,
+      );
+      canvas.drawCircle(Offset(px, 14), 5, Paint()..color = accent);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WindowPainter old) =>
+      old.playhead != playhead ||
+      old.from != from ||
+      old.to != to ||
+      old.marks.length != marks.length;
+}
+
 /// Buttons for the nudge row: four have to sit side by side on a phone.
 final ButtonStyle _compact = TextButton.styleFrom(
   visualDensity: VisualDensity.compact,
@@ -1001,8 +1405,9 @@ class _Controls extends StatelessWidget {
   const _Controls({
     required this.mode,
     required this.done,
+    required this.primary,
+    required this.wordStep,
     required this.onStamp,
-    required this.onStampEnd,
     required this.onUndo,
     required this.onNudge,
     required this.onShiftAll,
@@ -1013,8 +1418,9 @@ class _Controls extends StatelessWidget {
 
   final SyncMode mode;
   final bool done;
+  final String primary;
+  final Widget? wordStep;
   final VoidCallback onStamp;
-  final VoidCallback onStampEnd;
   final VoidCallback onUndo;
   final ValueChanged<Duration> onNudge;
   final ValueChanged<Duration> onShiftAll;
@@ -1089,22 +1495,7 @@ class _Controls extends StatelessWidget {
               ],
             ),
             const SizedBox(height: Space.xs),
-            // Words get a start and an end. Tapping along live, Start is all
-            // there is time for; scrubbing paused, mark the start, scrub to
-            // where the word stops, and mark the end.
-            if (mode == SyncMode.words)
-              Padding(
-                padding: const EdgeInsets.only(bottom: Space.xs),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: OutlinedButton.icon(
-                    onPressed: onStampEnd,
-                    icon: const Icon(Icons.last_page_rounded, size: 18),
-                    label: const Text('Mark the end of the word'),
-                  ),
-                ),
-              ),
+            ?wordStep,
             SizedBox(
               width: double.infinity,
               height: 64,
@@ -1119,9 +1510,9 @@ class _Controls extends StatelessWidget {
                 child: Text(
                   done
                       ? 'All ${mode == SyncMode.lines ? 'lines' : 'words'} timed'
-                      : mode == SyncMode.lines
-                      ? 'Tap on the line'
-                      : 'Mark the start of the word',
+                      : primary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TypeScale.title,
                 ),
               ),

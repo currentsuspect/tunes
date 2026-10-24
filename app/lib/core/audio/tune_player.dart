@@ -58,6 +58,11 @@ abstract class TunePlayer extends ChangeNotifier {
   /// ease music back in after another app has had the output. A no-op where a
   /// player has no such control.
   void setVolume(double level) {}
+
+  /// Playback speed, 1 normal. The lyric maker slows a song down so a word
+  /// can be caught; nothing else changes it. A no-op where a player cannot.
+  double get rate => 1;
+  void setRate(double rate) {}
   void toggle();
   void next();
   void previous();
@@ -638,6 +643,20 @@ class MediaKitTunePlayer extends TunePlayer {
     if (_queue.isEmpty) return;
     _claimLive();
     _player?.pause();
+  }
+
+  double _rate = 1;
+
+  @override
+  double get rate => _rate;
+
+  @override
+  void setRate(double rate) {
+    _rate = rate.clamp(0.25, 2.0);
+    // mpv keeps the pitch (scaletempo) by default, so slowed words still
+    // sound like themselves.
+    unawaited(_player?.setRate(_rate) ?? Future.value());
+    notifyListeners();
   }
 
   @override

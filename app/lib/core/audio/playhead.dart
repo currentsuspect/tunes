@@ -28,9 +28,11 @@ Duration projectPosition({
   required DateTime now,
   required bool playing,
   Duration? duration,
+  double rate = 1,
 }) {
   if (!playing) return _clamp(reported, duration);
-  final elapsed = now.difference(reportedAt);
+  // Slowed down, the song moves less than the clock does.
+  final elapsed = now.difference(reportedAt) * rate;
   // A backwards or absurd clock reading means the fix is not usable; fall back
   // to the reported value rather than projecting nonsense.
   if (elapsed.isNegative) return _clamp(reported, duration);

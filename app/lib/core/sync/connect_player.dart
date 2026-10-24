@@ -274,6 +274,12 @@ class ConnectPlayer extends TunePlayer {
 
   @override
   void setVolume(double level) => local.setVolume(level);
+
+  @override
+  double get rate => local.rate;
+
+  @override
+  void setRate(double rate) => local.setRate(rate);
   @override
   Future<void> setGapless(bool on) => local.setGapless(on);
   @override
