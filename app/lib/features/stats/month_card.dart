@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/platform/reveal.dart';
 import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
@@ -558,7 +559,16 @@ Future<void> shareMonthCard(
         'title': '${recap.monthName} in Tunes',
       });
     } else {
-      messenger?.showSnackBar(SnackBar(content: Text('Saved to ${file.path}')));
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('Saved to ${file.path}'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'Show',
+            onPressed: () => revealFile(file),
+          ),
+        ),
+      );
     }
   } catch (_) {
     messenger?.showSnackBar(
