@@ -28,20 +28,21 @@ People without a machine (Angel) keep using the owner's box, which stays the def
 ```
 phone ──► tunes.aestra.studio (Worker: auth, then route by account)
              ├─ acct-angel, acct-dylan ──► owner's box   (tunnel: tunes.aestra.studio)
-             ├─ acct-cedric            ──► Cedric's box  (tunnel: <box-id>.box.aestra.studio)
+             ├─ acct-cedric            ──► Cedric's box  (tunnel: <name>-box.aestra.studio)
              └─ /t/<sha> (cloud path)  ──► tunes-fetch   (R2, else the shared Telegram archive)
 ```
 
 ### 1. A box is a tunnel the owner hands out
 
 Each box gets a Cloudflare Tunnel created **in the owner's Cloudflare account**, with its own hostname
-`<box-id>.box.aestra.studio`.
+`<name>-box.aestra.studio`. One level under the zone, because the zone's free certificate covers `*.aestra.studio` only;
+a `box.aestra.studio` level had no certificate, which the dry run found (25 Oct).
 
 - The box owner receives one tunnel token and runs `cloudflared` with it.
 - The box only dials out: no Cloudflare account, no domain, no open ports on their side.
 - The owner can revoke a box by deleting its tunnel.
 
-The Worker is also routed on `*.box.aestra.studio/*`, and it denies every direct request there. That is how the main
+The Worker is also routed on `*-box.aestra.studio/*`, and it denies every direct request there. That is how the main
 origin is protected today: the Worker owns the hostname, so the tunnel is never reached without a valid device token.
 The Worker's own subrequests to a box hostname go through to the tunnel, as `fetch(req)` to `tunes.aestra.studio`
 does today. *To verify in the dry run (phase 4) before any real box.*
@@ -52,7 +53,7 @@ New D1 table:
 
 ```sql
 CREATE TABLE box (
-  id               TEXT PRIMARY KEY,           -- "box-cedric"
+  id               TEXT PRIMARY KEY,           -- "cedric-box"
   account_id       TEXT NOT NULL UNIQUE REFERENCES account(id),
   publish_key_hash TEXT NOT NULL UNIQUE,       -- sha256 of the box's publish key
   status           TEXT NOT NULL DEFAULT 'active',
@@ -63,7 +64,7 @@ CREATE TABLE box (
 
 After the device token is verified, the account in its claims picks the origin:
 
-- **Account has an active box:** the request goes to `https://<id>.box.aestra.studio`. The hostname is derived from the
+- **Account has an active box:** the request goes to `https://<name>-box.aestra.studio`. The hostname is derived from the
   id, never stored, so no row can point a request at an arbitrary host. This covers everything the box answers
   today: the library (`/manifest`, `/changes`, `/search`, …), Soulseek (`/soulseek/*`), `/about/*`, `/tracklist`,
   `/discography`, and track bytes from the origin.
@@ -202,7 +203,7 @@ its own library only:
 
 ## Phases
 
-1. **Worker and box:** tunesd's `/health`, the `box` table and migration, routing by account, the `*.box.aestra.studio` deny route, per-box
+1. **Worker and box:** tunesd's `/health`, the `box` table and migration, routing by account, the `*-box.aestra.studio` deny route, per-box
    publish and the per-box `/manifest`. Tests with a fake second origin.
 2. **Owner tooling:** `new-box.sh`, `disable-box.sh`.
 3. **The agent guide** `docs/byob/AGENT.md`, for Linux and macOS: Dennis is on Linux (and Windows) and Cedric on macOS.

@@ -541,11 +541,11 @@ describe("a box's own publish", () => {
     });
 
   it("writes under boxes/<id>/, never the owner's manifest", async () => {
-    const boxes = { [await hashOf(BOX_KEY)]: { id: "box-cedric", status: "active" } };
+    const boxes = { [await hashOf(BOX_KEY)]: { id: "cedric-box", status: "active" } };
     const { env } = fakeEnv({}, boxes);
     const res = await handleManifestPut(putAs("{\"tracks\":[]}", BOX_KEY), env);
     expect(res.status).toBe(200);
-    expect(env.CACHE.put.mock.calls[0][0]).toBe("boxes/box-cedric/manifest.json");
+    expect(env.CACHE.put.mock.calls[0][0]).toBe("boxes/cedric-box/manifest.json");
   });
 
   it("refuses a key that is neither the owner's nor an active box's", async () => {
@@ -557,7 +557,7 @@ describe("a box's own publish", () => {
   it("serves a box's account its own manifest", async () => {
     const stored: Record<string, string> = {
       "manifest.json": "{\"owner\":true}",
-      "boxes/box-cedric/manifest.json": "{\"box\":true}",
+      "boxes/cedric-box/manifest.json": "{\"box\":true}",
     };
     const { env } = fakeEnv({
       CACHE: {
@@ -566,9 +566,9 @@ describe("a box's own publish", () => {
       },
     });
     const req = new Request(`${HOST}/manifest`);
-    expect(await (await handleManifestGet(req, env, "box-cedric"))!.text()).toBe("{\"box\":true}");
+    expect(await (await handleManifestGet(req, env, "cedric-box"))!.text()).toBe("{\"box\":true}");
     expect(await (await handleManifestGet(req, env))!.text()).toBe("{\"owner\":true}");
     // A box that has not published yet: nothing here, so the request goes on to its tunnel.
-    expect(await handleManifestGet(req, env, "box-dennis")).toBeNull();
+    expect(await handleManifestGet(req, env, "dennis-box")).toBeNull();
   });
 });

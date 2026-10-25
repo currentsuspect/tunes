@@ -29,15 +29,15 @@ describe("signed media urls", () => {
 
   // BYOB (docs/BYOB.md): the account's box rides in the grant, bound into the signature.
   it("carries a box, signed, and grants without one still verify", async () => {
-    const withBox = await signMediaUrl(PATH, "dev-1", NOW + 300, SECRET, "box-cedric");
+    const withBox = await signMediaUrl(PATH, "dev-1", NOW + 300, SECRET, "cedric-box");
     expect(await verifyMediaUrl(PATH, paramsOf(withBox), SECRET, NOW)).toEqual({
       ok: true,
       deviceId: "dev-1",
-      box: "box-cedric",
+      box: "cedric-box",
     });
     // Moving a grant to another box, or dropping the box, breaks the signature.
     const moved = paramsOf(withBox);
-    moved.set("box", "box-dennis");
+    moved.set("box", "dennis-box");
     expect(await verifyMediaUrl(PATH, moved, SECRET, NOW)).toEqual({ ok: false, reason: "bad-signature" });
     const dropped = paramsOf(withBox);
     dropped.delete("box");
