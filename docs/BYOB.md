@@ -123,7 +123,7 @@ box owner's own convenience.
 
 ## What the box owner's agent does (BYOB guide)
 
-`docs/byob/AGENT.md` will be written for the box owner's own coding agent (Claude Code or similar), on their machine.
+[`docs/byob/AGENT.md`](byob/AGENT.md) is written for the box owner's own coding agent (Claude Code or similar), on their machine.
 It tells the agent what to ask, what to install and how to prove it works.
 
 **Ask the person:**
