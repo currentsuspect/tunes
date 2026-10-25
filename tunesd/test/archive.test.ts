@@ -2,7 +2,7 @@ import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { archiveAll, evictable, fileNameFor, needsArchive } from "../src/archive.js";
+import { archiveAll, archiveChatFrom, evictable, fileNameFor, needsArchive, sightingChats } from "../src/archive.js";
 import { State } from "../src/state.js";
 import { ObjectStore } from "../src/store.js";
 
@@ -160,5 +160,25 @@ describe("archive: songs only here go up to Telegram", () => {
   it("names files people can read", () => {
     expect(fileNameFor("abc", { artist: "A/B", title: "x: y", codec: "mp3" })).toBe("A B - x y.mp3");
     expect(fileNameFor("abcdef0123456789zz", undefined)).toBe("abcdef0123456789.bin");
+  });
+});
+
+// BYOB (docs/BYOB.md): a box archives into the shared group without reading it.
+describe("the archive chat a box uploads to but does not read", () => {
+  it("is TUNESD_ARCHIVE_CHAT, else the first channel read", () => {
+    expect(archiveChatFrom({ TUNESD_ARCHIVE_CHAT: "-100" } as NodeJS.ProcessEnv, ["-5"])).toBe(-100);
+    // The owner's box: no setting, so its own first channel, as it always was.
+    expect(archiveChatFrom({} as NodeJS.ProcessEnv, ["-5", "-6"])).toBe(-5);
+    expect(archiveChatFrom({} as NodeJS.ProcessEnv, [])).toBeNaN();
+  });
+
+  it("counts its own uploads without being scanned", () => {
+    // A box reading nothing but archiving into the group: the group's copies count.
+    expect(sightingChats([], -100)).toEqual(["-100"]);
+    expect(sightingChats(["-7"], -100)).toEqual(["-7", "-100"]);
+    // The owner's box already reads its archive: unchanged.
+    expect(sightingChats(["-5", "-6"], -5)).toEqual(["-5", "-6"]);
+    // No archive at all: unchanged.
+    expect(sightingChats(["-5"], NaN)).toEqual(["-5"]);
   });
 });

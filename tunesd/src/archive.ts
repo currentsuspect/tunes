@@ -25,6 +25,27 @@ export const ARCHIVE_MARK = "#tunes-archive";
 /** How old the last full source audit may be for eviction to trust it. */
 export const AUDIT_TRUST_MS = 14 * 24 * 3600 * 1000;
 
+/**
+ * The chat songs are archived to: TUNESD_ARCHIVE_CHAT, else the first channel read (the owner's box has always archived
+ * into its own source channel). NaN when there is neither.
+ */
+export function archiveChatFrom(env: NodeJS.ProcessEnv, channelIds: string[]): number {
+  return Number(env["TUNESD_ARCHIVE_CHAT"] ?? channelIds[0] ?? NaN);
+}
+
+/**
+ * The chats whose recorded copies of a song count: the channels this box reads, plus the archive chat.
+ *
+ * A BYOB box (docs/BYOB.md) uploads into the shared archive group without reading it: reading it would pull every song
+ * anyone ever posted there into this box's library. Its own uploads are recorded as sightings by the archiver, so they
+ * still count as live copies here (evictable, published to the cloud path, audited) without the group being scanned.
+ */
+export function sightingChats(channelIds: string[], archiveChat: number): string[] {
+  return Number.isFinite(archiveChat) && !channelIds.includes(String(archiveChat))
+    ? [...channelIds, String(archiveChat)]
+    : channelIds;
+}
+
 /** Songs Telegram holds a live copy of, in the channels tunesd reads. */
 export function liveShas(state: State, channelIds: string[]): Set<string> {
   return new Set(state.liveSightingsFor(channelIds).map((r) => r.sha));

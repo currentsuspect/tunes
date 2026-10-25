@@ -60,7 +60,7 @@ Ask these, and write down the answers. They are not secrets.
    they choose. Use a new account for this, not one they share music from.
 5. **A Telegram API ID and hash.** They make these at <https://my.telegram.org> → API development tools: any app name,
    platform "Desktop". They keep the page open; they'll paste the two values into a file you create (Step 4).
-6. **Telegram channels to read songs from**, besides the archive group. Optional: most people start with none.
+6. **Telegram channels to read songs from.** Optional: most people start with none. Never the archive group (see Step 4).
 7. **A Last.fm API key**, optional (<https://www.last.fm/api/account/create>). Without one, song details are a little
    thinner. Lyrics are unaffected.
 8. **Is this a laptop that sleeps?** A sleeping box is an offline box. Songs already in the archive still play through
@@ -117,9 +117,9 @@ TUNESD_ARCHIVE_CHAT=<from bundle>
 TUNESD_API_ID=<their API ID>
 TUNESD_API_HASH=<they paste it>
 
-# The archive group MUST be in this list, or nothing is ever archived. Add other channels after it, comma-separated,
-# as id=Name.
-TUNESD_CHANNELS=<TUNESD_ARCHIVE_CHAT>=Archive
+# Channels to read songs FROM, comma-separated as id=Name. Usually empty. Never the archive group: it holds everyone's
+# music, and reading it would pull all of it into this box. TUNESD_ARCHIVE_CHAT above is enough to upload there.
+TUNESD_CHANNELS=
 
 # --- where and how much ---
 TUNESD_DATA_DIR=<BOX>/data
@@ -276,8 +276,8 @@ No keys, tokens, passwords, sessions or logs.
   `<BOX>/tunes/tunesd/`.
 - **tunesd keeps restarting:** run `node_modules/.bin/tsx src/cli.ts serve` by hand in that folder and read the first
   error.
-- **Nothing is ever archived:** the archive group isn't in `TUNESD_CHANNELS`, or this Telegram account isn't in the
-  group.
+- **Nothing is ever archived:** `TUNESD_ARCHIVE_CHAT` is missing from `.env`, or this Telegram account isn't in the
+  group (`npm run ids` doesn't list it).
 - **Gets never finish:** slskd's downloads folder isn't `<TUNESD_DATA_DIR>/soulseek/downloads`, or
   `~/.config/tunes/slskd.env` has the wrong key.
 - **The tunnel never registers:** the token was copied incompletely (it is one long line), or the machine blocks
