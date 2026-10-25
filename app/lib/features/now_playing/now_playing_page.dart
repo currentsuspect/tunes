@@ -54,7 +54,15 @@ class NowPlayingPage extends StatefulWidget {
     this.reachability,
     this.shareLyrics,
     this.clipMoment,
+    this.libraryNow,
   });
+
+  /// The library as it is now. The shell keeps this page for the whole
+  /// session, so [manifest] is the library from when it first opened: songs
+  /// got since were missing from it, and their album and artist could not be
+  /// found from here (25 Oct: tapping B4VXN did nothing, Vax showed 0 songs).
+  /// Falls back to [manifest] when absent, which is all a test needs.
+  final TunesManifest Function()? libraryNow;
 
   /// Saves a listener's lyrics and shares them with everyone. Without it they
   /// are kept on this phone only, which is all a screen outside the app shell
@@ -84,6 +92,8 @@ class NowPlayingPage extends StatefulWidget {
 
 class _NowPlayingPageState extends State<NowPlayingPage> {
   final _scroll = ScrollController();
+
+  TunesManifest get _library => widget.libraryNow?.call() ?? widget.manifest;
 
   @override
   void dispose() {
@@ -120,7 +130,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       TunesPanels.artist(artist),
       () => ArtistPage(
         artist: artist,
-        manifest: widget.manifest,
+        manifest: _library,
         player: widget.player,
         store: widget.store,
         downloading: widget.downloading,
@@ -154,7 +164,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   void _openAlbum(BuildContext context, ManifestTrack track) {
     ManifestRelease? release;
     if (track.releaseId != null) {
-      for (final r in widget.manifest.releases) {
+      for (final r in _library.releases) {
         if (r.id == track.releaseId) {
           release = r;
           break;
@@ -162,7 +172,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       }
     }
     if (release == null) {
-      for (final r in widget.manifest.releases) {
+      for (final r in _library.releases) {
         if (r.artist == track.artistDisplay && r.title == track.album) {
           release = r;
           break;
@@ -176,7 +186,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       TunesPanels.album(resolved.id),
       () => AlbumPage(
         release: resolved,
-        manifest: widget.manifest,
+        manifest: _library,
         player: widget.player,
         store: widget.store,
         downloading: widget.downloading,
@@ -528,13 +538,21 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                                       TextOverflow.ellipsis,
                                                 ),
                                               ),
+                                              // The album opens its page, as the
+                                              // artist above opens theirs.
                                               if (current.albumLabel != null)
-                                                Text(
-                                                  current.albumLabel!,
-                                                  style: TypeScale.mono,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
+                                                GestureDetector(
+                                                  onTap: () => _openAlbum(
+                                                    context,
+                                                    current,
+                                                  ),
+                                                  child: Text(
+                                                    current.albumLabel!,
+                                                    style: TypeScale.mono,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
                                                 ),
                                               // Noir: the music's details as
                                               // fine print.
@@ -693,7 +711,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                           color: Tones.surface,
                           child: NowPlayingDetails(
                             track: current,
-                            manifest: widget.manifest,
+                            manifest: _library,
                             artUrlFor: widget.artUrlFor,
                             onOpenArtist: (a) => _openArtist(context, a),
                             onOpenAlbum: () => _openAlbum(context, current),

@@ -1057,7 +1057,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _local.removeListener(_feedRadio);
     _mpris?.stop();
     _homeWidgets?.stop();
-    widget.player.onQueueEnded = null;
+    // Only if it is still this shell's. When the shell's route is popped (Back
+    // on Home) the root guard puts a new shell in its place, which sets its
+    // hook before this one is disposed. Clearing it here left the radio
+    // unhooked: every album then ended in silence until the app was restarted
+    // (25 Oct). The same guard as accountSync.onChanged above.
+    if (widget.player.onQueueEnded == _pickRadio) {
+      widget.player.onQueueEnded = null;
+    }
     widget.history.removeListener(_onHistoryChanged);
     _nav.removeListener(_onNavChanged);
     _nav.dispose();
@@ -1478,6 +1485,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// library yet, or nothing is eligible. Offline the library is filtered to
   /// what is downloaded, so radio never offers a track that cannot play.
   Future<ManifestTrack?> _pickRadio(ManifestTrack seed) async {
+    DiagLog.log(
+      'radio: asked after ${seed.title}, autoplay ${widget.settings.radioAutoplay}, '
+      'library ${_manifest?.tracks.length}, offline ${widget.reachability.offline}',
+    );
     if (!widget.settings.radioAutoplay) return null;
     final manifest = _manifest;
     if (manifest == null || manifest.tracks.isEmpty) return null;
@@ -2189,6 +2200,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       () => NowPlayingPage(
         player: widget.player,
         manifest: _manifest ?? const TunesManifest(tracks: [], releases: []),
+        libraryNow: () =>
+            _manifest ?? const TunesManifest(tracks: [], releases: []),
         store: widget.store,
         downloading: _downloading,
         onDownload: _download,
@@ -2235,8 +2248,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// The library the kept pages were built from (see [build]).
+  TunesManifest? _panesBuiltFor;
+
   @override
   Widget build(BuildContext context) {
+    // Pages left behind were built from the library as it was then, so songs
+    // got since were missing from them. When the library changes, forget the
+    // ones not on screen; the next visit builds them from the new one.
+    if (!identical(_manifest, _panesBuiltFor)) {
+      _panesBuiltFor = _manifest;
+      _nav.forgetUnused();
+    }
     // The download scope lives in TunesApp, above the Navigator. Re-publishing
     // it here would cover this shell only, which is the bug that was. Gets
     // are only offered on panels, which live in this shell.
