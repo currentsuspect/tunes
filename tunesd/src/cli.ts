@@ -1,5 +1,5 @@
 import { genresFromTags } from "./genres.js";
-import { archiveAll, evictable, liveShas, needsArchive } from "./archive.js";
+import { archiveAll, archiveChatFrom, evictable, liveShas, needsArchive, sightingChats } from "./archive.js";
 import { completeAlbums, partialAlbums } from "./complete.js";
 import { loadReplacements, resourceLost } from "./resource.js";
 import { SlskdApi, slskdConfig } from "./soulseek.js";
@@ -94,7 +94,12 @@ async function main(): Promise<void> {
     const env = loadEnv();
     const log = makeLogger(env.logLevel);
     const channels = channelsFromEnv(process.env);
-    if (channels.length === 0) throw new Error("TUNESD_CHANNELS required: <chatId>=<title>,...");
+    // A BYOB box (docs/BYOB.md) usually reads no channel: its songs come from gets, and it only uploads to the
+    // archive group. So no channels is fine when there is an archive to upload to; with neither, nothing would ever
+    // arrive or be kept, which is a mistake worth stopping on (found by the 25 Oct dry run).
+    if (channels.length === 0 && !process.env["TUNESD_ARCHIVE_CHAT"]) {
+      throw new Error("TUNESD_CHANNELS required: <chatId>=<title>,... (or TUNESD_ARCHIVE_CHAT for a box that reads none)");
+    }
     await mkdir(env.dataDir, { recursive: true });
 
     const state = await new State(join(env.dataDir, "state.json")).load();
@@ -1464,7 +1469,13 @@ async function main(): Promise<void> {
     };
     let lastIntegrity: string | null = null;
 
-    const channelIds = channels.map((c) => String(c.id));
+    // The channels read, plus the archive chat even when it is not read: a BYOB box archives into the shared group
+    // without scanning it (archive.ts sightingChats). Scanning itself only ever covers `channels`.
+    const archiveChat = archiveChatFrom(process.env, channels.map((c) => String(c.id)));
+    const channelIds = sightingChats(
+      channels.map((c) => String(c.id)),
+      archiveChat,
+    );
     const publishNow = async (): Promise<void> => {
       if (!env.publishUrl || !env.publishKey) return;
       try {
@@ -1621,7 +1632,6 @@ async function main(): Promise<void> {
     // Telegram is the library's home and the box a cache (archive.ts). Songs
     // only held here go up to the archive channel; then the store is held to
     // TUNESD_CACHE_MAX_BYTES, evicting only what Telegram still holds.
-    const archiveChat = Number(process.env["TUNESD_ARCHIVE_CHAT"] ?? channels[0]?.id ?? NaN);
     const cacheMax = Number(process.env["TUNESD_CACHE_MAX_BYTES"] ?? NaN);
     let archiveRunning = false;
     const archiveAndPrune = async (): Promise<void> => {

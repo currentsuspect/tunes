@@ -106,9 +106,11 @@ What that gives:
   the same song, each box uploads it once: two messages with the same sha. Telegram storage costs nothing, and the
   cloud path can use either copy.
 
-Own-only is kept by what a box *scans*, not by what it uploads. Archive uploads carry a caption marker the scanner
-already skips, so reading the group never pulls someone else's songs into your library. A box's `TUNESD_CHANNELS` is
-its own business: the channels its owner wants as sources, plus the archive group for re-sourcing its own lost songs.
+Own-only is kept by what a box *scans*, not by what it uploads. A box sets `TUNESD_ARCHIVE_CHAT` and **does not read
+the group**: the group is the owner's main source channel (Tunes Stream, ~49k messages), and reading it would pull
+everyone's music into the box. tunesd counts the archive chat's copies it uploaded itself as live, without scanning
+the chat (`sightingChats`, found by the 25 Oct dry run). A box's `TUNESD_CHANNELS` is only the channels its owner wants
+as sources, usually none.
 
 ### 5. Optional: another storage area
 

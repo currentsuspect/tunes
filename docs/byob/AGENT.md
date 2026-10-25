@@ -60,7 +60,7 @@ Ask these, and write down the answers. They are not secrets.
    they choose. Use a new account for this, not one they share music from.
 5. **A Telegram API ID and hash.** They make these at <https://my.telegram.org> → API development tools: any app name,
    platform "Desktop". They keep the page open; they'll paste the two values into a file you create (Step 4).
-6. **Telegram channels to read songs from**, besides the archive group. Optional: most people start with none.
+6. **Telegram channels to read songs from.** Optional: most people start with none. Never the archive group (see Step 4).
 7. **A Last.fm API key**, optional (<https://www.last.fm/api/account/create>). Without one, song details are a little
    thinner. Lyrics are unaffected.
 8. **Is this a laptop that sleeps?** A sleeping box is an offline box. Songs already in the archive still play through
@@ -99,6 +99,9 @@ npm test                           # must pass; stop if it doesn't
 
 `npm ci` installs into this checkout. Never point tunesd at another checkout's `node_modules`.
 
+npm 12 and later block install scripts by default and will say esbuild's was skipped. That is fine: tsx works without
+it. If `npx tsx --version` fails, run `npm install-scripts approve esbuild` and `npm ci` again.
+
 ## Step 4: tunesd's settings
 
 Create `$BOX/tunes/tunesd/.env`, mode 600, from the bundle and Step 1. The person pastes the Telegram API hash
@@ -117,9 +120,9 @@ TUNESD_ARCHIVE_CHAT=<from bundle>
 TUNESD_API_ID=<their API ID>
 TUNESD_API_HASH=<they paste it>
 
-# The archive group MUST be in this list, or nothing is ever archived. Add other channels after it, comma-separated,
-# as id=Name.
-TUNESD_CHANNELS=<TUNESD_ARCHIVE_CHAT>=Archive
+# Channels to read songs FROM, comma-separated as id=Name. Usually empty. Never the archive group: it holds everyone's
+# music, and reading it would pull all of it into this box. TUNESD_ARCHIVE_CHAT above is enough to upload there.
+TUNESD_CHANNELS=
 
 # --- where and how much ---
 TUNESD_DATA_DIR=<BOX>/data
@@ -214,9 +217,19 @@ Three services:
 
 - **slskd:** `<BOX>/slskd/bin/slskd --app-dir <BOX>/slskd --config <BOX>/slskd/slskd.yml`
 - **tunesd:** `node_modules/.bin/tsx src/cli.ts serve`, working directory `<BOX>/tunes/tunesd`. It reads its own `.env`.
-- **cloudflared:** `cloudflared tunnel --no-autoupdate run --token <TUNNEL_TOKEN> --url http://127.0.0.1:4780`. The
-  token is a secret: put it in an environment variable the service reads (`TUNNEL_TOKEN`), not on a command line other
-  users can see.
+- **cloudflared:** `cloudflared --config <BOX>/cloudflared.yml tunnel run`, where `<BOX>/cloudflared.yml` holds just:
+
+  ```yaml
+  url: http://127.0.0.1:4780
+  no-autoupdate: true
+  ```
+
+  The explicit `--config` matters. Without it cloudflared also reads `~/.cloudflared/config.yml` when one exists (anyone
+  who already uses cloudflared has one), and that file's rules answer every request with a 404 before `--url` is
+  consulted. The dry run hit exactly this.
+
+  The token is a secret: put it in an environment variable the service reads (`TUNNEL_TOKEN`), never on a command line
+  other users can see.
 
 **macOS:** three LaunchAgents in `~/Library/LaunchAgents/`, e.g. `studio.aestra.tunes.tunesd.plist`, each with
 `RunAtLoad` and `KeepAlive` true, `WorkingDirectory`, and `StandardOutPath` / `StandardErrorPath` under `<BOX>/logs/`.
@@ -276,9 +289,11 @@ No keys, tokens, passwords, sessions or logs.
   `<BOX>/tunes/tunesd/`.
 - **tunesd keeps restarting:** run `node_modules/.bin/tsx src/cli.ts serve` by hand in that folder and read the first
   error.
-- **Nothing is ever archived:** the archive group isn't in `TUNESD_CHANNELS`, or this Telegram account isn't in the
-  group.
+- **Nothing is ever archived:** `TUNESD_ARCHIVE_CHAT` is missing from `.env`, or this Telegram account isn't in the
+  group (`npm run ids` doesn't list it).
 - **Gets never finish:** slskd's downloads folder isn't `<TUNESD_DATA_DIR>/soulseek/downloads`, or
   `~/.config/tunes/slskd.env` has the wrong key.
 - **The tunnel never registers:** the token was copied incompletely (it is one long line), or the machine blocks
   outbound traffic to Cloudflare.
+- **The tunnel registers but the owner's health check gets an empty 404:** cloudflared isn't running with
+  `--config <BOX>/cloudflared.yml`, and another `~/.cloudflared/config.yml` is answering instead.
