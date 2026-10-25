@@ -87,9 +87,9 @@ The box keeps using `/internal/publish` and `/internal/manifest`, with its own p
 
 ### 4. The shared Telegram archive
 
-Every box uploads to **the same archive group**, the owner's existing archive chat. Each box owner logs into Telegram
-with their own account (an API ID and hash from my.telegram.org, then a one-time phone login on their own machine) and
-is allowed to post in that group. In a channel that means admin with "post messages" only.
+Every box uploads to **the same archive group**, the owner's existing archive chat. It is a group and everyone is
+already a member, so posting needs no extra rights. Each box owner logs into Telegram with their own account (an API ID
+and hash from my.telegram.org, then a one-time phone login on their own machine).
 
 What that gives:
 
@@ -184,13 +184,26 @@ A script, `scripts/byob/new-box.sh <account-id>`, which:
 - **Soulseek** runs under each box owner's own account and name, with their own exposure. Say so plainly before they
   start.
 
+### 6. Spreading the load
+
+The owner's box does everything today: fetching, Soulseek, lyrics, enrichment. With BYOB each box does that work for
+its own library only:
+
+- **Its own Telegram budget.** Each box has its own session, so its fetch limits (`TUNESD_FETCH_DELAY_MS`,
+  `TUNESD_FETCH_DAILY_CAP`) are its own and can be set higher than the owner's box uses, since no single session
+  carries everyone's library any more.
+- **Its own lyrics and metadata.** The box sources lyrics for its own songs. Lyrics land in the shared D1 `lyrics`
+  table as today, so a lyric one box finds serves everyone. Metadata: the box owner's own Last.fm key
+  (`TUNESD_LASTFM_KEY`, free from last.fm/api) or none. Discogs and Spotify stay on the owner's box.
+
 ## Phases
 
 1. **Worker and box:** tunesd's `/health`, the `box` table and migration, routing by account, the `*.box.aestra.studio` deny route, per-box
    publish and the per-box `/manifest`. Tests with a fake second origin.
 2. **Owner tooling:** `new-box.sh`, `disable-box.sh`.
-3. **The agent guide** `docs/byob/AGENT.md`, Linux first. The box owners' OSes decide what comes next: tunesd runs on
-   Linux today, and Windows or macOS needs service setup and paths, not a rewrite.
+3. **The agent guide** `docs/byob/AGENT.md`, for Linux and macOS: Dennis is on Linux (and Windows) and Cedric on macOS.
+   On macOS that means launchd services instead of systemd. tunesd and slskd themselves run there unchanged
+   (Node, .NET). Windows comes after.
 4. **Dry run on this machine:** a throwaway account and a second tunesd on another port, behind a second tunnel.
    Prove the routing, the deny on the box hostname, publish, a get and an archive upload, then disable it. Done
    following the guide, with an agent, as a box owner would.
@@ -203,9 +216,9 @@ A script, `scripts/byob/new-box.sh <account-id>`, which:
 - **Friends with their own Cloudflare.** One account with many tunnels is simpler and free at this size.
 - **Moving the owner's own box** into the `box` table. It stays the default origin.
 
-## Open questions
+## Decided (25 Oct)
 
-1. Box owners' OSes (Cedric, Dennis): Linux, Windows or macOS?
-2. Is the archive chat a channel or a group? This decides whether box owners need admin rights to post.
-3. Do box owners get the owner's metadata keys (Last.fm, Discogs, Spotify), their own, or none? Lyrics and "about"
-   work without them, with less detail.
+- **Platforms:** Cedric is on macOS; Dennis is on Linux and Windows. The guide covers Linux and macOS first.
+- **Archive:** it is a group, and everyone is already a member.
+- **Rates:** per-box fetch limits may be raised, since the load is spread.
+- **Metadata:** each box uses its owner's own Last.fm key, or none.
