@@ -12,6 +12,7 @@ import '../../core/ui/shelf_widgets.dart';
 import '../../domain/collection_gaps.dart';
 import '../../domain/manifest.dart';
 import '../../domain/threads.dart';
+import '../../core/ui/dock.dart';
 
 /// Where the library stops and the world carries on.
 ///
@@ -66,7 +67,7 @@ class DiscoverView extends StatelessWidget {
     }
     final releases = gaps.fold<int>(0, (a, g) => a + g.missing.length);
     return ListView(
-      padding: const EdgeInsets.only(bottom: Space.xl),
+      padding: const EdgeInsets.only(bottom: Space.xl) + dockPad(context),
       children: [
         _Hero(threads: threads.length, records: releases),
         const _ReachDial(),

@@ -118,11 +118,17 @@ class TunesNavBar extends StatelessWidget {
     required this.items,
     required this.selectedIndex,
     required this.onSelected,
+    this.compact = false,
   });
 
   final List<TunesNavItem> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+
+  /// Glyphs only, on a lower bar: Glass's dock while the page is being read
+  /// downwards. The labels fold away rather than vanish, and come back the
+  /// moment the page moves up.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -130,33 +136,48 @@ class TunesNavBar extends StatelessWidget {
     // height clips the labels, and an uncapped bar eats the screen those
     // labels are there to navigate.
     final scale = MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.4);
-    return SizedBox(
-      height: 62 * scale,
-      child: Row(
-        children: [
-          for (var i = 0; i < items.length; i++)
-            Expanded(
-              child: _Tab(
-                item: items[i],
-                selected: i == selectedIndex,
-                onTap: () {
-                  if (i != selectedIndex) HapticFeedback.selectionClick();
-                  onSelected(i);
-                },
+    final still = MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: compact ? 1 : 0),
+      duration: still ? Duration.zero : const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, folded, _) => SizedBox(
+        height: (62 - 18 * folded) * scale,
+        child: Row(
+          children: [
+            for (var i = 0; i < items.length; i++)
+              Expanded(
+                child: _Tab(
+                  item: items[i],
+                  selected: i == selectedIndex,
+                  folded: folded,
+                  onTap: () {
+                    if (i != selectedIndex) HapticFeedback.selectionClick();
+                    onSelected(i);
+                  },
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class _Tab extends StatelessWidget {
-  const _Tab({required this.item, required this.selected, required this.onTap});
+  const _Tab({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+    this.folded = 0,
+  });
 
   final TunesNavItem item;
   final bool selected;
   final VoidCallback onTap;
+
+  /// 0 with its label, 1 glyph only ([TunesNavBar.compact]).
+  final double folded;
 
   @override
   Widget build(BuildContext context) {
@@ -184,15 +205,30 @@ class _Tab extends StatelessWidget {
                 painter: _GlyphPainter(item.glyph, color ?? Tones.textMuted),
               ),
             ),
-            const SizedBox(height: 3),
-            AnimatedDefaultTextStyle(
-              duration: fade,
-              style: TypeScale.caption.copyWith(
-                fontSize: 11,
-                color: selected ? Tones.text : Tones.textMuted,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ClipRect(
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: 1 - folded,
+                child: Opacity(
+                  opacity: 1 - folded,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 3),
+                      AnimatedDefaultTextStyle(
+                        duration: fade,
+                        style: TypeScale.caption.copyWith(
+                          fontSize: 11,
+                          color: selected ? Tones.text : Tones.textMuted,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                        child: Text(item.label),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              child: Text(item.label),
             ),
             const SizedBox(height: 3),
             AnimatedContainer(

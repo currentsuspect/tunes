@@ -15,6 +15,7 @@ import '../../core/ui/cover_tint.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import 'add_songs_sheet.dart';
+import '../../core/ui/dock.dart';
 
 /// One playlist, in the order you made it.
 ///
@@ -292,7 +293,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
                     child: !_loaded
                         ? const SizedBox.shrink()
                         : ReorderableListView.builder(
-                            padding: const EdgeInsets.only(bottom: Space.xl),
+                            padding:
+                                const EdgeInsets.only(bottom: Space.xl) +
+                                dockPad(context),
                             itemCount: _entries.length,
                             buildDefaultDragHandles: false,
                             header: _Header(

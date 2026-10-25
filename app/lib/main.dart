@@ -3,7 +3,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
-import 'package:flutter/rendering.dart' show HitTestResult, RenderEditable;
+import 'package:flutter/rendering.dart'
+    show HitTestResult, RenderEditable, ScrollDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -835,6 +836,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// not change its mind every time it rebuilds.
   final _greetingSeed = math.Random().nextInt(1 << 30);
   int _tab = 0;
+
+  /// Glass's dock folds to glyphs while a page is read downwards and opens
+  /// again when it moves up ([_foldDock]).
+  bool _dockCompact = false;
 
   /// This device's own player, for everything that is about this device's
   /// listening (history, radio, where to resume). [AppShell.player] is what
@@ -2421,9 +2426,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _wideNow(BuildContext context) =>
       usesDesktopShell(MediaQuery.sizeOf(context));
 
+  /// Folds Glass's dock on a downward read, opens it on the way back up.
+  /// Only vertical scrolls count: a sideways shelf is not reading the page.
+  bool _foldDock(UserScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    final fold = switch (n.direction) {
+      ScrollDirection.reverse => true,
+      ScrollDirection.forward => false,
+      ScrollDirection.idle => _dockCompact,
+    };
+    if (fold != _dockCompact) setState(() => _dockCompact = fold);
+    return false;
+  }
+
   Widget _buildNarrow() {
+    final glass = Looks.current.kind == LookKind.glass;
     return Scaffold(
-      body: NavScope(controller: _nav, child: _buildBody()),
+      // Glass: pages run on under the floating dock, which frosts them
+      // (core/ui/dock.dart says how a page keeps its last row clear).
+      extendBody: glass,
+      body: NavScope(
+        controller: _nav,
+        child: glass
+            ? NotificationListener<UserScrollNotification>(
+                onNotification: _foldDock,
+                child: _buildBody(),
+              )
+            : _buildBody(),
+      ),
       // The player sits above the navigation rather than beside it: it is a
       // layer over the app, and the nav is the app's own furniture. The
       // separation is a hairline and a surface change, not a shadow -- this
@@ -2782,13 +2812,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The mini-player over the tab bar: a layer over the app while the nav is
   /// its furniture. Tab roots only -- panels paint their own chrome.
   Widget _buildBottomNav() {
-    // Glass: the dock is one frosted pane, its bright edge on top.
     final glass = Looks.current.kind == LookKind.glass;
+    final tabs = TunesNavBar(
+      selectedIndex: _tab,
+      onSelected: _onTabSelected,
+      compact: glass && _dockCompact,
+      items: const [
+        TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
+        TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
+        TunesNavItem(glyph: NavGlyph.search, label: 'Search'),
+        TunesNavItem(glyph: NavGlyph.library, label: 'Library'),
+      ],
+    );
     return DecoratedBox(
+      // Glass: no strip at all. The mini player and the tabs float over the
+      // page as two frosted capsules.
       decoration: glass
-          ? glassDecoration(edge: false).copyWith(
-              border: Border(top: BorderSide(color: Looks.current.glassEdge)),
-            )
+          ? const BoxDecoration()
           : BoxDecoration(
               color: Tones.base,
               border: Border(top: BorderSide(color: Tones.hairline)),
@@ -2820,16 +2860,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               onTap: _openNowPlaying,
               artUrlFor: _artUrlFor,
             ),
-            TunesNavBar(
-              selectedIndex: _tab,
-              onSelected: _onTabSelected,
-              items: const [
-                TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
-                TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
-                TunesNavItem(glyph: NavGlyph.search, label: 'Search'),
-                TunesNavItem(glyph: NavGlyph.library, label: 'Library'),
-              ],
-            ),
+            if (glass)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.md,
+                  Space.xs,
+                  Space.md,
+                  Space.sm,
+                ),
+                child: GlassPane(
+                  borderRadius: BorderRadius.circular(28),
+                  child: tabs,
+                ),
+              )
+            else
+              tabs,
           ],
         ),
       ),

@@ -11,6 +11,7 @@ import '../../domain/manifest.dart';
 import '../../domain/month_recap.dart';
 import '../../core/data/settings_store.dart';
 import 'month_card.dart';
+import '../../core/ui/dock.dart';
 
 /// Where the names on "Your listening" lead, handed down from the app shell.
 class ListeningLinks {
@@ -78,13 +79,17 @@ class _ListeningPageState extends State<ListeningPage> {
     return Scaffold(
       backgroundColor: Tones.base,
       body: SafeArea(
+        // The bottom is the list's, so in Glass it runs on under the dock.
+        bottom: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            Space.lg,
-            Space.sm,
-            Space.lg,
-            Space.xl,
-          ),
+          padding:
+              const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.sm,
+                Space.lg,
+                Space.xl,
+              ) +
+              dockPad(context),
           children: [
             Align(
               alignment: Alignment.centerLeft,

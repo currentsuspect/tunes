@@ -12,6 +12,7 @@ import '../../core/ui/generated_artwork.dart';
 import '../../domain/about.dart';
 import '../../domain/manifest.dart';
 import 'about_widgets.dart';
+import '../../core/ui/dock.dart';
 
 /// A person, the way Roon shows one: a producer, a writer or a featured
 /// artist, and everything they made that the library holds, grouped by the
@@ -95,8 +96,12 @@ class _PersonPageState extends State<PersonPage> {
     return Scaffold(
       backgroundColor: Tones.base,
       body: SafeArea(
+        // The bottom is the list's, so in Glass it runs on under the dock.
+        bottom: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl),
+          padding:
+              const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl) +
+              dockPad(context),
           children: [
             Align(
               alignment: Alignment.centerLeft,

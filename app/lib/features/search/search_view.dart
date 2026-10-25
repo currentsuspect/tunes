@@ -24,6 +24,7 @@ import '../../domain/library_search.dart';
 import '../../domain/manifest.dart';
 import '../../domain/soulseek.dart';
 import '../library/library_widgets.dart';
+import '../../core/ui/dock.dart';
 
 /// Search (design approved 23 Oct): everything on the device from one box,
 /// sorted into Songs, Albums, Artists and Playlists with their counts, a top
@@ -545,12 +546,14 @@ class _SearchViewState extends State<SearchView> {
                             'Still looking further afield.',
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.lg,
-                    Space.sm,
-                    Space.lg,
-                    Space.xl,
-                  ),
+                  padding:
+                      const EdgeInsets.fromLTRB(
+                        Space.lg,
+                        Space.sm,
+                        Space.lg,
+                        Space.xl,
+                      ) +
+                      dockPad(context),
                   children: [
                     if (r != null && !r.isEmpty)
                       ..._library(context, r)
@@ -969,8 +972,9 @@ class _SearchViewState extends State<SearchView> {
         final total = r.totalTracks;
         if (total == null || r.trackShas.length >= total) continue;
         if (foldForSearch(r.title) == a &&
-            foldForSearch(r.artist)
-                .contains(foldForSearch(s.artist).split(' ').first)) {
+            foldForSearch(
+              r.artist,
+            ).contains(foldForSearch(s.artist).split(' ').first)) {
           return r;
         }
       }
@@ -1705,7 +1709,9 @@ class _BrowseWhenEmpty extends StatelessWidget {
     }
 
     return ListView(
-      padding: const EdgeInsets.only(top: Space.md, bottom: Space.lg),
+      padding:
+          const EdgeInsets.only(top: Space.md, bottom: Space.lg) +
+          dockPad(context),
       children: [
         if (artists.isNotEmpty) ...[
           const _BrowseHeader('Your artists'),

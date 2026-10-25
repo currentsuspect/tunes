@@ -11,6 +11,7 @@ import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/playing_bars.dart';
 import '../../domain/manifest.dart';
 import '../../domain/mixes.dart';
+import '../../core/ui/dock.dart';
 
 /// A mix the app made: what it is, why, and the songs, to play or to keep.
 ///
@@ -241,7 +242,9 @@ class _MixPageState extends State<MixPage> {
                   ),
                   Expanded(
                     child: ListView.builder(
-                      padding: const EdgeInsets.only(bottom: Space.xl),
+                      padding:
+                          const EdgeInsets.only(bottom: Space.xl) +
+                          dockPad(context),
                       itemCount: tracks.length + 1,
                       itemBuilder: (context, i) {
                         if (i == 0) {

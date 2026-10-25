@@ -15,6 +15,7 @@ import '../../domain/about.dart';
 import '../../domain/manifest.dart';
 import '../../core/data/gets.dart';
 import 'about_widgets.dart';
+import '../../core/ui/dock.dart';
 
 /// One song, the way Roon shows a track (the Roon pass, approved 24 Oct):
 /// what it is about, who made it, what it samples and what sampled it, the
@@ -155,8 +156,12 @@ class _SongPageState extends State<SongPage> {
     return Scaffold(
       backgroundColor: Tones.base,
       body: SafeArea(
+        // The bottom is the list's, so in Glass it runs on under the dock.
+        bottom: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl),
+          padding:
+              const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xl) +
+              dockPad(context),
           children: [
             Align(
               alignment: Alignment.centerLeft,

@@ -20,6 +20,7 @@ import '../../core/ui/shelf_widgets.dart';
 import '../../domain/manifest.dart';
 import '../playlists/playlist_page.dart';
 import 'library_widgets.dart';
+import '../../core/ui/dock.dart';
 
 class LibraryView extends StatefulWidget {
   const LibraryView({
@@ -247,10 +248,9 @@ class _LibraryViewState extends State<LibraryView> {
 
   Widget _trackList(List<ManifestTrack> tracks, {bool play = false}) {
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Space.lg,
-        vertical: Space.md,
-      ),
+      padding:
+          const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md) +
+          dockPad(context),
       // One extra item at the top for the count and shuffle.
       itemCount: tracks.length + 1,
       // Air between rows rather than a rule under each one: the sleeves and the
@@ -441,7 +441,9 @@ class _LibraryViewState extends State<LibraryView> {
           // this list. There is no empty state here any more, because this
           // screen is never empty.
           return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: Space.sm),
+            padding:
+                const EdgeInsets.symmetric(vertical: Space.sm) +
+                dockPad(context),
             itemCount: lists.length + 2,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
@@ -460,9 +462,9 @@ class _LibraryViewState extends State<LibraryView> {
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
                   ),
-                  onTap: () =>
-                      NavScope.of(context)
-                          .openPanel(TunesPanels.liked, () => _likedPage()),
+                  onTap: () => NavScope.of(
+                    context,
+                  ).openPanel(TunesPanels.liked, () => _likedPage()),
                 );
               }
               if (index == 1) {
@@ -551,7 +553,7 @@ class _LibraryViewState extends State<LibraryView> {
       return ListenableBuilder(
         listenable: widget.store,
         builder: (context, _) => GridView.builder(
-          padding: const EdgeInsets.all(Space.lg),
+          padding: const EdgeInsets.all(Space.lg) + dockPad(context),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 220,
             childAspectRatio: 0.76,
@@ -677,7 +679,7 @@ class _LibraryViewState extends State<LibraryView> {
         return a.key.toLowerCase().compareTo(b.key.toLowerCase());
       });
     return GridView.builder(
-      padding: const EdgeInsets.all(Space.lg),
+      padding: const EdgeInsets.all(Space.lg) + dockPad(context),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         childAspectRatio: 0.74,

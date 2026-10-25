@@ -76,31 +76,28 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
               Space.sm + 2,
               Space.xs,
             ),
-            child: DecoratedBox(
-              decoration: _barDecoration(tint),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(_barRadius),
-                child: Stack(
-                  children: [
-                    _SwipeableBody(
+            child: _barShell(
+              tint: tint,
+              child: Stack(
+                children: [
+                  _SwipeableBody(
+                    player: widget.player,
+                    onTap: widget.onTap,
+                    artUrlFor: widget.artUrlFor,
+                    track: current,
+                    source: source,
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _ProgressSeekBar(
                       player: widget.player,
-                      onTap: widget.onTap,
-                      artUrlFor: widget.artUrlFor,
-                      track: current,
-                      source: source,
+                      playhead: _playhead,
+                      accent: tint,
                     ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: _ProgressSeekBar(
-                        player: widget.player,
-                        playhead: _playhead,
-                        accent: tint,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -418,6 +415,25 @@ double get _barRadius => switch (Looks.current.kind) {
   LookKind.room || LookKind.glass => RadiusTokens.card - 2,
 };
 
+/// The bar's card around its contents. Glass floats it over the page, so
+/// it frosts what scrolls behind; every other look decorates and clips.
+Widget _barShell({required Color tint, required Widget child}) {
+  if (Looks.current.kind == LookKind.glass) {
+    return GlassPane(
+      borderRadius: BorderRadius.circular(_barRadius),
+      tint: tint,
+      child: child,
+    );
+  }
+  return DecoratedBox(
+    decoration: _barDecoration(tint),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(_barRadius),
+      child: child,
+    ),
+  );
+}
+
 BoxDecoration _barDecoration(Color tint) {
   final look = Looks.current;
   switch (look.kind) {
@@ -437,8 +453,8 @@ BoxDecoration _barDecoration(Color tint) {
         color: look.base,
         border: Border(top: BorderSide(color: look.hairline)),
       );
-    // Glass: a pane on the dock's pane, so no blur of its own, and no shadow
-    // either -- through a clear fill a shadow shows as a smudge inside.
+    // Glass draws through [_barShell]'s pane; this is its fill alone. No
+    // shadow: through a clear fill a shadow shows as a smudge inside.
     case LookKind.glass:
       return glassDecoration(
         borderRadius: BorderRadius.circular(_barRadius),
