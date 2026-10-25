@@ -94,7 +94,12 @@ async function main(): Promise<void> {
     const env = loadEnv();
     const log = makeLogger(env.logLevel);
     const channels = channelsFromEnv(process.env);
-    if (channels.length === 0) throw new Error("TUNESD_CHANNELS required: <chatId>=<title>,...");
+    // A BYOB box (docs/BYOB.md) usually reads no channel: its songs come from gets, and it only uploads to the
+    // archive group. So no channels is fine when there is an archive to upload to; with neither, nothing would ever
+    // arrive or be kept, which is a mistake worth stopping on (found by the 25 Oct dry run).
+    if (channels.length === 0 && !process.env["TUNESD_ARCHIVE_CHAT"]) {
+      throw new Error("TUNESD_CHANNELS required: <chatId>=<title>,... (or TUNESD_ARCHIVE_CHAT for a box that reads none)");
+    }
     await mkdir(env.dataDir, { recursive: true });
 
     const state = await new State(join(env.dataDir, "state.json")).load();
