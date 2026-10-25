@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/audio/sleep_timer.dart';
 import '../../core/theme/looks.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/glass.dart';
 
 /// Stop playing in 15, 30, 45 minutes, an hour, at the end of this song or
 /// this album; fade out over the last minute (design approved 24 Oct).
@@ -14,7 +15,7 @@ class SleepSheet extends StatelessWidget {
   static Future<void> show(BuildContext context, SleepTimer sleep) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -24,7 +25,10 @@ class SleepSheet extends StatelessWidget {
             ? BorderSide(color: Tones.text, width: 2)
             : BorderSide.none,
       ),
-      builder: (_) => SleepSheet(sleep: sleep),
+      builder: (_) => GlassSheet(
+        radius: RadiusTokens.card,
+        child: SleepSheet(sleep: sleep),
+      ),
     );
   }
 

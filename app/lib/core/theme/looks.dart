@@ -16,8 +16,10 @@ enum CoverStyle {
 /// Which room a look belongs to, for the few things that are more than
 /// colour: the progress line, section headings, the greeting's voice, the
 /// ground texture, stickers and bounce (the mood board's "what changes"
-/// table). Screens ask `Looks.current.kind`; a new theme picks one.
-enum LookKind { room, noir, crayon }
+/// table). Screens ask `Looks.current.kind`; a new theme picks one. Glass is
+/// Room's light seen through frosted panes, so where a screen has nothing
+/// glass-specific to say it treats Glass as Room.
+enum LookKind { room, noir, crayon, glass }
 
 /// Everything one theme decides, for one brightness.
 ///
@@ -92,8 +94,21 @@ class TunesLook {
   LookKind get kind => switch (themeId) {
     'noir' => LookKind.noir,
     'crayon' => LookKind.crayon,
+    'glass' => LookKind.glass,
     _ => LookKind.room,
   };
+
+  /// Room's behaviour, for the screens that treat Glass as Room.
+  bool get roomLike => kind == LookKind.room || kind == LookKind.glass;
+
+  /// A frosted pane (Glass): the fill's two ends, lighter at the top-left
+  /// where the light lands, and the bright edge that makes it read as glass
+  /// rather than a grey box. The blur behind it is [GlassPane]'s.
+  List<Color> get glassFill => isDark
+      ? const [Color(0x2EFFFFFF), Color(0x0FFFFFFF)]
+      : const [Color(0xB8FFFFFF), Color(0x73FFFFFF)];
+  Color get glassEdge =>
+      isDark ? const Color(0x38FFFFFF) : const Color(0xCCFFFFFF);
 
   /// Crayon's five crayons, for things coloured in turn (track numbers,
   /// squiggles). Brighter on the chalkboard.
@@ -292,7 +307,59 @@ abstract final class Looks {
     ),
   );
 
-  static const all = [room, noir, crayon];
+  static const glass = TunesThemeSpec(
+    id: 'glass',
+    name: 'Glass',
+    blurb: 'Frosted panes over the colour of the record.',
+    // Night glass: a deep indigo room, the cover's light stronger than in
+    // Room because the panes take some of it.
+    dark: TunesLook(
+      themeId: 'glass',
+      brightness: Brightness.dark,
+      base: Color(0xFF0B0D1A),
+      surface: Color(0xFF151A2C),
+      surfaceRaised: Color(0xFF1D2338),
+      hairline: Color(0x29FFFFFF),
+      primary: Color(0xFFA9C7FF),
+      onPrimary: Color(0xFF0B0D1A),
+      text: Color(0xFFF4F6FB),
+      textMuted: Color(0xFFA7AEC2),
+      held: Color(0xFF7FE0B5),
+      warn: Color(0xFFF2C47E),
+      badge: Color(0xFF7E8AA6),
+      display: 'InstrumentSans',
+      body: 'HankenGrotesk',
+      mono: 'DMMono',
+      cardRadius: 22,
+      controlRadius: 16,
+      glowStrength: 1.35,
+    ),
+    // Frost: pale blue-grey, ink type, the accent a deeper periwinkle so it
+    // still reads on the light panes.
+    light: TunesLook(
+      themeId: 'glass',
+      brightness: Brightness.light,
+      base: Color(0xFFEDF0F7),
+      surface: Color(0xFFE3E7F1),
+      surfaceRaised: Color(0xFFF8FAFD),
+      hairline: Color(0x1F12152A),
+      primary: Color(0xFF4F6BD8),
+      onPrimary: Color(0xFFFFFFFF),
+      text: Color(0xFF12152A),
+      textMuted: Color(0xFF5E6478),
+      held: Color(0xFF2B8A63),
+      warn: Color(0xFFA8691C),
+      badge: Color(0xFF6E7B8B),
+      display: 'InstrumentSans',
+      body: 'HankenGrotesk',
+      mono: 'DMMono',
+      cardRadius: 22,
+      controlRadius: 16,
+      glowStrength: 0.8,
+    ),
+  );
+
+  static const all = [room, noir, crayon, glass];
 
   static TunesThemeSpec byId(String id) =>
       all.firstWhere((t) => t.id == id, orElse: () => room);

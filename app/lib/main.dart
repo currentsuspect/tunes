@@ -60,6 +60,7 @@ import 'core/nav/nav_controller.dart';
 import 'core/nav/root_route_guard.dart';
 import 'core/radio/radio_engine.dart';
 import 'core/theme/looks.dart';
+import 'core/ui/glass.dart';
 import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
@@ -2331,18 +2332,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // before the process can die, or the close loses them to the kill.
         // Bounded: a wedged write must never trap Back.
         unawaited(
-          _persistResume()
-              .timeout(const Duration(seconds: 2), onTimeout: () {})
-              .then((_) {
-                // Halt, not stop: backing out of the app quiets it, but the queue and
-                // the resume point survive so reopening lands back where it was.
-                // Stopping here used to wipe the persisted queue with it.
-                if (widget.settings.stopOnClose) widget.player.halt();
-                // Leave regardless of the setting: refusing to pop is a mechanism for
-                // getting here, not a decision about whether the app should close.
-                // Swallowing it would trap someone who has turned stopOnClose off.
-                SystemNavigator.pop();
-              }),
+          _persistResume().timeout(const Duration(seconds: 2), onTimeout: () {}).then((
+            _,
+          ) {
+            // Halt, not stop: backing out of the app quiets it, but the queue and
+            // the resume point survive so reopening lands back where it was.
+            // Stopping here used to wipe the persisted queue with it.
+            if (widget.settings.stopOnClose) widget.player.halt();
+            // Leave regardless of the setting: refusing to pop is a mechanism for
+            // getting here, not a decision about whether the app should close.
+            // Swallowing it would trap someone who has turned stopOnClose off.
+            SystemNavigator.pop();
+          }),
         );
       },
       child: Listener(
@@ -2724,7 +2725,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     voice: switch (Looks.current.kind) {
                                       LookKind.crayon => GreetingVoice.crayon,
                                       LookKind.noir => GreetingVoice.noir,
-                                      LookKind.room => GreetingVoice.room,
+                                      LookKind.room ||
+                                      LookKind.glass => GreetingVoice.room,
                                     },
                                   ),
                                   style: TypeScale.wordmark.copyWith(
@@ -2780,11 +2782,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The mini-player over the tab bar: a layer over the app while the nav is
   /// its furniture. Tab roots only -- panels paint their own chrome.
   Widget _buildBottomNav() {
+    // Glass: the dock is one frosted pane, its bright edge on top.
+    final glass = Looks.current.kind == LookKind.glass;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Tones.base,
-        border: Border(top: BorderSide(color: Tones.hairline)),
-      ),
+      decoration: glass
+          ? glassDecoration(edge: false).copyWith(
+              border: Border(top: BorderSide(color: Looks.current.glassEdge)),
+            )
+          : BoxDecoration(
+              color: Tones.base,
+              border: Border(top: BorderSide(color: Tones.hairline)),
+            ),
       // Bottom only: the top edge of this bar is the app's own, and the
       // gesture strip is what would otherwise sit over the labels.
       child: SafeArea(

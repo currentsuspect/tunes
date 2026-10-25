@@ -4,6 +4,7 @@ import 'dart:ui' show PointMode;
 import 'package:flutter/material.dart';
 
 import '../theme/looks.dart';
+import 'glass.dart';
 
 /// The parts of a theme that are more than colour (docs mood board, 9 Oct,
 /// "what changes"): Crayon's squiggles, paper and crayon-stroke progress,
@@ -62,7 +63,7 @@ class _SquigglePainter extends CustomPainter {
 }
 
 /// The page's texture, over everything, never in the way: Crayon's faint dot
-/// grid (paper), Noir's film grain. Room has none. Painted once into a
+/// grid (paper), Noir's film grain, Glass's pools of light. Room has none. Painted once into a
 /// picture and cached; it never repaints while you scroll.
 class LookGround extends StatelessWidget {
   const LookGround({super.key, required this.child});
@@ -73,6 +74,14 @@ class LookGround extends StatelessWidget {
   Widget build(BuildContext context) {
     final look = Looks.current;
     if (look.kind == LookKind.room) return child;
+    if (look.kind == LookKind.glass) {
+      return Stack(
+        children: [
+          child,
+          const Positioned.fill(child: GlassLight()),
+        ],
+      );
+    }
     return Stack(
       children: [
         child,
@@ -163,7 +172,7 @@ class LookTrackShape extends RoundedRectSliderTrackShape {
     double additionalActiveTrackHeight = 2,
   }) {
     final look = Looks.current;
-    if (look.kind == LookKind.room) {
+    if (look.roomLike) {
       return super.paint(
         context,
         offset,

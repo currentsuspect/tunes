@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import '../song/about_nav.dart';
 import '../../core/platform/device.dart';
 
@@ -280,6 +282,9 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
 
           return _Backdrop(
             artSha: current.artSha,
+            artUrl: current.artSha == null
+                ? null
+                : widget.artUrlFor(current.artSha!),
             child: SafeArea(
               // The widget.player keeps a whole viewport to itself so nothing about
               // it changes; the details are a scroll away rather than a
@@ -340,8 +345,9 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           _openQueue(context);
                                           break;
                                         case 'about':
-                                          AboutNav.maybeOf(context)
-                                              ?.openSong(current);
+                                          AboutNav.maybeOf(
+                                            context,
+                                          )?.openSong(current);
                                           break;
                                         case 'artist':
                                           // The same opener the sleeve uses.
@@ -414,8 +420,9 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       if (!(isWideWindow(
                                             MediaQuery.sizeOf(context),
                                           ) &&
-                                          (SettingsScope.maybeOf(context)
-                                                  ?.showLyrics ??
+                                          (SettingsScope.maybeOf(
+                                                context,
+                                              )?.showLyrics ??
                                               true) &&
                                           (current.lyrics ?? '')
                                               .trim()
@@ -731,22 +738,79 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
 }
 
 /// The page's room: ink wall, with the cover's colour pouring in from the top.
+/// In Glass the wall is the cover itself, frosted, so the whole page is a
+/// pane over the record.
 class _Backdrop extends StatelessWidget {
-  const _Backdrop({required this.artSha, required this.child});
+  const _Backdrop({
+    required this.artSha,
+    required this.artUrl,
+    required this.child,
+  });
 
   final String? artSha;
+  final String? artUrl;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final glass = Looks.current.kind == LookKind.glass;
     return TintBuilder(
       artSha: artSha,
       builder: (context, tint) => Stack(
         fit: StackFit.expand,
         children: [
+          if (glass) _FrostedCover(url: artUrl, artSha: artSha),
           AmbientGlow(tint: tint),
           child,
         ],
+      ),
+    );
+  }
+}
+
+/// The cover, decoded small (it is about to be blurred past recognition, so
+/// a full-size decode would be wasted), stretched over the page, frosted and
+/// dimmed so the type on it still reads. Cached as one layer: it repaints on
+/// a track change, not while the scrubber moves.
+class _FrostedCover extends StatelessWidget {
+  const _FrostedCover({required this.url, required this.artSha});
+
+  final String? url;
+  final String? artSha;
+
+  static const _decode = 96.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                sigmaX: 48,
+                sigmaY: 48,
+                tileMode: TileMode.mirror,
+              ),
+              child: FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: Artwork(
+                  url: url,
+                  artSha: artSha,
+                  size: _decode,
+                  borderRadius: 0,
+                  fallback: const SizedBox.square(dimension: _decode),
+                ),
+              ),
+            ),
+            ColoredBox(
+              color: look.base.withValues(alpha: look.isDark ? 0.55 : 0.45),
+            ),
+          ],
+        ),
       ),
     );
   }

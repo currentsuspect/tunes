@@ -11,6 +11,7 @@ import '../../core/ui/cover_tint.dart';
 import '../../core/ui/source_pill.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/glass.dart';
 import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/track_swipe.dart';
 import '../../domain/manifest.dart';
@@ -395,7 +396,7 @@ class _TransportButtonState extends State<_TransportButton> {
                   color: switch (Looks.current.kind) {
                     LookKind.noir => Tones.primary,
                     LookKind.crayon => Looks.current.crayons[1],
-                    LookKind.room => Tones.base,
+                    LookKind.room || LookKind.glass => Tones.base,
                   },
                 ),
               ),
@@ -409,11 +410,12 @@ class _TransportButtonState extends State<_TransportButton> {
 
 /// The bar's shape per room (mood board, 9 Oct). Room: a raised card lit by
 /// the cover. Crayon: a sticker on the page, sun yellow on paper, ink edge
-/// and a hard offset shadow. Noir: no card at all, a hairline above.
+/// and a hard offset shadow. Noir: no card at all, a hairline above. Glass:
+/// Room's card as a frosted pane.
 double get _barRadius => switch (Looks.current.kind) {
   LookKind.noir => 0,
   LookKind.crayon => 18,
-  LookKind.room => RadiusTokens.card - 2,
+  LookKind.room || LookKind.glass => RadiusTokens.card - 2,
 };
 
 BoxDecoration _barDecoration(Color tint) {
@@ -434,6 +436,13 @@ BoxDecoration _barDecoration(Color tint) {
       return BoxDecoration(
         color: look.base,
         border: Border(top: BorderSide(color: look.hairline)),
+      );
+    // Glass: a pane on the dock's pane, so no blur of its own, and no shadow
+    // either -- through a clear fill a shadow shows as a smudge inside.
+    case LookKind.glass:
+      return glassDecoration(
+        borderRadius: BorderRadius.circular(_barRadius),
+        tint: tint,
       );
     case LookKind.room:
       return BoxDecoration(

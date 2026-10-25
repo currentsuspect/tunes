@@ -8,6 +8,7 @@ import '../../features/playlists/add_to_playlist_sheet.dart';
 import '../data/likes_store.dart';
 import '../data/playlist_store.dart';
 import '../theme/tokens.dart';
+import 'glass.dart';
 import 'manual_find_sheet.dart';
 
 /// Long-press menu for a track row. Houses every per-track action
@@ -51,19 +52,22 @@ class TrackActionsSheet extends StatelessWidget {
     final about = AboutNav.maybeOf(context);
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => TrackActionsSheet(
-        track: track,
-        onPlayNext: onPlayNext,
-        onAddToQueue: onAddToQueue,
-        onEdit: onEdit,
-        onAbout: about == null ? null : () => about.openSong(track),
+      builder: (_) => GlassSheet(
+        radius: RadiusTokens.card,
+        child: TrackActionsSheet(
+          track: track,
+          onPlayNext: onPlayNext,
+          onAddToQueue: onAddToQueue,
+          onEdit: onEdit,
+          onAbout: about == null ? null : () => about.openSong(track),
+        ),
       ),
     );
   }
@@ -163,8 +167,9 @@ class TrackActionsSheet extends StatelessWidget {
                 await Clipboard.setData(ClipboardData(text: track.sha));
                 if (!context.mounted) return;
                 Navigator.of(context).pop();
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text('sha copied')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('sha copied')));
               },
             ),
             const SizedBox(height: Space.sm),
@@ -293,18 +298,21 @@ class EditInfoSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
+      builder: (_) => GlassSheet(
+        radius: RadiusTokens.card,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: EditInfoSheet(track: track, onSave: onSave),
         ),
-        child: EditInfoSheet(track: track, onSave: onSave),
       ),
     );
   }
