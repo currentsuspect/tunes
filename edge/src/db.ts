@@ -28,6 +28,38 @@ export interface InviteRow {
   redeemed_device_id: string | null;
 }
 
+export interface BoxRow {
+  id: string;
+  account_id: string;
+  publish_key_hash: string;
+  status: string;
+  created_at: number;
+  last_publish_at: number | null;
+}
+
+/** A box id is also the first label of its hostname, so its shape is fixed: lowercase letters, digits and hyphens. */
+export const BOX_ID = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+
+/** The account's box when it has an active one (docs/BYOB.md). Null means the owner's box serves it. */
+export async function activeBoxForAccount(db: D1Database, accountId: string): Promise<BoxRow | null> {
+  return db
+    .prepare("SELECT * FROM box WHERE account_id = ? AND status = 'active'")
+    .bind(accountId)
+    .first<BoxRow>();
+}
+
+/** The active box a publish key belongs to, by the key's hash. */
+export async function activeBoxByPublishHash(db: D1Database, hash: string): Promise<BoxRow | null> {
+  return db
+    .prepare("SELECT * FROM box WHERE publish_key_hash = ? AND status = 'active'")
+    .bind(hash)
+    .first<BoxRow>();
+}
+
+export async function touchBoxPublish(db: D1Database, id: string, nowSec: number): Promise<void> {
+  await db.prepare("UPDATE box SET last_publish_at = ? WHERE id = ?").bind(nowSec, id).run();
+}
+
 export async function accountById(db: D1Database, id: string): Promise<AccountRow | null> {
   return db.prepare("SELECT * FROM account WHERE id = ?").bind(id).first<AccountRow>();
 }

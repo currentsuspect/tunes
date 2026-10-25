@@ -12,6 +12,7 @@ import { leanManifest, releaseArtKey } from "./manifest.js";
 import type { UpdateFeed } from "./updates.js";
 import type { AboutService } from "./about.js";
 import { kMaxLyricChars, type LyricStore } from "./lyricstore.js";
+import { health } from "./health.js";
 import type {
   ArtistDiscography,
   DiscographyGroup,
@@ -121,6 +122,11 @@ export class ManifestServer {
     const server = createServer(async (req, res) => {
       try {
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+        if (url.pathname === "/health" && (req.method === "GET" || req.method === "HEAD")) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+          res.end(req.method === "HEAD" ? undefined : JSON.stringify(health()));
+          return;
+        }
         // ?lean=1: without the lyrics' words (leanManifest); the device
         // fetches the ones whose stamp changed from /lyrics-for.
         if (url.pathname === "/manifest") {

@@ -250,3 +250,37 @@ describe("media edge", () => {
     });
   });
 });
+
+// BYOB (docs/BYOB.md): the gate says which box a request that passed belongs to, without a database.
+describe("routing to an account's own box", () => {
+  const token = (box?: string) =>
+    signAccessToken(
+      { sub: "acct-cedric", did: "dev-1", iat: NOW - 10, exp: NOW + 600, ...(box ? { box } : {}) },
+      ENV.ACCESS_SECRET,
+    );
+  const routeOf = async (req: Request) => {
+    const route = { box: null as string | null };
+    const res = await handleMedia(req, ENV, NOW, route);
+    return { res, box: route.box };
+  };
+
+  it("takes the box from the access token on library requests", async () => {
+    const auth = { headers: { authorization: `Bearer ${await token("box-cedric")}` } };
+    expect(await routeOf(get("/manifest", auth))).toEqual({ res: null, box: "box-cedric" });
+    expect(await routeOf(get("/soulseek/search", auth))).toEqual({ res: null, box: "box-cedric" });
+    // A token from before boxes, or for an account without one: the owner's box.
+    const plain = { headers: { authorization: `Bearer ${await token()}` } };
+    expect(await routeOf(get("/manifest", plain))).toEqual({ res: null, box: null });
+  });
+
+  it("takes the box from a signed media url", async () => {
+    const signed = await signMediaUrl(`/track/${SHA}`, "dev-1", NOW + 300, ENV.MEDIA_SECRET, "box-cedric");
+    expect(await routeOf(get(signed))).toEqual({ res: null, box: "box-cedric" });
+  });
+
+  it("never routes public paths, and strips the box before origin", async () => {
+    expect(await routeOf(get("/update"))).toEqual({ res: null, box: null });
+    const signed = await signMediaUrl(`/track/${SHA}`, "dev-1", NOW + 300, ENV.MEDIA_SECRET, "box-cedric");
+    expect(new URL(stripSignature(get(signed)).url).searchParams.has("box")).toBe(false);
+  });
+});

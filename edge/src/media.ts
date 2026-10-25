@@ -102,12 +102,19 @@ const API_PATHS = new Set([
  * Returns a Response when the request is handled or rejected here, or null to
  * let the caller pass it through to origin untouched.
  */
+/** Where a request that passed the gate should go (docs/BYOB.md): the account's own box, or null for the owner's box. */
+export interface MediaRoute {
+  box: string | null;
+}
+
 export async function handleMedia(
   req: Request,
   env: MediaEnv,
   nowSec: number,
+  route?: MediaRoute,
 ): Promise<Response | null> {
   const url = new URL(req.url);
+  if (route) route.box = null;
 
   if (PUBLIC_PATHS.has(url.pathname)) return null;
   if (url.pathname.startsWith("/update/")) return null;
@@ -121,6 +128,7 @@ export async function handleMedia(
       nowSec,
     );
     if (!claims) return deny("bad-token", 401);
+    if (route) route.box = claims.box ?? null;
     return null;
   }
 
@@ -134,6 +142,7 @@ export async function handleMedia(
       nowSec,
     );
     if (!claims) return deny("bad-token", 401);
+    if (route) route.box = claims.box ?? null;
     return null;
   }
 
@@ -174,7 +183,10 @@ export async function handleMedia(
       env.ACCESS_SECRET,
       nowSec,
     );
-    if (claims) return null;
+    if (claims) {
+      if (route) route.box = claims.box ?? null;
+      return null;
+    }
     return deny("bad-token", 401);
   }
 
@@ -185,6 +197,7 @@ export async function handleMedia(
     nowSec,
   );
   if (!verdict.ok) return deny(verdict.reason);
+  if (route) route.box = verdict.box;
 
   return null;
 }
@@ -202,6 +215,6 @@ export async function handleMedia(
  */
 export function stripSignature(req: Request): Request {
   const url = new URL(req.url);
-  for (const k of ["sig", "did", "exp"]) url.searchParams.delete(k);
+  for (const k of ["sig", "did", "exp", "box"]) url.searchParams.delete(k);
   return new Request(url.toString(), req);
 }
