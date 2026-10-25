@@ -99,6 +99,9 @@ npm test                           # must pass; stop if it doesn't
 
 `npm ci` installs into this checkout. Never point tunesd at another checkout's `node_modules`.
 
+npm 12 and later block install scripts by default and will say esbuild's was skipped. That is fine: tsx works without
+it. If `npx tsx --version` fails, run `npm install-scripts approve esbuild` and `npm ci` again.
+
 ## Step 4: tunesd's settings
 
 Create `$BOX/tunes/tunesd/.env`, mode 600, from the bundle and Step 1. The person pastes the Telegram API hash
@@ -214,9 +217,19 @@ Three services:
 
 - **slskd:** `<BOX>/slskd/bin/slskd --app-dir <BOX>/slskd --config <BOX>/slskd/slskd.yml`
 - **tunesd:** `node_modules/.bin/tsx src/cli.ts serve`, working directory `<BOX>/tunes/tunesd`. It reads its own `.env`.
-- **cloudflared:** `cloudflared tunnel --no-autoupdate run --token <TUNNEL_TOKEN> --url http://127.0.0.1:4780`. The
-  token is a secret: put it in an environment variable the service reads (`TUNNEL_TOKEN`), not on a command line other
-  users can see.
+- **cloudflared:** `cloudflared --config <BOX>/cloudflared.yml tunnel run`, where `<BOX>/cloudflared.yml` holds just:
+
+  ```yaml
+  url: http://127.0.0.1:4780
+  no-autoupdate: true
+  ```
+
+  The explicit `--config` matters. Without it cloudflared also reads `~/.cloudflared/config.yml` when one exists (anyone
+  who already uses cloudflared has one), and that file's rules answer every request with a 404 before `--url` is
+  consulted. The dry run hit exactly this.
+
+  The token is a secret: put it in an environment variable the service reads (`TUNNEL_TOKEN`), never on a command line
+  other users can see.
 
 **macOS:** three LaunchAgents in `~/Library/LaunchAgents/`, e.g. `studio.aestra.tunes.tunesd.plist`, each with
 `RunAtLoad` and `KeepAlive` true, `WorkingDirectory`, and `StandardOutPath` / `StandardErrorPath` under `<BOX>/logs/`.
@@ -282,3 +295,5 @@ No keys, tokens, passwords, sessions or logs.
   `~/.config/tunes/slskd.env` has the wrong key.
 - **The tunnel never registers:** the token was copied incompletely (it is one long line), or the machine blocks
   outbound traffic to Cloudflare.
+- **The tunnel registers but the owner's health check gets an empty 404:** cloudflared isn't running with
+  `--config <BOX>/cloudflared.yml`, and another `~/.cloudflared/config.yml` is answering instead.
