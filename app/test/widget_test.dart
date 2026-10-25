@@ -2573,6 +2573,28 @@ void main() {
     expect(pick?.sha, 'b' * 64);
   });
 
+  testWidgets('a rebuilt shell keeps the radio hooked', (tester) async {
+    // Android can rebuild the shell inside a running process. The new shell
+    // sets its hook before the old one is disposed, and the old one used to
+    // clear it on the way out: from then on every album ended in silence
+    // (25 Oct, B4VXN). Re-pumping the same app under a new key does the same.
+    final player = FakeTunePlayer();
+    await pumpApp(
+      tester,
+      _FakeClient(() async => _manifestOf(_library())),
+      player,
+    );
+    final app = tester.widget<TunesApp>(find.byType(TunesApp));
+    await tester.pumpWidget(KeyedSubtree(key: UniqueKey(), child: app));
+    await tester.pumpAndSettle();
+
+    expect(player.onQueueEnded, isNotNull);
+    await goToLibrary(tester);
+    await tester.tap(find.text('Bassline'));
+    await tester.pumpAndSettle();
+    expect((await player.onQueueEnded!(player.current!))?.sha, 'b' * 64);
+  });
+
   testWidgets('radio off ends the queue in silence', (tester) async {
     final player = FakeTunePlayer();
     await pumpApp(

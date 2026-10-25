@@ -711,6 +711,10 @@ class MediaKitTunePlayer extends TunePlayer {
   /// business. So by the time this runs with repeat off at the last index,
   /// the queue has genuinely run out, exactly like a manual next past the end.
   void _onNaturalEnd() {
+    DiagLog.log(
+      'radio: decoder end, index $_index of ${_queue.length}, repeat $_repeat, '
+      'hook ${onQueueEnded != null}, held $_heldForNetwork, live ${identical(_liveWrapper, this)}',
+    );
     if (_repeat != PlaybackRepeat.off) return;
     if (_queue.isEmpty || _index < _queue.length - 1) return;
     final seed = current;
@@ -732,10 +736,14 @@ class MediaKitTunePlayer extends TunePlayer {
   /// persisted through the same hook as any other play, so a close mid-radio
   /// restores into the radio queue rather than forgetting it.
   Future<void> _continueAfterEnd(ManifestTrack seed) async {
-    if (_extending) return;
+    if (_extending) {
+      DiagLog.log('radio: already extending, ignored');
+      return;
+    }
     _extending = true;
     try {
       final pick = await onQueueEnded?.call(seed);
+      DiagLog.log('radio: pick after ${seed.title}: ${pick?.title ?? "none"}');
       if (pick == null) {
         stop();
         return;
