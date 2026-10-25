@@ -22,11 +22,16 @@ class MiniPlayerBar extends StatefulWidget {
     required this.player,
     required this.onTap,
     this.artUrlFor,
+    this.glassBacking,
   });
 
   final TunePlayer player;
   final VoidCallback onTap;
   final String Function(String sha)? artUrlFor;
+
+  /// How thick the bar's pane is in Glass, set by the dock from what is
+  /// scrolling under it. Null elsewhere.
+  final Color? glassBacking;
 
   @override
   State<MiniPlayerBar> createState() => _MiniPlayerBarState();
@@ -78,6 +83,7 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
             ),
             child: _barShell(
               tint: tint,
+              backing: widget.glassBacking,
               child: Stack(
                 children: [
                   _SwipeableBody(
@@ -417,11 +423,13 @@ double get _barRadius => switch (Looks.current.kind) {
 
 /// The bar's card around its contents. Glass floats it over the page, so
 /// it frosts what scrolls behind; every other look decorates and clips.
-Widget _barShell({required Color tint, required Widget child}) {
+Widget _barShell({required Color tint, required Widget child, Color? backing}) {
   if (Looks.current.kind == LookKind.glass) {
     return GlassPane(
       borderRadius: BorderRadius.circular(_barRadius),
       tint: tint,
+      backing: backing,
+      pressable: true,
       child: child,
     );
   }

@@ -61,6 +61,7 @@ import 'core/nav/nav_controller.dart';
 import 'core/nav/root_route_guard.dart';
 import 'core/radio/radio_engine.dart';
 import 'core/theme/looks.dart';
+import 'core/ui/cover_tint.dart';
 import 'core/ui/glass.dart';
 import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
@@ -840,6 +841,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Glass's dock folds to glyphs while a page is read downwards and opens
   /// again when it moves up ([_foldDock]).
   bool _dockCompact = false;
+
+  /// Whether the page has content under Glass's dock right now. The dock's
+  /// panes thicken while it does, so their labels hold up over a busy page,
+  /// and clear again at the end of a list, where only the wall is behind.
+  bool _dockOverContent = true;
 
   /// This device's own player, for everything that is about this device's
   /// listening (history, radio, where to resume). [AppShell.player] is what
@@ -2426,16 +2432,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _wideNow(BuildContext context) =>
       usesDesktopShell(MediaQuery.sizeOf(context));
 
-  /// Folds Glass's dock on a downward read, opens it on the way back up.
-  /// Only vertical scrolls count: a sideways shelf is not reading the page.
-  bool _foldDock(UserScrollNotification n) {
-    if (n.metrics.axis != Axis.vertical) return false;
-    final fold = switch (n.direction) {
-      ScrollDirection.reverse => true,
-      ScrollDirection.forward => false,
-      ScrollDirection.idle => _dockCompact,
+  /// What Glass's dock learns from the page scrolling under it: a downward
+  /// read folds it and an upward one opens it; the offset moves the light on
+  /// every pane's edge ([GlassSheen]); and whether rows remain below sets how
+  /// thick the panes are. Only vertical scrolls count: a sideways shelf is
+  /// not reading the page.
+  bool _onPageScroll(Notification n) {
+    final metrics = switch (n) {
+      ScrollNotification(:final metrics) => metrics,
+      ScrollMetricsNotification(:final metrics) => metrics,
+      _ => null,
     };
-    if (fold != _dockCompact) setState(() => _dockCompact = fold);
+    if (metrics == null || metrics.axis != Axis.vertical) return false;
+    var fold = _dockCompact;
+    if (n is UserScrollNotification) {
+      fold = switch (n.direction) {
+        ScrollDirection.reverse => true,
+        ScrollDirection.forward => false,
+        ScrollDirection.idle => _dockCompact,
+      };
+    }
+    if (n is ScrollUpdateNotification) GlassSheen.follow(metrics.pixels);
+    final over = metrics.extentAfter > 1;
+    if (fold != _dockCompact || over != _dockOverContent) {
+      setState(() {
+        _dockCompact = fold;
+        _dockOverContent = over;
+      });
+    }
     return false;
   }
 
@@ -2448,8 +2472,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       body: NavScope(
         controller: _nav,
         child: glass
-            ? NotificationListener<UserScrollNotification>(
-                onNotification: _foldDock,
+            ? NotificationListener<Notification>(
+                onNotification: _onPageScroll,
                 child: _buildBody(),
               )
             : _buildBody(),
@@ -2811,6 +2835,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The mini-player over the tab bar: a layer over the app while the nav is
   /// its furniture. Tab roots only -- panels paint their own chrome.
+  /// How thick Glass's dock panes are: denser with rows under them.
+  Color _dockBacking() {
+    final look = Looks.current;
+    final a = _dockOverContent
+        ? (look.isDark ? 0.42 : 0.34)
+        : (look.isDark ? 0.12 : 0.08);
+    return look.base.withValues(alpha: a);
+  }
+
   Widget _buildBottomNav() {
     final glass = Looks.current.kind == LookKind.glass;
     final tabs = TunesNavBar(
@@ -2859,6 +2892,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               player: widget.player,
               onTap: _openNowPlaying,
               artUrlFor: _artUrlFor,
+              glassBacking: glass ? _dockBacking() : null,
             ),
             if (glass)
               Padding(
@@ -2868,9 +2902,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   Space.md,
                   Space.sm,
                 ),
-                child: GlassPane(
-                  borderRadius: BorderRadius.circular(28),
-                  child: tabs,
+                child: ListenableBuilder(
+                  listenable: widget.player,
+                  builder: (context, _) => TintBuilder(
+                    artSha: widget.player.current?.artSha,
+                    builder: (context, tint) => GlassPane(
+                      borderRadius: BorderRadius.circular(28),
+                      tint: widget.player.current == null ? null : tint,
+                      backing: _dockBacking(),
+                      pressable: true,
+                      child: tabs,
+                    ),
+                  ),
                 ),
               )
             else
