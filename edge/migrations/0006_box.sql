@@ -3,7 +3,7 @@
 --
 -- At most one box per account. An account with no active box is served by the
 -- owner's box, as before this table existed. The box's hostname is derived
--- from its id (<id>.box.aestra.studio), so it is not stored: nothing here can
+-- from its id (<name>-box.aestra.studio), so it is not stored: nothing here can
 -- point a request at an arbitrary host.
 --
 -- `publish_key_hash` is sha256 of the box's own service key, the one it uses

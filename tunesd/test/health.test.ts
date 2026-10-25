@@ -5,9 +5,9 @@ import { ManifestServer } from "../src/serve.js";
 // BYOB (docs/BYOB.md): a box says it is up and which box it is, and nothing about its library.
 describe("GET /health", () => {
   it("names the box and the daemon's version", () => {
-    const h = health({ TUNESD_BOX_ID: "box-cedric" } as NodeJS.ProcessEnv);
+    const h = health({ TUNESD_BOX_ID: "cedric-box" } as NodeJS.ProcessEnv);
     expect(h.ok).toBe(true);
-    expect(h.box).toBe("box-cedric");
+    expect(h.box).toBe("cedric-box");
     expect(h.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(h.uptimeSec).toBeGreaterThanOrEqual(0);
     // The owner's box has no box id.

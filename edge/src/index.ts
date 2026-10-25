@@ -58,16 +58,21 @@ export interface Env {
   CACHE?: R2Bucket;
   /** Cloud byte path. Absent in tests; /t/ falls through to origin deny. */
   FETCH_WORKER?: Fetcher;
-  /** Where BYOB boxes live (docs/BYOB.md): a box is <id>.<suffix>, its own Cloudflare Tunnel. */
-  BOX_ORIGIN_SUFFIX?: string;
+  /** The zone BYOB boxes live in (docs/BYOB.md): a box is <id>.<zone>, e.g. cedric-box.aestra.studio. */
+  BOX_ZONE?: string;
 }
 
-const DEFAULT_BOX_ORIGIN_SUFFIX = "box.aestra.studio";
+const DEFAULT_BOX_ZONE = "aestra.studio";
+
+/** Whether @p hostname is under a box's name (<name>-box.<zone>, or anything beneath one): never served from outside. */
+function isBoxHost(hostname: string, zone: string): boolean {
+  return hostname.endsWith(`-box.${zone}`);
+}
 
 /** The same request, sent to a box's own hostname instead of the owner's box (docs/BYOB.md). */
-function toBox(req: Request, box: string, suffix: string): Request {
+function toBox(req: Request, box: string, zone: string): Request {
   const url = new URL(req.url);
-  url.hostname = `${box}.${suffix}`;
+  url.hostname = `${box}.${zone}`;
   url.port = "";
   return new Request(url.toString(), req);
 }
@@ -120,14 +125,14 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const nowSec = Math.floor(Date.now() / 1000);
-    const boxSuffix = env.BOX_ORIGIN_SUFFIX || DEFAULT_BOX_ORIGIN_SUFFIX;
+    const boxZone = env.BOX_ZONE || DEFAULT_BOX_ZONE;
 
-    // ---- *.box.aestra.studio ----------------------------------------------
+    // ---- *-box.aestra.studio ----------------------------------------------
     // A box's own hostname is reachable only as this Worker's subrequest. The
     // Worker is routed on it too, so a request from outside lands here and is
     // refused before the tunnel is consulted, the way tunes.aestra.studio's
     // origin stays unreachable without a device credential.
-    if (url.hostname === boxSuffix || url.hostname.endsWith(`.${boxSuffix}`)) {
+    if (isBoxHost(url.hostname, boxZone)) {
       return reject(404);
     }
 
@@ -282,7 +287,7 @@ export default {
       const id = boxHealth[1]!;
       if (!BOX_ID.test(id)) return reject(400);
       try {
-        const res = await fetch(`https://${id}.${boxSuffix}/health`);
+        const res = await fetch(`https://${id}.${boxZone}/health`);
         return new Response(await res.text(), {
           status: res.status,
           headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
@@ -370,7 +375,7 @@ export default {
     // Continue to origin — which for tunes.aestra.studio is tunesd through
     // the tunnel. The Worker does not know or care where the bytes come from.
     // An account with its own box goes to that box's tunnel instead.
-    if (box) return fetch(toBox(stripSignature(req), box, boxSuffix));
+    if (box) return fetch(toBox(stripSignature(req), box, boxZone));
     return fetch(stripSignature(req));
   },
 };

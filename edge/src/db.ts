@@ -37,8 +37,11 @@ export interface BoxRow {
   last_publish_at: number | null;
 }
 
-/** A box id is also the first label of its hostname, so its shape is fixed: lowercase letters, digits and hyphens. */
-export const BOX_ID = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+/** A box id is its hostname's first label (<name>-box.aestra.studio), so its shape is fixed: lowercase letters, digits
+ * and hyphens, ending in "-box". One level under the zone because the zone's certificate covers *.aestra.studio only:
+ * box.aestra.studio's own subdomains had no certificate (25 Oct dry run). The "-box" ending is what the Worker's route
+ * (*-box.aestra.studio) and its refusal of outside requests key on. */
+export const BOX_ID = /^[a-z0-9](?:[a-z0-9-]{0,34}[a-z0-9])?-box$/;
 
 /** The account's box when it has an active one (docs/BYOB.md). Null means the owner's box serves it. */
 export async function activeBoxForAccount(db: D1Database, accountId: string): Promise<BoxRow | null> {

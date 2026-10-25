@@ -35,8 +35,8 @@ Supported here: **macOS** and **Linux**. Windows is not covered yet; stop and sa
 One file, `<box-id>.env`, handed over privately. It contains:
 
 ```
-TUNESD_BOX_ID=box-<name>
-TUNES_BOX_HOST=box-<name>.box.aestra.studio
+TUNESD_BOX_ID=<name>-box
+TUNES_BOX_HOST=<name>-box.aestra.studio
 TUNNEL_TOKEN=…            # secret
 INTERNAL_PUBLISH_URL=https://tunes.aestra.studio/internal/publish
 INTERNAL_PUBLISH_KEY=…    # secret

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Make a BYOB box for an account (docs/BYOB.md, phase 2). Run by the Tunes owner, on the owner's machine.
 #
-#   scripts/byob/new-box.sh acct-cedric          # shows what it would do; changes nothing
+#   scripts/byob/new-box.sh acct-cedric          # shows what it would do; changes nothing (box cedric-box)
 #   scripts/byob/new-box.sh acct-cedric --yes    # does it
 #
 # It creates the box's Cloudflare Tunnel and DNS name in the owner's account, a publish key (only its hash is stored),
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <account-id> [--box-id box-name] [--archive-chat id] [--env path/to/tunesd/.env] [--yes]" >&2
+  echo "usage: $0 <account-id> [--box-id name-box] [--archive-chat id] [--env path/to/tunesd/.env] [--yes]" >&2
   exit 2
 }
 
@@ -35,7 +35,8 @@ done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EDGE="${HERE}/../../edge"
-SUFFIX="box.aestra.studio"
+# One level under the zone: its certificate covers *.aestra.studio only (a box.aestra.studio level had none).
+ZONE="aestra.studio"
 PUBLISH_URL="https://tunes.aestra.studio/internal/publish"
 OUT_DIR="${HOME}/.config/tunes/boxes"
 
@@ -44,9 +45,9 @@ say() { echo "new-box: $*"; }
 
 # --- the box id: the hostname's first label, so its shape is fixed (edge/src/db.ts BOX_ID) ---------------------------
 [[ "$ACCOUNT" =~ ^acct-[a-z0-9-]+$ ]] || die "account ids look like acct-name, got '$ACCOUNT'"
-[[ -n "$BOX_ID" ]] || BOX_ID="box-${ACCOUNT#acct-}"
-[[ "$BOX_ID" =~ ^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])?$ ]] || die "box id '$BOX_ID' must be 3-40 of a-z 0-9 -, not starting or ending with -"
-HOST="${BOX_ID}.${SUFFIX}"
+[[ -n "$BOX_ID" ]] || BOX_ID="${ACCOUNT#acct-}-box"
+[[ "$BOX_ID" =~ ^[a-z0-9]([a-z0-9-]{0,34}[a-z0-9])?-box$ ]] || die "box id '$BOX_ID' must be a-z 0-9 - ending in -box, e.g. cedric-box"
+HOST="${BOX_ID}.${ZONE}"
 TUNNEL_NAME="tunes-${BOX_ID}"
 
 # --- the archive group: the owner's, or the first channel the owner's box reads (tunesd's own default) -------------

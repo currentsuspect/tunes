@@ -46,10 +46,10 @@ describe("bring your own box", () => {
         method: "POST",
         body: JSON.stringify({ refresh_token: REFRESH }),
       }),
-      env({ id: "box-cedric" }),
+      env({ id: "cedric-box" }),
     );
     const { access_token } = (await res.json()) as { access_token: string };
-    expect((await verifyAccessToken(access_token, ACCESS_SECRET, NOW))?.box).toBe("box-cedric");
+    expect((await verifyAccessToken(access_token, ACCESS_SECRET, NOW))?.box).toBe("cedric-box");
 
     const none = await worker.fetch(
       new Request("https://tunes.aestra.studio/auth/token", {
@@ -80,16 +80,19 @@ describe("bring your own box", () => {
         env(null),
       );
     };
-    await ask("box-cedric");
+    await ask("cedric-box");
     await ask();
-    expect(seen).toEqual(["box-cedric.box.aestra.studio", "tunes.aestra.studio"]);
+    expect(seen).toEqual(["cedric-box.aestra.studio", "tunes.aestra.studio"]);
   });
 
   it("refuses a box's hostname from outside, before any tunnel", async () => {
     const tunnel = vi.fn(async () => new Response("library"));
     vi.stubGlobal("fetch", tunnel);
-    const res = await worker.fetch(new Request("https://box-cedric.box.aestra.studio/manifest"), env(null));
+    const res = await worker.fetch(new Request("https://cedric-box.aestra.studio/manifest"), env(null));
     expect(res.status).toBe(404);
+    // Anything beneath a box's name is refused the same way.
+    const deeper = await worker.fetch(new Request("https://x.cedric-box.aestra.studio/manifest"), env(null));
+    expect(deeper.status).toBe(404);
     expect(tunnel).not.toHaveBeenCalled();
   });
 
@@ -114,9 +117,9 @@ describe("bring your own box", () => {
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
       seen.push(String(url));
-      return new Response(JSON.stringify({ ok: true, box: "box-cedric" }));
+      return new Response(JSON.stringify({ ok: true, box: "cedric-box" }));
     });
-    const ask = (key: string, id = "box-cedric") =>
+    const ask = (key: string, id = "cedric-box") =>
       worker.fetch(
         new Request(`https://tunes.aestra.studio/internal/boxes/${id}/health`, {
           headers: { authorization: `Bearer ${key}` },
@@ -125,7 +128,7 @@ describe("bring your own box", () => {
       );
     const ok = await ask("k".repeat(64));
     expect(ok.status).toBe(200);
-    expect(seen).toEqual(["https://box-cedric.box.aestra.studio/health"]);
+    expect(seen).toEqual(["https://cedric-box.aestra.studio/health"]);
     expect((await ask("x".repeat(64))).status).toBe(401);
     expect((await ask("k".repeat(64), "Evil.Host")).status).toBe(400);
     expect(seen).toHaveLength(1);

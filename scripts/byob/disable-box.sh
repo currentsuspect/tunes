@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Turn a BYOB box off (docs/BYOB.md, phase 2). The account goes back to the owner's box.
 #
-#   scripts/byob/disable-box.sh box-cedric                  # shows what it would do
-#   scripts/byob/disable-box.sh box-cedric --yes            # disables routing (the row is kept)
-#   scripts/byob/disable-box.sh box-cedric --yes --delete-tunnel
+#   scripts/byob/disable-box.sh cedric-box                  # shows what it would do
+#   scripts/byob/disable-box.sh cedric-box --yes            # disables routing (the row is kept)
+#   scripts/byob/disable-box.sh cedric-box --yes --delete-tunnel
 #
 # Routing stops within one access-token lifetime (10 minutes); signed /track and /art URLs already handed out keep
 # pointing at the box until they expire (4 hours). --delete-tunnel also deletes the box's tunnel, so the box can no
@@ -29,7 +29,7 @@ EDGE="${HERE}/../../edge"
 die() { echo "disable-box: $*" >&2; exit 1; }
 say() { echo "disable-box: $*"; }
 
-[[ "$BOX_ID" =~ ^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])?$ ]] || die "not a box id: '$BOX_ID'"
+[[ "$BOX_ID" =~ ^[a-z0-9]([a-z0-9-]{0,34}[a-z0-9])?-box$ ]] || die "not a box id (name-box): '$BOX_ID'"
 d1() { (cd "$EDGE" && npx wrangler d1 execute tunes-auth --remote --json --command "$1" 2>/dev/null); }
 
 ROW="$(d1 "SELECT account_id, status FROM box WHERE id = '${BOX_ID}'" \
