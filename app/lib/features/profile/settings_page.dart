@@ -12,6 +12,8 @@ import '../../core/data/download_store.dart';
 import '../../core/data/play_history.dart';
 import '../../core/data/storage_usage.dart';
 import '../../core/platform/diag_log.dart';
+import '../../core/platform/share_log.dart';
+import '../../core/platform/reveal.dart';
 import '../../core/data/avatar.dart';
 import '../../core/auth/tunes_auth.dart';
 import '../../core/data/settings_store.dart';
@@ -283,6 +285,36 @@ class _SettingsPageState extends State<SettingsPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _art = ArtScope.maybeOf(context);
+  }
+
+  Future<void> _shareLog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final copy = await shareDiagLog(
+        buildNumber: widget.buildNumber,
+        commit: widget.commit,
+      );
+      if (copy == null) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('No log yet on this device')),
+        );
+      } else if (!Platform.isAndroid) {
+        messenger?.showSnackBar(
+          SnackBar(
+            content: Text('Saved to ${copy.path}'),
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(
+              label: 'Show',
+              onPressed: () => revealFile(copy),
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text("Couldn't share the log this time")),
+      );
+    }
   }
 
   Future<void> _measure() async {
@@ -858,6 +890,16 @@ class _SettingsPageState extends State<SettingsPage> {
                                     : (DiagLog.path == null
                                           ? 'not initialised'
                                           : formatBytes(_usage!.logBytes)),
+                              ),
+                              _LinkTile(
+                                title: 'Share the log',
+                                detail:
+                                    'What the app noted about playback and '
+                                    'syncing, to send anywhere. It holds song '
+                                    'names, nothing private.',
+                                onTap: DiagLog.path == null
+                                    ? null
+                                    : () => _shareLog(context),
                               ),
                               _LinkTile(
                                 title: 'Free image memory',

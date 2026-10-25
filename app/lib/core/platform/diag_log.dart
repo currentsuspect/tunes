@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 
 class DiagLog {
@@ -10,6 +11,11 @@ class DiagLog {
   /// Where the log actually is, so the developer section can report its size
   /// rather than print a zero it never measured.
   static String? get path => _file?.path;
+
+  /// Points the log at [file], for tests: [init] would write to the real
+  /// cache folder of whoever runs them.
+  @visibleForTesting
+  static set fileForTest(File? file) => _file = file;
 
   static Future<void> init() async {
     try {
