@@ -89,6 +89,9 @@ export interface AccessClaims {
   exp: number;
   /** Issued at, unix seconds. */
   iat: number;
+  /** The account's own box (docs/BYOB.md), when it has one: where its library requests go. Absent = the owner's box.
+   * Set at /auth/token, which reads the database; the gate routes on it without one. */
+  box?: string;
 }
 
 /** Mints an HS256 JWT. The only token type this service issues. */

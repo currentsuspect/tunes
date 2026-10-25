@@ -64,23 +64,32 @@ export const MEDIA_TTL_MAX_SEC = 86_400;
  * with "/" and a uuid contains no newline, so "\n" is safe here -- a naive
  * concatenation would let ("/a", "b") and ("/ab", "") sign identically.
  */
-export function canonicalString(path: string, deviceId: string, exp: number): string {
-  return `${path}\n${deviceId}\n${exp}`;
+export function canonicalString(path: string, deviceId: string, exp: number, box?: string): string {
+  // The box (docs/BYOB.md) only when there is one, so every grant minted before it existed still verifies. A box id is
+  // [a-z0-9-] (db.ts BOX_ID), so it cannot carry the separator either.
+  return box ? `${path}\n${deviceId}\n${exp}\n${box}` : `${path}\n${deviceId}\n${exp}`;
 }
 
+/**
+ * Signs @p path for a device. @p box, when the account has its own box, is bound into the signature and carried in the
+ * URL, so the gate can route the request there without a database read. Never pass one for /t/ paths: the cloud path is
+ * shared, and tunes-fetch verifies those signatures with its own canonical string, which has no box.
+ */
 export async function signMediaUrl(
   path: string,
   deviceId: string,
   exp: number,
   secret: string,
+  box?: string,
 ): Promise<string> {
-  const sig = await hmacHex(secret, canonicalString(path, deviceId, exp));
+  const sig = await hmacHex(secret, canonicalString(path, deviceId, exp, box));
   const q = new URLSearchParams({ exp: String(exp), did: deviceId, sig });
+  if (box) q.set("box", box);
   return `${path}?${q.toString()}`;
 }
 
 export type MediaVerdict =
-  | { ok: true; deviceId: string }
+  | { ok: true; deviceId: string; box: string | null }
   | { ok: false; reason: "missing" | "expired" | "bad-signature" };
 
 /**
@@ -106,8 +115,9 @@ export async function verifyMediaUrl(
   const exp = Number(expRaw);
   if (!Number.isSafeInteger(exp)) return { ok: false, reason: "missing" };
 
-  const expected = await hmacHex(secret, canonicalString(path, did, exp));
+  const box = params.get("box") || undefined;
+  const expected = await hmacHex(secret, canonicalString(path, did, exp, box));
   if (!timingSafeEqual(expected, sig)) return { ok: false, reason: "bad-signature" };
   if (exp <= nowSec) return { ok: false, reason: "expired" };
-  return { ok: true, deviceId: did };
+  return { ok: true, deviceId: did, box: box ?? null };
 }

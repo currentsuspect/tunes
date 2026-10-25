@@ -14,6 +14,10 @@ compatibility_date = "2026-09-01"
 # edge is live.
 routes = [
   { pattern = "tunes.aestra.studio/*", zone_name = "aestra.studio" },
+  # BYOB boxes (docs/BYOB.md): each box is <id>.box.aestra.studio, its own
+  # tunnel. Routed here so a request from outside is refused by the Worker
+  # before any tunnel is reached; the Worker's own subrequests go through.
+  { pattern = "*.box.aestra.studio/*", zone_name = "aestra.studio" },
 ]
 
 [vars]

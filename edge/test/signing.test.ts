@@ -23,7 +23,28 @@ describe("signed media urls", () => {
     expect(await verifyMediaUrl(PATH, paramsOf(signed), SECRET, NOW)).toEqual({
       ok: true,
       deviceId: "dev-1",
+      box: null,
     });
+  });
+
+  // BYOB (docs/BYOB.md): the account's box rides in the grant, bound into the signature.
+  it("carries a box, signed, and grants without one still verify", async () => {
+    const withBox = await signMediaUrl(PATH, "dev-1", NOW + 300, SECRET, "box-cedric");
+    expect(await verifyMediaUrl(PATH, paramsOf(withBox), SECRET, NOW)).toEqual({
+      ok: true,
+      deviceId: "dev-1",
+      box: "box-cedric",
+    });
+    // Moving a grant to another box, or dropping the box, breaks the signature.
+    const moved = paramsOf(withBox);
+    moved.set("box", "box-dennis");
+    expect(await verifyMediaUrl(PATH, moved, SECRET, NOW)).toEqual({ ok: false, reason: "bad-signature" });
+    const dropped = paramsOf(withBox);
+    dropped.delete("box");
+    expect(await verifyMediaUrl(PATH, dropped, SECRET, NOW)).toEqual({ ok: false, reason: "bad-signature" });
+    // A grant minted before boxes existed has no box and verifies as before.
+    const old = await signMediaUrl(PATH, "dev-1", NOW + 300, SECRET);
+    expect(new URLSearchParams(old.split("?")[1]).has("box")).toBe(false);
   });
 
   it("rejects a url whose path was swapped for another object", async () => {

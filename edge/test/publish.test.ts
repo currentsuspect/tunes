@@ -13,7 +13,7 @@ const KEY = "k".repeat(64);
 const HOST = "https://tunes.aestra.studio";
 const SHA = "a".repeat(64);
 
-function fakeEnv(over: Record<string, unknown> = {}) {
+function fakeEnv(over: Record<string, unknown> = {}, boxes: Record<string, unknown> = {}) {
   const puts: { key: string; value: string }[] = [];
   const batches: unknown[][] = [];
   return {
@@ -21,7 +21,13 @@ function fakeEnv(over: Record<string, unknown> = {}) {
       INTERNAL_PUBLISH_KEY: KEY,
       DB: {
         prepare: (sql: string) => ({
-          bind: (...args: unknown[]) => ({ sql, args }),
+          bind: (...args: unknown[]) => ({
+            sql,
+            args,
+            // BYOB box lookups (a key that is not the owner's): no box unless a test adds one.
+            first: async () => (boxes as Record<string, unknown>)[String(args[0])] ?? null,
+            run: async () => ({}),
+          }),
         }),
         batch: vi.fn(async (stmts: unknown[]) => {
           batches.push(stmts);
@@ -519,3 +525,50 @@ describe("the box reading its own audio back (24 Oct, drop moments)", () => {
   });
 });
 
+
+// BYOB (docs/BYOB.md): a box publishes with its own key, into its own place.
+describe("a box's own publish", () => {
+  const BOX_KEY = "b".repeat(64);
+  const hashOf = async (s: string) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  const putAs = (body: string, key: string) =>
+    new Request(`${HOST}/internal/manifest`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${key}`, "content-length": String(body.length) },
+      body,
+    });
+
+  it("writes under boxes/<id>/, never the owner's manifest", async () => {
+    const boxes = { [await hashOf(BOX_KEY)]: { id: "box-cedric", status: "active" } };
+    const { env } = fakeEnv({}, boxes);
+    const res = await handleManifestPut(putAs("{\"tracks\":[]}", BOX_KEY), env);
+    expect(res.status).toBe(200);
+    expect(env.CACHE.put.mock.calls[0][0]).toBe("boxes/box-cedric/manifest.json");
+  });
+
+  it("refuses a key that is neither the owner's nor an active box's", async () => {
+    const { env } = fakeEnv({}, {});
+    expect((await handleManifestPut(putAs("{}", "c".repeat(64)), env)).status).toBe(401);
+    expect(env.CACHE.put).not.toHaveBeenCalled();
+  });
+
+  it("serves a box's account its own manifest", async () => {
+    const stored: Record<string, string> = {
+      "manifest.json": "{\"owner\":true}",
+      "boxes/box-cedric/manifest.json": "{\"box\":true}",
+    };
+    const { env } = fakeEnv({
+      CACHE: {
+        get: async (key: string) =>
+          key in stored ? { body: new Response(stored[key]).body } : null,
+      },
+    });
+    const req = new Request(`${HOST}/manifest`);
+    expect(await (await handleManifestGet(req, env, "box-cedric"))!.text()).toBe("{\"box\":true}");
+    expect(await (await handleManifestGet(req, env))!.text()).toBe("{\"owner\":true}");
+    // A box that has not published yet: nothing here, so the request goes on to its tunnel.
+    expect(await handleManifestGet(req, env, "box-dennis")).toBeNull();
+  });
+});

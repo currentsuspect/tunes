@@ -23,13 +23,15 @@ import {
   verifyAccessToken,
 } from "./crypto.js";
 import { MEDIA_TTL_MAX_SEC, MEDIA_TTL_SEC, signMediaUrl } from "./signing.js";
-import { handleMedia, stripSignature } from "./media.js";
+import { handleMedia, stripSignature, type MediaRoute } from "./media.js";
 import { handleSync } from "./sync.js";
-import { handleArtGet, handleArtPut, handleAudioPut, handlePublish,
+import { checkAuth, handleArtGet, handleArtPut, handleAudioPut, handlePublish,
   handleManifestGet,
   handleManifestPut, handleTrackGet } from "./publish.js";
 import {
+  BOX_ID,
   accountById,
+  activeBoxForAccount,
   deviceById,
   deviceByRefreshHash,
   inviteByHash,
@@ -56,6 +58,18 @@ export interface Env {
   CACHE?: R2Bucket;
   /** Cloud byte path. Absent in tests; /t/ falls through to origin deny. */
   FETCH_WORKER?: Fetcher;
+  /** Where BYOB boxes live (docs/BYOB.md): a box is <id>.<suffix>, its own Cloudflare Tunnel. */
+  BOX_ORIGIN_SUFFIX?: string;
+}
+
+const DEFAULT_BOX_ORIGIN_SUFFIX = "box.aestra.studio";
+
+/** The same request, sent to a box's own hostname instead of the owner's box (docs/BYOB.md). */
+function toBox(req: Request, box: string, suffix: string): Request {
+  const url = new URL(req.url);
+  url.hostname = `${box}.${suffix}`;
+  url.port = "";
+  return new Request(url.toString(), req);
 }
 
 const DEFAULT_ACCESS_TTL_SEC = 600;
@@ -106,6 +120,16 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const nowSec = Math.floor(Date.now() / 1000);
+    const boxSuffix = env.BOX_ORIGIN_SUFFIX || DEFAULT_BOX_ORIGIN_SUFFIX;
+
+    // ---- *.box.aestra.studio ----------------------------------------------
+    // A box's own hostname is reachable only as this Worker's subrequest. The
+    // Worker is routed on it too, so a request from outside lands here and is
+    // refused before the tunnel is consulted, the way tunes.aestra.studio's
+    // origin stays unreachable without a device credential.
+    if (url.hostname === boxSuffix || url.hostname.endsWith(`.${boxSuffix}`)) {
+      return reject(404);
+    }
 
     // ---- POST /auth/redeem ------------------------------------------------
     // Invite code -> a device row and the only refresh token it will ever get.
@@ -159,8 +183,13 @@ export default {
       if (!account || account.status !== "active") return reject();
 
       const ttl = Number(env.ACCESS_TTL_SEC ?? DEFAULT_ACCESS_TTL_SEC);
+      // The account's own box, if it has one (docs/BYOB.md). In the token, so
+      // the gate routes without a database read; a box turned off stops being
+      // used within one token lifetime.
+      const box = await activeBoxForAccount(env.DB, account.id);
+      const claims = { sub: account.id, did: device.id, iat: nowSec, exp: nowSec + ttl };
       const token = await signAccessToken(
-        { sub: account.id, did: device.id, iat: nowSec, exp: nowSec + ttl },
+        box && BOX_ID.test(box.id) ? { ...claims, box: box.id } : claims,
         env.ACCESS_SECRET,
       );
       await touchDevice(env.DB, device.id, nowSec);
@@ -210,7 +239,10 @@ export default {
       const exp = nowSec + ttl;
       const grants: Record<string, string> = {};
       for (const p of paths) {
-        grants[p] = await signMediaUrl(p, claims.did, exp, env.MEDIA_SECRET);
+        // The box rides in /track and /art grants so those bytes come from the
+        // account's own box; /t/ is the shared cloud path and never carries it.
+        const box = p.startsWith("/t/") ? undefined : claims.box;
+        grants[p] = await signMediaUrl(p, claims.did, exp, env.MEDIA_SECRET, box);
       }
       return json({ grants, expires_in: ttl });
     }
@@ -241,6 +273,25 @@ export default {
       return handlePublish(req, env);
     }
 
+    // ---- GET /internal/boxes/:id/health -----------------------------------
+    // The owner's end-to-end check of a BYOB box (docs/BYOB.md): through its
+    // tunnel, which nothing else outside can reach. Owner's service key only.
+    const boxHealth = /^\/internal\/boxes\/([^/]+)\/health$/.exec(url.pathname);
+    if (boxHealth && req.method === "GET") {
+      if (!checkAuth(req, env)) return reject();
+      const id = boxHealth[1]!;
+      if (!BOX_ID.test(id)) return reject(400);
+      try {
+        const res = await fetch(`https://${id}.${boxSuffix}/health`);
+        return new Response(await res.text(), {
+          status: res.status,
+          headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+        });
+      } catch {
+        return json({ ok: false, error: "unreachable" }, 502);
+      }
+    }
+
     // ---- PUT /internal/manifest ------------------------------------------
     // The manifest alone, raw, streamed to R2 (publish.ts says why).
     if (url.pathname === "/internal/manifest") {
@@ -269,10 +320,13 @@ export default {
     //
     // After the media gate, deliberately: the origin path requires a device
     // credential, and a copy in R2 must not drop that gate.
-    const rejected = await handleMedia(req, env, nowSec);
+    const route: MediaRoute = { box: null };
+    const rejected = await handleMedia(req, env, nowSec, route);
     if (rejected) return rejected;
+    // Only a box id of the expected shape ever becomes a hostname.
+    const box = route.box && BOX_ID.test(route.box) ? route.box : null;
     if (url.pathname === "/manifest" && req.method === "GET" && env.CACHE) {
-      const served = await handleManifestGet(req, env);
+      const served = await handleManifestGet(req, env, box);
       if (served) return served;
     }
 
@@ -315,6 +369,8 @@ export default {
     }
     // Continue to origin — which for tunes.aestra.studio is tunesd through
     // the tunnel. The Worker does not know or care where the bytes come from.
+    // An account with its own box goes to that box's tunnel instead.
+    if (box) return fetch(toBox(stripSignature(req), box, boxSuffix));
     return fetch(stripSignature(req));
   },
 };

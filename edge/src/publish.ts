@@ -9,6 +9,7 @@
  * key, and the edge holds the Cloudflare side.
  */
 import { timingSafeEqual } from "./crypto.js";
+import { activeBoxByPublishHash, touchBoxPublish } from "./db.js";
 
 const SHA_RE = /^[0-9a-f]{64}$/;
 const MAX_ROWS = 5000;
@@ -61,9 +62,32 @@ export function checkAuth(req: Request, env: PublishEnv): boolean {
   return key !== "" && timingSafeEqual(header, `Bearer ${key}`);
 }
 
+/** Who is publishing: the owner's box (the service key), or a BYOB box by its own key (docs/BYOB.md). */
+export type Publisher = { box: null } | { box: string };
+
+/**
+ * The owner's key is checked first and needs no database. Anything else that looks like a key is hashed and looked up
+ * among active boxes: a box writes only its own manifest (keyed by its id) and, like the owner's box, content-addressed
+ * art, audio and fetch_map rows. Null = refused.
+ */
+export async function publisherOf(req: Request, env: PublishEnv): Promise<Publisher | null> {
+  if (checkAuth(req, env)) return { box: null };
+  const header = req.headers.get("authorization") ?? "";
+  if (!header.startsWith("Bearer ") || header.length < 7 + 32 || !env.DB) return null;
+  const hash = await sha256Hex(new TextEncoder().encode(header.slice(7)));
+  const box = await activeBoxByPublishHash(env.DB, hash);
+  return box ? { box: box.id } : null;
+}
+
+/** Where a manifest lives in R2: the shared keys for the owner's box, boxes/<id>/ for a BYOB box. */
+function manifestKey(box: string | null, name: string): string {
+  return box ? `boxes/${box}/${name}` : name;
+}
+
 export async function handlePublish(req: Request, env: PublishEnv): Promise<Response> {
   if (req.method !== "POST") return error(405);
-  if (!checkAuth(req, env)) return error(401);
+  const publisher = await publisherOf(req, env);
+  if (!publisher) return error(401);
 
   let body: unknown;
   try {
@@ -113,8 +137,9 @@ export async function handlePublish(req: Request, env: PublishEnv): Promise<Resp
       )
     );
   }
+  if (publisher.box) await touchBoxPublish(db, publisher.box, Math.floor(Date.now() / 1000));
   if (manifestBody !== null) {
-    await cache.put("manifest.json", manifestBody, {
+    await cache.put(manifestKey(publisher.box, "manifest.json"), manifestBody, {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
     });
   }
@@ -131,7 +156,9 @@ export async function handlePublish(req: Request, env: PublishEnv): Promise<Resp
  * serves itself; a length is required so R2 can take the stream as is. */
 export async function handleManifestPut(req: Request, env: PublishEnv): Promise<Response> {
   if (req.method !== "PUT") return error(405);
-  if (!checkAuth(req, env)) return error(401);
+  const publisher = await publisherOf(req, env);
+  if (!publisher) return error(401);
+  const key = (name: string) => manifestKey(publisher.box, name);
   const length = Number(req.headers.get("content-length") ?? NaN);
   if (!Number.isFinite(length) || length <= 1) return error(411);
   if (length > MAX_MANIFEST_BYTES) return error(413);
@@ -146,17 +173,18 @@ export async function handleManifestPut(req: Request, env: PublishEnv): Promise<
   // apart; always gzipped.
   if (new URL(req.url).searchParams.get("lean") === "1") {
     if (!gzipped) return error(400);
-    await cache.put(MANIFEST_LEAN_GZ, req.body, {
+    await cache.put(key(MANIFEST_LEAN_GZ), req.body, {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
     });
     return new Response(JSON.stringify({ ok: true, manifestBytes: length, lean: "stored" }), {
       headers: { "content-type": "application/json; charset=utf-8" },
     });
   }
-  await cache.put(gzipped ? MANIFEST_GZ : MANIFEST, req.body, {
+  await cache.put(key(gzipped ? MANIFEST_GZ : MANIFEST), req.body, {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
   });
-  await cache.delete?.(gzipped ? MANIFEST : MANIFEST_GZ);
+  await cache.delete?.(key(gzipped ? MANIFEST : MANIFEST_GZ));
+  if (publisher.box && env.DB) await touchBoxPublish(env.DB, publisher.box, Math.floor(Date.now() / 1000));
   return new Response(
     JSON.stringify({
       ok: true,
@@ -179,9 +207,14 @@ const MANIFEST_LEAN_GZ = "manifest-lean.json.gz";
  * plain copy from a box that has not started gzipping. Null when there is
  * neither, so the request goes on to origin.
  */
-export async function handleManifestGet(req: Request, env: PublishEnv): Promise<Response | null> {
+export async function handleManifestGet(
+  req: Request,
+  env: PublishEnv,
+  box: string | null = null,
+): Promise<Response | null> {
   const cache = env.CACHE;
   if (!cache) return null;
+  const key = (name: string) => manifestKey(box, name);
   const headers = {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "public, max-age=60",
@@ -190,7 +223,7 @@ export async function handleManifestGet(req: Request, env: PublishEnv): Promise<
   // A device that fetches lyrics by stamp asks for the lean copy; until
   // the box has published one, it gets the full one, which it also reads.
   const lean = new URL(req.url).searchParams.get("lean") === "1";
-  const gz = (lean ? await cache.get(MANIFEST_LEAN_GZ) : null) ?? (await cache.get(MANIFEST_GZ));
+  const gz = (lean ? await cache.get(key(MANIFEST_LEAN_GZ)) : null) ?? (await cache.get(key(MANIFEST_GZ)));
   if (gz) {
     if (/\bgzip\b/.test(req.headers.get("accept-encoding") ?? "")) {
       return new Response(gz.body, {
@@ -201,7 +234,7 @@ export async function handleManifestGet(req: Request, env: PublishEnv): Promise<
     }
     return new Response(gz.body.pipeThrough(new DecompressionStream("gzip")), { headers });
   }
-  const plain = await cache.get(MANIFEST);
+  const plain = await cache.get(key(MANIFEST));
   return plain ? new Response(plain.body, { headers }) : null;
 }
 
@@ -347,7 +380,7 @@ export async function handleArtGet(pathname: string, env: PublishEnv): Promise<R
  * GET path below reads what this writes. */
 export async function handleArtPut(req: Request, pathname: string, env: PublishEnv): Promise<Response> {
   if (req.method !== "PUT") return error(405);
-  if (!checkAuth(req, env)) return error(401);
+  if (!(await publisherOf(req, env))) return error(401);
   const m = ART_PATH.exec(pathname);
   if (!m?.[1]) return error(404);
   const sha = m[1]!;
@@ -403,7 +436,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * truncated object is worse than a missing one. */
 export async function handleAudioPut(req: Request, pathname: string, env: PublishEnv): Promise<Response> {
   if (req.method !== "PUT" && req.method !== "GET") return error(405);
-  if (!checkAuth(req, env)) return error(401);
+  if (!(await publisherOf(req, env))) return error(401);
   const m = AUDIO_PATH.exec(pathname);
   if (!m?.[1]) return error(404);
   const sha = m[1]!;

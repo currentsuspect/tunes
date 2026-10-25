@@ -54,7 +54,6 @@ New D1 table:
 CREATE TABLE box (
   id               TEXT PRIMARY KEY,           -- "box-cedric"
   account_id       TEXT NOT NULL UNIQUE REFERENCES account(id),
-  origin_host      TEXT NOT NULL,              -- "box-cedric.box.aestra.studio"
   publish_key_hash TEXT NOT NULL UNIQUE,       -- sha256 of the box's publish key
   status           TEXT NOT NULL DEFAULT 'active',
   created_at       INTEGER NOT NULL,
@@ -64,13 +63,18 @@ CREATE TABLE box (
 
 After the device token is verified, the account in its claims picks the origin:
 
-- **Account has an active box:** the request goes to `https://<origin_host>`. This covers everything the box answers
+- **Account has an active box:** the request goes to `https://<id>.box.aestra.studio`. The hostname is derived from the
+  id, never stored, so no row can point a request at an arbitrary host. This covers everything the box answers
   today: the library (`/manifest`, `/changes`, `/search`, …), Soulseek (`/soulseek/*`), `/about/*`, `/tracklist`,
   `/discography`, and track bytes from the origin.
 - **No box, or a disabled box:** the owner's box, exactly as today.
 - **Never routed to a box:** `/auth/*`, `/sync/*`, `/lyrics*`, `/update*` and `/internal/*`. These stay central.
 
-The lookup is one indexed D1 read per request and can be cached in the isolate for a minute.
+The box is looked up once, when the device gets its access token (`/auth/token`, which already reads the database),
+and carried in the token's `box` claim. Signed `/track` and `/art` URLs carry it too, bound into the signature, so the
+gate routes without a database read. `/t/` URLs never carry it: the cloud path is shared, and `tunes-fetch` verifies
+those itself. A disabled box stops being used within one token lifetime (10 minutes), and within one media grant
+(4 hours) for signed URLs already handed out.
 
 > The byte path is the only part of the Worker that must not touch the database today. A routed origin needs the
 > account first. The route is resolved from the token's claims before the stateless section, so that rule still holds
@@ -148,8 +152,8 @@ tunesd's `.env`:
 
 **Prove it:**
 
-1. `GET /health` through the tunnel answers. tunesd has no such endpoint today; phase 1 adds one, unauthenticated,
-   answering only the version and box id.
+1. `GET localhost:4780/health` answers with the box's id, and the owner's `GET /internal/boxes/<id>/health` (service
+   key, through the Worker) answers the same through the tunnel. Nothing else outside can reach a box.
 2. The box's first publish lands (`last_publish_at` is set).
 3. A test get from the person's phone arrives in their library.
 4. The song is uploaded to the archive group.
