@@ -430,6 +430,7 @@ Widget _barShell({required Color tint, required Widget child, Color? backing}) {
       tint: tint,
       backing: backing,
       pressable: true,
+      lens: true,
       child: child,
     );
   }

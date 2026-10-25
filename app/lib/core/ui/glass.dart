@@ -1,7 +1,8 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
+import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../theme/looks.dart';
 
@@ -16,6 +17,25 @@ abstract final class GlassSheen {
   /// Called with a vertical scroll's offset. A slow sine, so a long read
   /// sweeps the light back and forth rather than pinning it at one end.
   static void follow(double pixels) => x.value = math.sin(pixels / 520) * 0.85;
+}
+
+/// Glass's lens shader (shaders/glass_lens.frag): the page bends at a
+/// floating pane's rim. Loaded once at start; until it has loaded, and
+/// wherever the renderer cannot run a shader as a backdrop filter (Skia,
+/// tests), panes are plain frost.
+abstract final class GlassLens {
+  static FragmentProgram? _program;
+
+  static Future<void> load() async {
+    if (!ImageFilter.isShaderFilterSupported) return;
+    try {
+      _program = await FragmentProgram.fromAsset('shaders/glass_lens.frag');
+    } catch (_) {
+      // A pane without a lens is still a pane.
+    }
+  }
+
+  static FragmentShader? shader() => _program?.fragmentShader();
 }
 
 /// Glass's one effect: a pane that frosts what is behind it.
@@ -36,6 +56,7 @@ class GlassPane extends StatefulWidget {
     this.tint,
     this.backing,
     this.pressable = false,
+    this.lens = false,
   });
 
   final Widget child;
@@ -53,6 +74,11 @@ class GlassPane extends StatefulWidget {
   /// Swells under the finger. Only for panes that are themselves a control
   /// (the dock's capsules); a sheet that swelled would read as broken.
   final bool pressable;
+
+  /// Bends the page at the rim ([GlassLens]). Only for small floating panes
+  /// (the dock's capsules): it is a pass over every pixel the pane covers,
+  /// and a sheet's worth of bending would be hard to read through.
+  final bool lens;
 
   @override
   State<GlassPane> createState() => _GlassPaneState();
@@ -84,8 +110,11 @@ class _GlassPaneState extends State<GlassPane> {
     final still = MediaQuery.disableAnimationsOf(context);
     final pane = ClipRRect(
       borderRadius: widget.borderRadius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: widget.blur, sigmaY: widget.blur),
+      child: _Frost(
+        blur: widget.blur,
+        lens: widget.lens,
+        radius: widget.borderRadius.topLeft.x,
+        dpr: MediaQuery.devicePixelRatioOf(context),
         child: AnimatedContainer(
           duration: still ? Duration.zero : const Duration(milliseconds: 260),
           color: widget.backing ?? Colors.transparent,
@@ -130,6 +159,97 @@ class _GlassPaneState extends State<GlassPane> {
         child: pane,
       ),
     );
+  }
+}
+
+/// The frost behind a pane: a blur, and through [GlassLens] the bend at its
+/// rim. A render object rather than a BackdropFilter because the lens needs
+/// the pane's place on screen at paint time, mid-animation included (the
+/// dock folding, a capsule swelling under the finger).
+class _Frost extends SingleChildRenderObjectWidget {
+  const _Frost({
+    required this.blur,
+    required this.lens,
+    required this.radius,
+    required this.dpr,
+    required super.child,
+  });
+
+  final double blur;
+  final bool lens;
+  final double radius;
+  final double dpr;
+
+  @override
+  _RenderFrost createRenderObject(BuildContext context) =>
+      _RenderFrost(blur, lens ? GlassLens.shader() : null, radius, dpr);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderFrost render) {
+    render
+      ..blur = blur
+      ..radius = radius
+      ..dpr = dpr;
+    if (lens && render.shader == null) render.shader = GlassLens.shader();
+    if (!lens) render.shader = null;
+  }
+}
+
+class _RenderFrost extends RenderProxyBox {
+  _RenderFrost(this._blur, this.shader, this._radius, this._dpr);
+
+  FragmentShader? shader;
+
+  double _blur;
+  set blur(double v) {
+    if (v == _blur) return;
+    _blur = v;
+    markNeedsPaint();
+  }
+
+  double _radius;
+  set radius(double v) {
+    if (v == _radius) return;
+    _radius = v;
+    markNeedsPaint();
+  }
+
+  double _dpr;
+  set dpr(double v) {
+    if (v == _dpr) return;
+    _dpr = v;
+    markNeedsPaint();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => child != null;
+
+  @override
+  BackdropFilterLayer? get layer => super.layer as BackdropFilterLayer?;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) return;
+    final blur = ImageFilter.blur(sigmaX: _blur, sigmaY: _blur);
+    final s = shader;
+    var filter = blur;
+    if (s != null) {
+      final origin = localToGlobal(Offset.zero) * _dpr;
+      final pane = size * _dpr;
+      // Index 0 and 1 are u_size, which the engine sets.
+      s
+        ..setFloat(2, origin.dx)
+        ..setFloat(3, origin.dy)
+        ..setFloat(4, pane.width)
+        ..setFloat(5, pane.height)
+        ..setFloat(6, _radius * _dpr)
+        ..setFloat(7, 9 * _dpr) // the rim pulls the page this far, at most
+        ..setFloat(8, 14 * _dpr) // over a band this wide
+        ..setFloat(9, 1.2 * _dpr); // with this much colour split
+      filter = ImageFilter.compose(outer: ImageFilter.shader(s), inner: blur);
+    }
+    layer = (layer ?? BackdropFilterLayer())..filter = filter;
+    context.pushLayer(layer!, super.paint, offset);
   }
 }
 

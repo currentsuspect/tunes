@@ -128,6 +128,8 @@ const _accountUrl = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Glass's lens; panes are plain frost until it lands (core/ui/glass.dart).
+  unawaited(GlassLens.load());
   // Draw behind the system bars. Recent Android does this to apps whether
   // they ask or not, so an app that has not opted in gets the layout without
   // the chance to say what the bars should look like over it.
@@ -2911,6 +2913,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       tint: widget.player.current == null ? null : tint,
                       backing: _dockBacking(),
                       pressable: true,
+                      lens: true,
                       child: tabs,
                     ),
                   ),
