@@ -32,6 +32,8 @@ class SettingsStore extends ChangeNotifier {
   static const _autoNight = 'theme.autoNight';
   static const _autoDay = 'theme.autoDay';
   static const _themeBrightness = 'theme.brightness';
+  static const _glassStyle = 'theme.glassStyle';
+  static const _glassTint = 'theme.glassTint';
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _lyricsEndRangeMs = 'lyrics.endRangeMs';
@@ -280,6 +282,16 @@ class SettingsStore extends ChangeNotifier {
   /// the app was dark-only until themes, so nobody wakes up to a white app.
   int get themeBrightness => int.tryParse(_cache[_themeBrightness] ?? '') ?? 1;
   Future<void> setThemeBrightness(int v) => _put(_themeBrightness, '$v');
+
+  /// Glass's panes, as the iPhone offers its home screen: 0 frosted (the
+  /// default), 1 clear, 2 tinted.
+  int get glassStyle =>
+      (int.tryParse(_cache[_glassStyle] ?? '') ?? 0).clamp(0, 2);
+  Future<void> setGlassStyle(int v) => _put(_glassStyle, '$v');
+
+  /// Tinted Glass's colour, as 0xAARRGGBB, or null to take each record's.
+  int? get glassTint => int.tryParse(_cache[_glassTint] ?? '');
+  Future<void> setGlassTint(int? v) => _put(_glassTint, v == null ? '' : '$v');
 
   Future<void> setDoubleTapDownloads(bool v) => _put(_doubleTapDownloads, '$v');
 

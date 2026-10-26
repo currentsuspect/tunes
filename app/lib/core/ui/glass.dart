@@ -58,6 +58,7 @@ class GlassPane extends StatefulWidget {
     this.pressable = false,
     this.lens = false,
     this.lift = false,
+    this.keepFrost = false,
   });
 
   final Widget child;
@@ -85,6 +86,10 @@ class GlassPane extends StatefulWidget {
   /// a clear pane a shadow reads as a smudge inside). For what floats over the
   /// page, the dock's capsules; a sheet is anchored and stays flat.
   final bool lift;
+
+  /// Frosted whatever the [GlassStyle]: for a sheet full of small type,
+  /// which Clear would leave hard to read. It still takes the style's tint.
+  final bool keepFrost;
 
   @override
   State<GlassPane> createState() => _GlassPaneState();
@@ -114,16 +119,22 @@ class _GlassPaneState extends State<GlassPane> {
   @override
   Widget build(BuildContext context) {
     final still = MediaQuery.disableAnimationsOf(context);
+    final look = Looks.current;
+    final frost = widget.keepFrost ? 1.0 : look.glassFrost;
+    final backing = widget.backing;
     final pane = ClipRRect(
       borderRadius: widget.borderRadius,
       child: _Frost(
-        blur: widget.blur,
+        blur: widget.blur * frost,
         lens: widget.lens,
         radius: widget.borderRadius.topLeft.x,
+        bend: look.glassBend,
         dpr: MediaQuery.devicePixelRatioOf(context),
         child: AnimatedContainer(
           duration: still ? Duration.zero : const Duration(milliseconds: 260),
-          color: widget.backing ?? Colors.transparent,
+          color: backing == null
+              ? Colors.transparent
+              : backing.withValues(alpha: backing.a * frost),
           child: DecoratedBox(
             decoration: glassDecoration(
               borderRadius: widget.borderRadius,
@@ -184,6 +195,7 @@ class _Frost extends SingleChildRenderObjectWidget {
     required this.blur,
     required this.lens,
     required this.radius,
+    required this.bend,
     required this.dpr,
     required super.child,
   });
@@ -191,17 +203,19 @@ class _Frost extends SingleChildRenderObjectWidget {
   final double blur;
   final bool lens;
   final double radius;
+  final double bend;
   final double dpr;
 
   @override
   _RenderFrost createRenderObject(BuildContext context) =>
-      _RenderFrost(blur, lens ? GlassLens.shader() : null, radius, dpr);
+      _RenderFrost(blur, lens ? GlassLens.shader() : null, radius, bend, dpr);
 
   @override
   void updateRenderObject(BuildContext context, _RenderFrost render) {
     render
       ..blur = blur
       ..radius = radius
+      ..bend = bend
       ..dpr = dpr;
     if (lens && render.shader == null) render.shader = GlassLens.shader();
     if (!lens) render.shader = null;
@@ -209,7 +223,7 @@ class _Frost extends SingleChildRenderObjectWidget {
 }
 
 class _RenderFrost extends RenderProxyBox {
-  _RenderFrost(this._blur, this.shader, this._radius, this._dpr);
+  _RenderFrost(this._blur, this.shader, this._radius, this._bend, this._dpr);
 
   FragmentShader? shader;
 
@@ -224,6 +238,13 @@ class _RenderFrost extends RenderProxyBox {
   set radius(double v) {
     if (v == _radius) return;
     _radius = v;
+    markNeedsPaint();
+  }
+
+  double _bend;
+  set bend(double v) {
+    if (v == _bend) return;
+    _bend = v;
     markNeedsPaint();
   }
 
@@ -256,7 +277,7 @@ class _RenderFrost extends RenderProxyBox {
         ..setFloat(4, pane.width)
         ..setFloat(5, pane.height)
         ..setFloat(6, _radius * _dpr)
-        ..setFloat(7, 9 * _dpr) // the rim pulls the page this far, at most
+        ..setFloat(7, _bend * _dpr) // the rim pulls the page this far, at most
         ..setFloat(8, 14 * _dpr) // over a band this wide
         ..setFloat(9, 1.2 * _dpr); // with this much colour split
       filter = ImageFilter.compose(outer: ImageFilter.shader(s), inner: blur);
@@ -393,17 +414,21 @@ BoxDecoration glassDecoration({
 }) {
   final look = Looks.current;
   final fill = look.glassFill;
+  final wash = look.glassWash(tint);
   return BoxDecoration(
     borderRadius: borderRadius,
     gradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [
-        if (tint == null)
-          fill[0]
+        if (wash case (final c, final a))
+          Color.alphaBlend(c.withValues(alpha: a), fill[0])
         else
-          Color.alphaBlend(tint.withValues(alpha: 0.10), fill[0]),
-        fill[1],
+          fill[0],
+        if (wash case (final c, final a))
+          Color.alphaBlend(c.withValues(alpha: a * 0.5), fill[1])
+        else
+          fill[1],
       ],
     ),
     border: edge ? Border.all(color: look.glassEdge) : null,
@@ -436,6 +461,7 @@ class GlassSheet extends StatelessWidget {
     return GlassPane(
       borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
       blur: 30,
+      keepFrost: true,
       backing: look.base.withValues(alpha: look.isDark ? 0.62 : 0.5),
       child: child,
     );

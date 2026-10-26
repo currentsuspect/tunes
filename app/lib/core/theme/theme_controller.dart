@@ -41,6 +41,8 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
     required DateTime now,
     int dayFrom = dayStarts,
     int nightFrom = nightStarts,
+    int glassStyle = 0,
+    int? glassTint,
   }) {
     final m = now.hour * 60 + now.minute;
     // A night that wraps midnight (the usual case) or one that does not.
@@ -55,7 +57,12 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
       2 => Brightness.light,
       _ => platform,
     };
-    return spec.of(brightness);
+    return spec
+        .of(brightness)
+        .glassed(
+          GlassStyle.values[glassStyle.clamp(0, 2)],
+          glassTint == null ? null : Color(glassTint),
+        );
   }
 
   void _apply({bool rebuild = true}) {
@@ -66,6 +73,8 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
       now: DateTime.now(),
       dayFrom: settings.autoDayMinutes,
       nightFrom: settings.autoNightMinutes,
+      glassStyle: settings.glassStyle,
+      glassTint: settings.glassTint,
     );
     _setSystemBars(next);
     if (identical(next, Looks.current)) return;

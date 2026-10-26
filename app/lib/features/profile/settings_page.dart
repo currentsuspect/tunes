@@ -28,6 +28,7 @@ import '../updates/update_controller.dart';
 import '../../domain/whats_new.dart';
 import '../../core/theme/looks.dart';
 import 'eq_sheet.dart';
+import 'glass_tint_picker.dart';
 import '../../core/ui/glass.dart';
 import '../../core/ui/dock.dart';
 
@@ -418,6 +419,19 @@ class _SettingsPageState extends State<SettingsPage> {
                               brightness: s.themeBrightness,
                               onChoice: s.setThemeChoice,
                             ),
+                            if (s.themeChoice == 'glass') ...[
+                              _ChoiceTile(
+                                title: 'Glass',
+                                choices: const ['Default', 'Clear', 'Tinted'],
+                                selected: s.glassStyle,
+                                onChanged: s.setGlassStyle,
+                              ),
+                              if (s.glassStyle == 2)
+                                GlassTintPicker(
+                                  value: s.glassTint,
+                                  onChanged: s.setGlassTint,
+                                ),
+                            ],
                             if (s.themeChoice == 'auto') ...[
                               _LinkTile(
                                 title:
