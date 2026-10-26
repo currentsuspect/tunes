@@ -29,6 +29,7 @@ import '../../domain/manifest.dart';
 import 'karaoke_line.dart';
 import 'lyric_follow.dart';
 import 'lyrics_sync_page.dart';
+import '../../core/ui/glass.dart';
 
 /// Bottom sheet that shows the lyrics for what is playing, with a tap-to-edit
 /// toggle.
@@ -77,19 +78,22 @@ class LyricsSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.base,
+      backgroundColor: sheetBackground(Tones.base),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => LyricsSheet(
-        track: track,
-        player: player,
-        onSave: onSave,
-        clip: clip,
-        artUrlFor: artUrlFor,
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => LyricsSheet(
+          track: track,
+          player: player,
+          onSave: onSave,
+          clip: clip,
+          artUrlFor: artUrlFor,
+        ),
       ),
     );
   }
@@ -1372,92 +1376,97 @@ class _ViewState extends State<_View> with SingleTickerProviderStateMixin {
     final line = lrc.lines[i];
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surfaceRaised,
-      builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy_rounded, size: 20),
-              title: const Text('Copy line'),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                Clipboard.setData(ClipboardData(text: voice.text));
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                  const SnackBar(
-                    content: Text('Line copied'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              },
-            ),
-            if (widget.onLyrics != null)
+      backgroundColor: sheetBackground(Tones.surfaceRaised),
+      builder: glassSheet(
+        28,
+        (sheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.auto_fix_high_rounded, size: 20),
-                title: const Text('Lyric Center'),
-                subtitle: const Text(
-                  'Fix how a word or ad-lib looks, and when it comes',
+                leading: const Icon(Icons.copy_rounded, size: 20),
+                title: const Text('Copy line'),
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  Clipboard.setData(ClipboardData(text: voice.text));
+                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                    const SnackBar(
+                      content: Text('Line copied'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+              if (widget.onLyrics != null)
+                ListTile(
+                  leading: const Icon(Icons.auto_fix_high_rounded, size: 20),
+                  title: const Text('Lyric Center'),
+                  subtitle: const Text(
+                    'Fix how a word or ad-lib looks, and when it comes',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    _openCenter(i);
+                  },
+                ),
+              ListTile(
+                leading: Icon(
+                  _loop?.origin == _origin[i]
+                      ? Icons.stop_rounded
+                      : Icons.repeat_one_rounded,
+                  size: 20,
+                ),
+                title: Text(
+                  _loop?.origin == _origin[i]
+                      ? 'Stop looping'
+                      : 'Loop this line',
                 ),
                 onTap: () {
                   Navigator.of(sheet).pop();
-                  _openCenter(i);
+                  _toggleLoop(i);
                 },
               ),
-            ListTile(
-              leading: Icon(
-                _loop?.origin == _origin[i]
-                    ? Icons.stop_rounded
-                    : Icons.repeat_one_rounded,
-                size: 20,
-              ),
-              title: Text(
-                _loop?.origin == _origin[i] ? 'Stop looping' : 'Loop this line',
-              ),
-              onTap: () {
-                Navigator.of(sheet).pop();
-                _toggleLoop(i);
-              },
-            ),
-            if (widget.onShareMoment != null && line.words.isNotEmpty ||
-                widget.onShareMoment != null && lrc.lines.length > 1)
-              ListTile(
-                leading: const Icon(Icons.ios_share_rounded, size: 20),
-                title: const Text('Share this moment'),
-                subtitle: const Text('The line, with the song under it'),
-                onTap: () {
-                  Navigator.of(sheet).pop();
-                  _shareMoment(i);
-                },
-              ),
-            // A label inside a word-timed line would be swept as a word, so
-            // those lines keep the side they were given.
-            if (!line.hasWordTiming && !voice.backing) ...[
-              if (voice.side != LyricSide.left)
+              if (widget.onShareMoment != null && line.words.isNotEmpty ||
+                  widget.onShareMoment != null && lrc.lines.length > 1)
                 ListTile(
-                  leading: const Icon(
-                    Icons.format_align_left_rounded,
-                    size: 20,
-                  ),
-                  title: const Text('Sing from the left'),
+                  leading: const Icon(Icons.ios_share_rounded, size: 20),
+                  title: const Text('Share this moment'),
+                  subtitle: const Text('The line, with the song under it'),
                   onTap: () {
                     Navigator.of(sheet).pop();
-                    widget.onLineVoice(_source!, _origin[i], 1);
+                    _shareMoment(i);
                   },
                 ),
-              if (voice.side != LyricSide.right)
-                ListTile(
-                  leading: const Icon(
-                    Icons.format_align_right_rounded,
-                    size: 20,
+              // A label inside a word-timed line would be swept as a word, so
+              // those lines keep the side they were given.
+              if (!line.hasWordTiming && !voice.backing) ...[
+                if (voice.side != LyricSide.left)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.format_align_left_rounded,
+                      size: 20,
+                    ),
+                    title: const Text('Sing from the left'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      widget.onLineVoice(_source!, _origin[i], 1);
+                    },
                   ),
-                  title: const Text('Sing from the right'),
-                  onTap: () {
-                    Navigator.of(sheet).pop();
-                    widget.onLineVoice(_source!, _origin[i], 2);
-                  },
-                ),
+                if (voice.side != LyricSide.right)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.format_align_right_rounded,
+                      size: 20,
+                    ),
+                    title: const Text('Sing from the right'),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      widget.onLineVoice(_source!, _origin[i], 2);
+                    },
+                  ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

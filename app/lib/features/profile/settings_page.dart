@@ -28,6 +28,8 @@ import '../updates/update_controller.dart';
 import '../../domain/whats_new.dart';
 import '../../core/theme/looks.dart';
 import 'eq_sheet.dart';
+import '../../core/ui/glass.dart';
+import '../../core/ui/dock.dart';
 
 /// Who you are and how the app behaves.
 ///
@@ -346,7 +348,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final art = ArtScope.maybeOf(context);
     return Scaffold(
       backgroundColor: Tones.base,
+      // The list runs on under Glass's dock (dockPad below).
       body: SafeArea(
+        bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -370,7 +374,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   builder: (context, box) {
                     final side = math.max(Space.lg, (box.maxWidth - 760) / 2);
                     return ListView(
-                      padding: EdgeInsets.fromLTRB(side, 0, side, Space.xl),
+                      padding:
+                          EdgeInsets.fromLTRB(side, 0, side, Space.xl) +
+                          dockPad(context),
                       children: [
                         Text(
                           'Settings',
@@ -942,22 +948,25 @@ class _SettingsPageState extends State<SettingsPage> {
     if (s.avatarPath != null) {
       final choice = await showModalBottomSheet<String>(
         context: context,
-        backgroundColor: Tones.surfaceRaised,
-        builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.photo_library_outlined),
-                title: Text('Choose a photo', style: TypeScale.body),
-                onTap: () => Navigator.of(context).pop('pick'),
-              ),
-              ListTile(
-                leading: Icon(Icons.delete_outline_rounded),
-                title: Text('Remove photo', style: TypeScale.body),
-                onTap: () => Navigator.of(context).pop('remove'),
-              ),
-            ],
+        backgroundColor: sheetBackground(Tones.surfaceRaised),
+        builder: glassSheet(
+          28,
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: Icon(Icons.photo_library_outlined),
+                  title: Text('Choose a photo', style: TypeScale.body),
+                  onTap: () => Navigator.of(context).pop('pick'),
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete_outline_rounded),
+                  title: Text('Remove photo', style: TypeScale.body),
+                  onTap: () => Navigator.of(context).pop('remove'),
+                ),
+              ],
+            ),
           ),
         ),
       );

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/data/download_manager.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/manifest.dart';
+import '../../core/ui/glass.dart';
 
 /// Everything downloading, queued or failed, with a way out of each.
 class DownloadsSheet extends StatelessWidget {
@@ -24,14 +25,17 @@ class DownloadsSheet extends StatelessWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.base,
+      backgroundColor: sheetBackground(Tones.base),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => DownloadsSheet(manager: manager, trackFor: trackFor),
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => DownloadsSheet(manager: manager, trackFor: trackFor),
+      ),
     );
   }
 

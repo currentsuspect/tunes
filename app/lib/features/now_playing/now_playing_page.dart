@@ -40,6 +40,7 @@ import '../playlists/add_to_playlist_sheet.dart';
 import '../queue/queue_sheet.dart';
 import 'lyric_preview.dart';
 import 'now_playing_details.dart';
+import '../../core/ui/glass.dart';
 
 class NowPlayingPage extends StatefulWidget {
   const NowPlayingPage({
@@ -204,13 +205,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   void _showTrackInfo(BuildContext context, ManifestTrack track) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (sheetContext) {
+      builder: glassSheet(RadiusTokens.card, (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(Space.lg),
@@ -259,7 +260,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             ),
           ),
         );
-      },
+      }),
     );
   }
 
@@ -345,9 +346,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                           _openQueue(context);
                                           break;
                                         case 'about':
-                                          AboutNav.maybeOf(
-                                            context,
-                                          )?.openSong(current);
+                                          AboutNav.maybeOf(context)
+                                              ?.openSong(current);
                                           break;
                                         case 'artist':
                                           // The same opener the sleeve uses.
@@ -420,9 +420,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                       if (!(isWideWindow(
                                             MediaQuery.sizeOf(context),
                                           ) &&
-                                          (SettingsScope.maybeOf(
-                                                context,
-                                              )?.showLyrics ??
+                                          (SettingsScope.maybeOf(context)
+                                                  ?.showLyrics ??
                                               true) &&
                                           (current.lyrics ?? '')
                                               .trim()

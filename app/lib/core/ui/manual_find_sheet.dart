@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../domain/manifest.dart';
 import '../theme/tokens.dart';
+import 'glass.dart';
 
 /// Bottom sheet that helps the user manually resolve a track whose
 /// auto-enrichment has failed or produced 'unknown artist' / 'unknown
@@ -18,14 +19,17 @@ class ManualFindSheet extends StatelessWidget {
   static Future<void> show(BuildContext context, ManifestTrack track) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => ManualFindSheet(track: track),
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => ManualFindSheet(track: track),
+      ),
     );
   }
 

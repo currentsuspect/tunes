@@ -5,6 +5,7 @@ import '../../core/data/queue_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/ui/radio_modes.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/glass.dart';
 
 /// Bottom sheet that shows the persistent play queue, lets the user
 /// drag-reorder tracks, and "play now" or remove individual entries.
@@ -25,14 +26,17 @@ class QueueSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => QueueSheet(queueStore: queueStore, player: player),
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => QueueSheet(queueStore: queueStore, player: player),
+      ),
     );
   }
 

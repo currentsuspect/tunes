@@ -57,6 +57,7 @@ class GlassPane extends StatefulWidget {
     this.backing,
     this.pressable = false,
     this.lens = false,
+    this.lift = false,
   });
 
   final Widget child;
@@ -79,6 +80,11 @@ class GlassPane extends StatefulWidget {
   /// (the dock's capsules): it is a pass over every pixel the pane covers,
   /// and a sheet's worth of bending would be hard to read through.
   final bool lens;
+
+  /// Hovers: a soft shadow under the pane, kept off the glass itself (through
+  /// a clear pane a shadow reads as a smudge inside). For what floats over the
+  /// page, the dock's capsules; a sheet is anchored and stays flat.
+  final bool lift;
 
   @override
   State<GlassPane> createState() => _GlassPaneState();
@@ -153,10 +159,17 @@ class _GlassPaneState extends State<GlassPane> {
         _press(false);
       },
       child: AnimatedScale(
-        scale: _down ? 1.02 : 1,
-        duration: still ? Duration.zero : const Duration(milliseconds: 160),
+        // Glass under the finger swells, as iOS 26's does: a little more than
+        // a button dips, because it is the material moving, not a key.
+        scale: _down ? 1.035 : 1,
+        duration: still ? Duration.zero : const Duration(milliseconds: 220),
         curve: Curves.easeOutBack,
-        child: pane,
+        child: widget.lift
+            ? CustomPaint(
+                painter: _LiftPainter(widget.borderRadius, Looks.current),
+                child: pane,
+              )
+            : pane,
       ),
     );
   }
@@ -284,6 +297,29 @@ class _EdgePainter extends CustomPainter {
       ],
     );
     final top = Rect.fromLTRB(0, 0, size.width, size.height / 2);
+    // The glass's thickness: a soft glow just inside the rim, strongest at
+    // the top, so the pane reads as a slab with volume rather than a cut-out.
+    canvas
+      ..save()
+      ..clipRRect(rrect)
+      ..drawRRect(
+        rrect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.white.withValues(alpha: look.isDark ? 0.16 : 0.5),
+              Colors.white.withValues(alpha: 0),
+              Colors.white.withValues(alpha: look.isDark ? 0.05 : 0.2),
+            ],
+            stops: const [0, 0.55, 1],
+          ).createShader(rect),
+      )
+      ..restore();
     // Light comes from above: the travelling highlight is on the top half of
     // the edge, the bottom half a plain, dimmer line.
     canvas
@@ -314,6 +350,39 @@ class _EdgePainter extends CustomPainter {
       old.radius != radius || old.look != look || old.touch != touch;
 }
 
+/// The shadow a hovering pane casts on the page: soft, a little below, and
+/// only outside the pane.
+class _LiftPainter extends CustomPainter {
+  _LiftPainter(this.radius, this.look);
+
+  final BorderRadius radius;
+  final TunesLook look;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = radius.toRRect(Offset.zero & size);
+    canvas
+      ..save()
+      ..clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect((Offset.zero & size).inflate(40))
+          ..addRRect(rrect),
+      )
+      ..drawRRect(
+        rrect.shift(const Offset(0, 6)),
+        Paint()
+          ..color = Colors.black.withValues(alpha: look.isDark ? 0.42 : 0.14)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+      )
+      ..restore();
+  }
+
+  @override
+  bool shouldRepaint(_LiftPainter old) =>
+      old.radius != radius || old.look != look;
+}
+
 /// The pane's fill and edge without the blur, for things that sit on a pane
 /// already (a blur inside a blur costs twice and shows nothing new) or in a
 /// list.
@@ -341,11 +410,16 @@ BoxDecoration glassDecoration({
   );
 }
 
-/// A bottom sheet's background: [Tones.surface] in every look but Glass,
-/// where the sheet is clear and [GlassSheet] frosts it.
-Color sheetBackground() => Looks.current.kind == LookKind.glass
+/// A bottom sheet's background: [solid] ([Tones.surface] unless given) in
+/// every look but Glass, where the sheet is clear and [GlassSheet] frosts it.
+Color sheetBackground([Color? solid]) => Looks.current.kind == LookKind.glass
     ? Colors.transparent
-    : Looks.current.surface;
+    : solid ?? Looks.current.surface;
+
+/// A sheet's builder inside [GlassSheet]:
+/// `builder: glassSheet(radius, (context) => ...)`.
+WidgetBuilder glassSheet(double radius, WidgetBuilder builder) =>
+    (context) => GlassSheet(radius: radius, child: builder(context));
 
 /// A bottom sheet's body, frosted in Glass and unchanged in every other look.
 /// Pair with [sheetBackground] on the `showModalBottomSheet` call.
@@ -364,6 +438,37 @@ class GlassSheet extends StatelessWidget {
       blur: 30,
       backing: look.base.withValues(alpha: look.isDark ? 0.62 : 0.5),
       child: child,
+    );
+  }
+}
+
+/// The top of a Glass screen: the page fades into the room's base under the
+/// status bar, as iOS 26's scroll edge does, so rows scrolling up go soft
+/// before they reach the clock instead of running into it.
+class GlassTopEdge extends StatelessWidget {
+  const GlassTopEdge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Looks.current.base;
+    return IgnorePointer(
+      child: SizedBox(
+        height: MediaQuery.paddingOf(context).top + 18,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                base.withValues(alpha: 0.92),
+                base.withValues(alpha: 0.6),
+                base.withValues(alpha: 0),
+              ],
+              stops: const [0, 0.55, 1],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

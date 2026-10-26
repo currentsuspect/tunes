@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/data/playlist_store.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/glass.dart';
 
 /// Where a track goes when you decide it belongs somewhere.
 ///
@@ -28,14 +29,17 @@ class AddToPlaylistSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => AddToPlaylistSheet(store: store, shas: shas),
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => AddToPlaylistSheet(store: store, shas: shas),
+      ),
     );
   }
 

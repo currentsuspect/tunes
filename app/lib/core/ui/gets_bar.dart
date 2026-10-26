@@ -8,6 +8,7 @@ import '../data/gets.dart';
 import '../theme/looks.dart';
 import '../theme/tokens.dart';
 import 'get_status.dart';
+import 'glass.dart';
 
 /// Getting from Soulseek, shown from anywhere (owner, 23 Oct: "added
 /// Desperado using slsk, where do I see prog").
@@ -182,14 +183,17 @@ class GetsSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => GetsSheet(gets: gets, trackFor: trackFor, onPlay: onPlay),
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => GetsSheet(gets: gets, trackFor: trackFor, onPlay: onPlay),
+      ),
     );
   }
 

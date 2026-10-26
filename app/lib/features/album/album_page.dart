@@ -28,6 +28,7 @@ import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import '../../domain/soulseek.dart';
 import '../artist/artist_page.dart';
+import '../../core/ui/dock.dart';
 
 class AlbumPage extends StatelessWidget {
   const AlbumPage({
@@ -95,7 +96,9 @@ class AlbumPage extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               AmbientGlow(tint: tint, strength: 0.34),
+              // The list runs on under Glass's dock (dockPad below).
               SafeArea(
+                bottom: false,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -234,12 +237,14 @@ class AlbumPage extends StatelessWidget {
                     Expanded(
                       child: ListView(
                         controller: controller,
-                        padding: const EdgeInsets.fromLTRB(
-                          Space.lg,
-                          Space.sm,
-                          Space.lg,
-                          Space.lg,
-                        ),
+                        padding:
+                            const EdgeInsets.fromLTRB(
+                              Space.lg,
+                              Space.sm,
+                              Space.lg,
+                              Space.lg,
+                            ) +
+                            dockPad(context),
                         children: [
                           Center(
                             child: DoubleTapCover(

@@ -63,6 +63,7 @@ import 'core/radio/radio_engine.dart';
 import 'core/theme/looks.dart';
 import 'core/ui/cover_tint.dart';
 import 'core/ui/glass.dart';
+import 'core/ui/glass_dock.dart';
 import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
@@ -2345,18 +2346,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         // before the process can die, or the close loses them to the kill.
         // Bounded: a wedged write must never trap Back.
         unawaited(
-          _persistResume().timeout(const Duration(seconds: 2), onTimeout: () {}).then((
-            _,
-          ) {
-            // Halt, not stop: backing out of the app quiets it, but the queue and
-            // the resume point survive so reopening lands back where it was.
-            // Stopping here used to wipe the persisted queue with it.
-            if (widget.settings.stopOnClose) widget.player.halt();
-            // Leave regardless of the setting: refusing to pop is a mechanism for
-            // getting here, not a decision about whether the app should close.
-            // Swallowing it would trap someone who has turned stopOnClose off.
-            SystemNavigator.pop();
-          }),
+          _persistResume()
+              .timeout(const Duration(seconds: 2), onTimeout: () {})
+              .then((_) {
+                // Halt, not stop: backing out of the app quiets it, but the queue and
+                // the resume point survive so reopening lands back where it was.
+                // Stopping here used to wipe the persisted queue with it.
+                if (widget.settings.stopOnClose) widget.player.halt();
+                // Leave regardless of the setting: refusing to pop is a mechanism for
+                // getting here, not a decision about whether the app should close.
+                // Swallowing it would trap someone who has turned stopOnClose off.
+                SystemNavigator.pop();
+              }),
         );
       },
       child: Listener(
@@ -2476,7 +2477,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: glass
             ? NotificationListener<Notification>(
                 onNotification: _onPageScroll,
-                child: _buildBody(),
+                child: Stack(
+                  children: [
+                    _buildBody(),
+                    // iOS 26's scroll edge: the page fades out under the
+                    // status bar rather than running into the clock. Not
+                    // over the player, which is lit edge to edge.
+                    if (_nav.current != const PanelDest(TunesPanels.nowPlaying))
+                      const Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        child: GlassTopEdge(),
+                      ),
+                  ],
+                ),
               )
             : _buildBody(),
       ),
@@ -2851,7 +2866,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final tabs = TunesNavBar(
       selectedIndex: _tab,
       onSelected: _onTabSelected,
-      compact: glass && _dockCompact,
       items: const [
         TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
         TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
@@ -2890,37 +2904,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               },
             ),
             GetsBar(gets: _gets, onTap: () => _openGets()),
-            MiniPlayerBar(
-              player: widget.player,
-              onTap: _openNowPlaying,
-              artUrlFor: _artUrlFor,
-              glassBacking: glass ? _dockBacking() : null,
-            ),
             if (glass)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Space.md,
-                  Space.xs,
-                  Space.md,
-                  Space.sm,
-                ),
-                child: ListenableBuilder(
-                  listenable: widget.player,
-                  builder: (context, _) => TintBuilder(
-                    artSha: widget.player.current?.artSha,
-                    builder: (context, tint) => GlassPane(
-                      borderRadius: BorderRadius.circular(28),
-                      tint: widget.player.current == null ? null : tint,
-                      backing: _dockBacking(),
-                      pressable: true,
-                      lens: true,
-                      child: tabs,
-                    ),
+              ListenableBuilder(
+                listenable: widget.player,
+                builder: (context, _) => TintBuilder(
+                  artSha: widget.player.current?.artSha,
+                  builder: (context, tint) => GlassDock(
+                    items: tabs.items,
+                    selectedIndex: _tab,
+                    onSelected: _onTabSelected,
+                    minimized: _dockCompact,
+                    onExpand: () => setState(() => _dockCompact = false),
+                    backing: _dockBacking(),
+                    tint: widget.player.current == null ? null : tint,
+                    mini: widget.player.current == null
+                        ? null
+                        : (fold) => MiniPlayerBar(
+                            player: widget.player,
+                            onTap: _openNowPlaying,
+                            artUrlFor: _artUrlFor,
+                            glassBacking: _dockBacking(),
+                            glassFold: fold,
+                          ),
                   ),
                 ),
               )
-            else
+            else ...[
+              MiniPlayerBar(
+                player: widget.player,
+                onTap: _openNowPlaying,
+                artUrlFor: _artUrlFor,
+              ),
               tabs,
+            ],
           ],
         ),
       ),

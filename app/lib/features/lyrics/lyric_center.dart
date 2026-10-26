@@ -4,6 +4,7 @@ import '../../core/lyrics/adlib_kinds.dart';
 import '../../core/lyrics/lyric_fx.dart';
 import '../../core/lyrics/word_fx.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/ui/glass.dart';
 
 /// Opens the Lyric Center for one stored line: pick a word or an ad-lib,
 /// then its look and its moment. Estimates (an ad-lib at the end of a line,
@@ -22,14 +23,17 @@ Future<void> openLyricCenter(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Tones.surfaceRaised,
-    builder: (_) => _LyricCenter(
-      words: words,
-      line: line,
-      fixes: LyricFxTable(Map.of(fixes.fixes)),
-      seed: seed,
-      onSave: onSave,
-      onHear: onHear,
+    backgroundColor: sheetBackground(Tones.surfaceRaised),
+    builder: glassSheet(
+      28,
+      (_) => _LyricCenter(
+        words: words,
+        line: line,
+        fixes: LyricFxTable(Map.of(fixes.fixes)),
+        seed: seed,
+        onSave: onSave,
+        onHear: onHear,
+      ),
     ),
   );
 }

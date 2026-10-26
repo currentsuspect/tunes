@@ -80,8 +80,23 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
     // top bar with its first item clipped (owner, 24 Oct: "weird and not in
     // theme at all"). Now a card that opens under its button: an ink edge and
     // no blur in Crayon, a hairline and a soft lift in Room and Noir.
+    // Glass (after iOS 26): menus and alerts are rounder, nearly opaque glass
+    // with a bright rim. Not frosted: a menu opens over the very thing it is
+    // about, and a blur behind small type costs more than it shows.
+    dialogTheme: look.kind == LookKind.glass
+        ? DialogThemeData(
+            backgroundColor: Tones.surfaceRaised.withValues(alpha: 0.94),
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+              side: BorderSide(color: look.glassEdge),
+            ),
+          )
+        : null,
     popupMenuTheme: PopupMenuThemeData(
-      color: Tones.surfaceRaised,
+      color: look.kind == LookKind.glass
+          ? Tones.surfaceRaised.withValues(alpha: 0.94)
+          : Tones.surfaceRaised,
       surfaceTintColor: Colors.transparent,
       position: PopupMenuPosition.under,
       elevation: look.kind == LookKind.crayon ? 0 : 8,
@@ -89,11 +104,15 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
       menuPadding: const EdgeInsets.symmetric(vertical: Space.xs),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(
-          RadiusTokens.card.clamp(4, 14).toDouble(),
+          look.kind == LookKind.glass
+              ? 20
+              : RadiusTokens.card.clamp(4, 14).toDouble(),
         ),
-        side: look.kind == LookKind.crayon
-            ? BorderSide(color: Tones.text, width: 2)
-            : BorderSide(color: Tones.hairline),
+        side: switch (look.kind) {
+          LookKind.crayon => BorderSide(color: Tones.text, width: 2),
+          LookKind.glass => BorderSide(color: look.glassEdge),
+          _ => BorderSide(color: Tones.hairline),
+        },
       ),
       textStyle: TypeScale.body,
       labelTextStyle: WidgetStatePropertyAll(TypeScale.body),
