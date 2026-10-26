@@ -3,6 +3,7 @@ import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/looks.dart';
 
@@ -17,6 +18,18 @@ abstract final class GlassSheen {
   /// Called with a vertical scroll's offset. A slow sine, so a long read
   /// sweeps the light back and forth rather than pinning it at one end.
   static void follow(double pixels) => x.value = math.sin(pixels / 520) * 0.85;
+}
+
+/// What Glass feels like under the finger. The dock is a material, so it
+/// answers touch the way a thing does: a light knock when glass is touched,
+/// a firmer one when the droplet is picked up, a tick for every tab it passes
+/// over, a soft one as it is set down or the dock settles into a new shape.
+/// iOS turns these off itself when the phone's system haptics are off.
+abstract final class GlassHaptics {
+  static void touch() => HapticFeedback.lightImpact();
+  static void lift() => HapticFeedback.mediumImpact();
+  static void tick() => HapticFeedback.selectionClick();
+  static void settle() => HapticFeedback.lightImpact();
 }
 
 /// Glass's lens shader (shaders/glass_lens.frag): the page bends at a
@@ -113,7 +126,9 @@ class _GlassPaneState extends State<GlassPane> {
   }
 
   void _press(bool down) {
-    if (widget.pressable && down != _down) setState(() => _down = down);
+    if (!widget.pressable || down == _down) return;
+    if (down) GlassHaptics.touch();
+    setState(() => _down = down);
   }
 
   @override
@@ -508,7 +523,15 @@ class GlassLight extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final look = Looks.current;
-    final a = look.isDark ? 0.16 : 0.12;
+    // Tinted: both pools in the chosen colour, the second turned a little
+    // round the wheel so the room is lit rather than flooded.
+    final tinted = look.glassTint != null;
+    final a = (look.isDark ? 0.16 : 0.12) * (tinted ? 1.5 : 1);
+    final second = tinted
+        ? HSLColor.fromColor(look.primary)
+              .withHue((HSLColor.fromColor(look.primary).hue + 40) % 360)
+              .toColor()
+        : const Color(0xFF8A7CF0);
     return IgnorePointer(
       child: RepaintBoundary(
         child: Stack(
@@ -532,8 +555,8 @@ class GlassLight extends StatelessWidget {
                   center: const Alignment(-0.95, 0.75),
                   radius: 0.85,
                   colors: [
-                    const Color(0xFF8A7CF0).withValues(alpha: a * 0.8),
-                    const Color(0xFF8A7CF0).withValues(alpha: 0),
+                    second.withValues(alpha: a * 0.8),
+                    second.withValues(alpha: 0),
                   ],
                 ),
               ),

@@ -703,6 +703,9 @@ class _TunesAppState extends State<TunesApp> {
   void initState() {
     super.initState();
     _theme = ThemeController(widget.settings);
+    widget.player.addListener(_followRecord);
+    widget.artStore.addListener(_followRecord);
+    _followRecord();
     _downloads = DownloadManager(
       client: widget.client,
       store: widget.store,
@@ -710,8 +713,34 @@ class _TunesAppState extends State<TunesApp> {
     )..onSaved = (_) => widget.player.refreshSources();
   }
 
+  /// Tells the theme the playing record's colour, for Tinted Glass that
+  /// matches the record. Cheap when nothing changed: the tint is memoized by
+  /// cover, and the theme ignores a colour it already has.
+  void _followRecord() {
+    final sha = widget.player.current?.artSha;
+    if (sha == null) {
+      _theme.recordTint = null;
+      return;
+    }
+    if (CoverTint.cached(sha) case final c?) {
+      _theme.recordTint = c;
+      return;
+    }
+    final path = widget.artStore.pathFor(sha);
+    if (path == null) return;
+    unawaited(
+      CoverTint.of(sha, File(path)).then((c) {
+        if (mounted && widget.player.current?.artSha == sha) {
+          _theme.recordTint = c;
+        }
+      }),
+    );
+  }
+
   @override
   void dispose() {
+    widget.player.removeListener(_followRecord);
+    widget.artStore.removeListener(_followRecord);
     _theme.dispose();
     _downloads.dispose();
     super.dispose();
@@ -2457,6 +2486,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (n is ScrollUpdateNotification) GlassSheen.follow(metrics.pixels);
     final over = metrics.extentAfter > 1;
+    if (fold != _dockCompact) GlassHaptics.settle();
     if (fold != _dockCompact || over != _dockOverContent) {
       setState(() {
         _dockCompact = fold;
@@ -2914,7 +2944,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     selectedIndex: _tab,
                     onSelected: _onTabSelected,
                     minimized: _dockCompact,
-                    onExpand: () => setState(() => _dockCompact = false),
+                    onExpand: () {
+                      GlassHaptics.settle();
+                      setState(() => _dockCompact = false);
+                    },
                     backing: _dockBacking(),
                     tint: widget.player.current == null ? null : tint,
                     mini: widget.player.current == null

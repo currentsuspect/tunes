@@ -1,7 +1,6 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../theme/tokens.dart';
 import 'glass.dart';
@@ -148,10 +147,7 @@ class GlassDock extends StatelessWidget {
                         label: 'Show tabs',
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            onExpand();
-                          },
+                          onTap: onExpand,
                         ),
                       ),
                     ),

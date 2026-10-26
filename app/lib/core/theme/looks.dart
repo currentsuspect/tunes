@@ -166,17 +166,21 @@ class TunesLook {
       final accent = keep == null ? null : glassAccent(keep, dark: isDark);
       Color tone(Color c, double a) =>
           keep == null ? c : Color.alphaBlend(keep.withValues(alpha: a), c);
+      // The whole room, not only the glass: grounds, cards, lines and the
+      // quiet text all lean to the colour, the text itself stays ink.
       return TunesLook(
         themeId: themeId,
         brightness: brightness,
-        base: tone(base, isDark ? 0.07 : 0.06),
-        surface: tone(surface, isDark ? 0.08 : 0.07),
-        surfaceRaised: tone(surfaceRaised, isDark ? 0.08 : 0.05),
-        hairline: hairline,
+        base: tone(base, isDark ? 0.13 : 0.11),
+        surface: tone(surface, isDark ? 0.15 : 0.13),
+        surfaceRaised: tone(surfaceRaised, isDark ? 0.15 : 0.09),
+        hairline: keep == null
+            ? hairline
+            : Color.alphaBlend(keep.withValues(alpha: 0.12), hairline),
         primary: accent ?? primary,
         onPrimary: onPrimary,
         text: text,
-        textMuted: textMuted,
+        textMuted: tone(textMuted, isDark ? 0.18 : 0.14),
         held: held,
         warn: warn,
         badge: badge,

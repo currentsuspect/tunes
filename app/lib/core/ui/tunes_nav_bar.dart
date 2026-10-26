@@ -202,7 +202,12 @@ class _TunesNavBarState extends State<TunesNavBar>
     _at.value = (dx / tabWidth - 0.5).clamp(0.0, n - 1.0);
     final tab = (dx / tabWidth).floor().clamp(0, n - 1);
     if (tab != _dragTab) {
-      if (_dragTab != null) HapticFeedback.selectionClick();
+      // Picked up, then a tick for every tab it passes over.
+      if (_dragTab == null) {
+        HapticFeedback.mediumImpact();
+      } else {
+        HapticFeedback.selectionClick();
+      }
       setState(() => _dragTab = tab);
     }
   }
@@ -211,6 +216,8 @@ class _TunesNavBarState extends State<TunesNavBar>
     final tab = _dragTab;
     if (tab == null) return;
     setState(() => _dragTab = null);
+    // Set down.
+    HapticFeedback.lightImpact();
     _springTo(tab);
     if (tab != widget.selectedIndex) widget.onSelected(tab);
   }

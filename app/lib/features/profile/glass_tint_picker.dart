@@ -92,8 +92,8 @@ class _GlassTintPickerState extends State<GlassTintPicker> {
           ),
           const SizedBox(height: Space.md),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _Swatch(
                 label: 'Match the record',
@@ -186,8 +186,8 @@ class _Swatch extends StatelessWidget {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        width: 38,
-        height: 38,
+        width: 34,
+        height: 34,
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
@@ -240,6 +240,7 @@ class _Strip extends StatelessWidget {
               onHorizontalDragUpdate: (d) => at(d.localPosition.dx),
               onHorizontalDragEnd: (_) => onDone(),
               child: SizedBox(
+                width: w,
                 height: 30,
                 child: CustomPaint(painter: _StripPainter(value, colors)),
               ),

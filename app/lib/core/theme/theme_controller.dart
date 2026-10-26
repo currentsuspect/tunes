@@ -25,6 +25,20 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
   final SettingsStore settings;
   Timer? _clock;
 
+  /// The playing record's colour, for Tinted Glass set to match the record:
+  /// then the whole app, not just the glass, takes each song's colour.
+  Color? get recordTint => _recordTint;
+  Color? _recordTint;
+  set recordTint(Color? c) {
+    if (c == _recordTint) return;
+    _recordTint = c;
+    if (settings.themeChoice == 'glass' &&
+        settings.glassStyle == 2 &&
+        settings.glassTint == null) {
+      _apply();
+    }
+  }
+
   /// Auto's day, by default: 06:30 until 18:45 (settings can move both).
   static const dayStarts = 6 * 60 + 30;
   static const nightStarts = 18 * 60 + 45;
@@ -74,7 +88,7 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
       dayFrom: settings.autoDayMinutes,
       nightFrom: settings.autoNightMinutes,
       glassStyle: settings.glassStyle,
-      glassTint: settings.glassTint,
+      glassTint: settings.glassTint ?? _recordTint?.toARGB32(),
     );
     _setSystemBars(next);
     if (identical(next, Looks.current)) return;
