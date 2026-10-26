@@ -273,14 +273,14 @@ class _SwipeableBody extends StatelessWidget {
           : null,
       artSha: track.artSha,
       size: side,
-      borderRadius: 9 + 8 * fold,
+      borderRadius: 9 + 2 * fold,
       // The same generated tile the list rows use. A blank square in the one
       // bar that is always on screen made tracks without a cover look like a
       // failed load.
       fallback: GeneratedArtwork.fromTrack(
         track,
         size: side,
-        borderRadius: 9 + 8 * fold,
+        borderRadius: 9 + 2 * fold,
       ),
     );
     return Row(
@@ -456,7 +456,9 @@ class _TransportButtonState extends State<_TransportButton> {
 double get _barRadius => switch (Looks.current.kind) {
   LookKind.noir => 0,
   LookKind.crayon => 18,
-  LookKind.room || LookKind.glass => RadiusTokens.card - 2,
+  LookKind.room => RadiusTokens.card - 2,
+  // A capsule, as iOS 26's player bar is.
+  LookKind.glass => 31,
 };
 
 /// The bar's card around its contents. Glass floats it over the page, so
