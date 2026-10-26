@@ -296,7 +296,7 @@ class SettingsStore extends ChangeNotifier {
   int? get glassTint => int.tryParse(_cache[_glassTint] ?? '');
   Future<void> setGlassTint(int? v) => _put(_glassTint, v == null ? '' : '$v');
 
-  /// Glass's background photo (BYOB): a copy in the app's own storage, or
+  /// Glass's background photo: a copy in the app's own storage, or
   /// null for the room's own ground.
   String? get wallpaperPath {
     final v = _cache[_wallpaper];

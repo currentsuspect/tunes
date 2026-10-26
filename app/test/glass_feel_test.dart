@@ -243,7 +243,7 @@ void main() {
     });
   });
 
-  group('your own background (BYOB)', () {
+  group('your own background', () {
     test('Glass with a photo clears the pages\' ground to show it', () {
       final look = ThemeController.resolve(
         choice: 'glass',

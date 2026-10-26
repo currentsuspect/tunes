@@ -609,7 +609,7 @@ class GlassTopEdge extends StatelessWidget {
   }
 }
 
-/// Glass's background photo (BYOB), under every page: the photo filling the
+/// Glass's background photo, under every page: the photo filling the
 /// screen, softened by [SettingsStore.wallpaperBlur] and laid under the
 /// room's ground at [SettingsStore.wallpaperDim], so type on it still reads.
 /// Decoded at the screen's size, not the photo's, and drawn once: it sits

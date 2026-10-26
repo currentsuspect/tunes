@@ -6,7 +6,7 @@ import '../../core/data/avatar.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 
-/// Glass's background photo (BYOB): choose one from the phone, change it or
+/// Glass's background photo: choose one from the phone, change it or
 /// take it away, and set how dim and how soft it sits under the pages.
 ///
 /// The sliders move their own handles while dragged and set the photo when
