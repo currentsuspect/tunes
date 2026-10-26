@@ -11,22 +11,31 @@ import 'package:path_provider/path_provider.dart';
 /// on. So the chosen image is copied into the app's own storage immediately;
 /// what gets remembered in settings is that copy, not where it came from.
 class AvatarStore {
-  AvatarStore({ImagePicker? picker}) : _picker = picker ?? ImagePicker();
+  AvatarStore({ImagePicker? picker, this.name = 'avatar', this.maxEdge = 512})
+    : _picker = picker ?? ImagePicker();
+
+  /// The same store for Glass's background photo: kept large enough to fill
+  /// a phone's screen sharp, and no larger.
+  AvatarStore.wallpaper({ImagePicker? picker})
+    : this(picker: picker, name: 'wallpaper', maxEdge: 2000);
 
   final ImagePicker _picker;
 
-  /// Shown at 38px in the header and 56px in settings. Storing a 12-megapixel
-  /// photo to draw a thumbnail would cost real memory every time it decodes,
-  /// so it is resized on the way in and never again.
-  static const _maxEdge = 512.0;
+  /// What the stored files are called (`<name>_<time>.jpg`).
+  final String name;
+
+  /// The avatar is shown at 38px in the header and 56px in settings. Storing a
+  /// 12-megapixel photo to draw a thumbnail would cost real memory every time
+  /// it decodes, so it is resized on the way in and never again.
+  final double maxEdge;
 
   /// Opens the platform photo picker. Returns the stored path, or null if the
   /// picker was dismissed.
   Future<String?> pick() async {
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: _maxEdge,
-      maxHeight: _maxEdge,
+      maxWidth: maxEdge,
+      maxHeight: maxEdge,
       imageQuality: 90,
     );
     if (picked == null) return null;
@@ -42,7 +51,7 @@ class AvatarStore {
   Future<String> store(File source) async {
     final dir = await getApplicationSupportDirectory();
     final dest = File(
-      p.join(dir.path, 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg'),
+      p.join(dir.path, '${name}_${DateTime.now().millisecondsSinceEpoch}.jpg'),
     );
     await source.copy(dest.path);
     return dest.path;

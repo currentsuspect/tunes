@@ -234,7 +234,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       if (covers.length == 4) break;
     }
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: covers.isEmpty ? null : covers.first,
         builder: (context, tint) => Stack(
@@ -597,7 +597,7 @@ class _Row extends StatelessWidget {
       builder: (context, _) {
         final playing = t != null && player.current?.sha == t.sha;
         return Material(
-          color: Tones.base,
+          color: Tones.page,
           child: PressRow(
             onTap: onTap,
             child: Padding(

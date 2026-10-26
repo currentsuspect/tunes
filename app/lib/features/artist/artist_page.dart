@@ -205,7 +205,7 @@ class _ArtistPageState extends State<ArtistPage> {
     final aboutNav = AboutNav.maybeOf(context);
 
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: photo,
         builder: (context, tint) => SingleChildScrollView(

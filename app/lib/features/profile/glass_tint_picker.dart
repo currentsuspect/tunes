@@ -17,11 +17,16 @@ class GlassTintPicker extends StatefulWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.photo,
   });
 
   /// 0xAARRGGBB, or null for the record's colour.
   final int? value;
   final ValueChanged<int?> onChanged;
+
+  /// The background photo's colour, offered as a swatch of its own so the
+  /// glass and the app can match the picture under them.
+  final Color? photo;
 
   static const presets = [
     Color(0xFF7AA2FF), // ice blue
@@ -120,6 +125,20 @@ class _GlassTintPickerState extends State<GlassTintPicker> {
                   ),
                 ),
               ),
+              if (widget.photo case final c?)
+                _Swatch(
+                  label: 'From your photo',
+                  selected: !record && widget.value == c.toARGB32(),
+                  onTap: () => widget.onChanged(c.toARGB32()),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: c),
+                    child: const Icon(
+                      Icons.wallpaper_rounded,
+                      size: 15,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               for (final c in GlassTintPicker.presets)
                 _Swatch(
                   label: '#${c.toARGB32().toRadixString(16).substring(2)}',

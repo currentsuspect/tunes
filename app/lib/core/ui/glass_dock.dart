@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -61,8 +62,8 @@ class GlassDock extends StatelessWidget {
       ),
       child: TweenAnimationBuilder<double>(
         tween: Tween(end: minimized ? 1 : 0),
-        duration: still ? Duration.zero : const Duration(milliseconds: 420),
-        curve: Curves.easeOutCubic,
+        duration: still ? Duration.zero : const Duration(milliseconds: 620),
+        curve: const LiquidCurve(),
         builder: (context, t, _) => mini == null
             ? _tabsAlone(t, scale)
             : LayoutBuilder(
@@ -91,14 +92,17 @@ class GlassDock extends StatelessWidget {
     minimize: minimize,
   );
 
+  // The spring runs a little past 0 and 1: the glass's shape may overshoot
+  // (that is the liquid), the fades and folds inside it may not.
   Widget _tabsAlone(double t, double scale) => _pane(
     height: (62 - 18 * t) * scale,
-    child: _bar(fold: t),
+    child: _bar(fold: t.clamp(0.0, 1.0)),
   );
 
   Widget _withMini(double t, double scale, double width) {
     final full = 62 * scale;
-    final tabsWidth = lerpDouble(width, _circle, t)!;
+    final f = t.clamp(0.0, 1.0);
+    final tabsWidth = math.max(lerpDouble(width, _circle, t)!, _circle * 0.85);
     final tabsHeight = lerpDouble(full, _circle, t)!;
     final height = lerpDouble(_miniHeight + _gap + full, _circle, t)!;
     final miniLeft = lerpDouble(0, _circle + _gap, t)!;
@@ -119,7 +123,7 @@ class GlassDock extends StatelessWidget {
             top: 0,
             width: width - miniLeft,
             height: lerpDouble(_miniHeight, _circle, t),
-            child: mini!(t),
+            child: mini!(f),
           ),
           Positioned(
             left: 0,
@@ -136,7 +140,7 @@ class GlassDock extends StatelessWidget {
                     maxWidth: width,
                     child: Transform.translate(
                       offset: Offset(shift, 0),
-                      child: _bar(fold: t, minimize: t),
+                      child: _bar(fold: f, minimize: f),
                     ),
                   ),
                   // Minimized, the circle is one button: it opens the tabs.

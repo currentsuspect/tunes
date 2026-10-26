@@ -62,6 +62,7 @@ class TunesLook {
     this.glowStrength = 1,
     this.glassStyle = GlassStyle.frosted,
     this.glassTint,
+    this.wallpaper,
   });
 
   final String themeId;
@@ -99,6 +100,10 @@ class TunesLook {
 
   /// Tinted Glass's own colour, or null for the record's.
   final Color? glassTint;
+
+  /// Glass's background photo, if the listener brought one: the path of the
+  /// stored copy. Pages leave their ground clear to show it.
+  final String? wallpaper;
 
   bool get isDark => brightness == Brightness.dark;
 
@@ -155,11 +160,13 @@ class TunesLook {
   /// This look as Glass in [style], with [tint] for Tinted. The same
   /// arguments give the same object, so the theme controller can tell
   /// nothing changed and leave the app alone.
-  TunesLook glassed(GlassStyle style, Color? tint) {
+  TunesLook glassed(GlassStyle style, Color? tint, [String? photo]) {
     if (kind != LookKind.glass) return this;
     final keep = style == GlassStyle.tinted ? tint : null;
-    if (style == glassStyle && keep == glassTint) return this;
-    return _glassed.putIfAbsent((this, style, keep), () {
+    if (style == glassStyle && keep == glassTint && photo == wallpaper) {
+      return this;
+    }
+    return _glassed.putIfAbsent((this, style, keep, photo), () {
       // Tinted: the colour runs through the room, not just the panes. The
       // accent is the colour moved to a lightness that reads on this room,
       // the room's grounds take a breath of it.
@@ -195,11 +202,13 @@ class TunesLook {
         glowStrength: glowStrength,
         glassStyle: style,
         glassTint: keep,
+        wallpaper: photo,
       );
     });
   }
 
-  static final _glassed = <(TunesLook, GlassStyle, Color?), TunesLook>{};
+  static final _glassed =
+      <(TunesLook, GlassStyle, Color?, String?), TunesLook>{};
 
   /// Tinted Glass's accent for [tint]: the same hue, moved until it reads
   /// on a dark or a light room. By luminance, not lightness: a yellow and a

@@ -57,6 +57,7 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
     int nightFrom = nightStarts,
     int glassStyle = 0,
     int? glassTint,
+    String? wallpaper,
   }) {
     final m = now.hour * 60 + now.minute;
     // A night that wraps midnight (the usual case) or one that does not.
@@ -76,6 +77,7 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
         .glassed(
           GlassStyle.values[glassStyle.clamp(0, 2)],
           glassTint == null ? null : Color(glassTint),
+          wallpaper,
         );
   }
 
@@ -89,6 +91,7 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
       nightFrom: settings.autoNightMinutes,
       glassStyle: settings.glassStyle,
       glassTint: settings.glassTint ?? _recordTint?.toARGB32(),
+      wallpaper: settings.wallpaperPath,
     );
     _setSystemBars(next);
     if (identical(next, Looks.current)) return;

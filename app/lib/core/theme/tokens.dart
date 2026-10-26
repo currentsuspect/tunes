@@ -11,6 +11,11 @@ export 'looks.dart' show Looks, TunesLook, TunesThemeSpec, CoverStyle;
 /// colour. See the mood board this was built from for the reasoning.
 abstract final class Tones {
   static Color get base => Looks.current.base;
+
+  /// A page's own ground: [base], or clear when Glass has a background
+  /// photo behind every page ([TunesLook.wallpaper]).
+  static Color get page =>
+      Looks.current.wallpaper == null ? Looks.current.base : Colors.transparent;
   static Color get surface => Looks.current.surface;
   static Color get surfaceRaised => Looks.current.surfaceRaised;
   static Color get hairline => Looks.current.hairline;

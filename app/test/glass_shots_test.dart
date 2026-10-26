@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +37,45 @@ Future<void> _fonts() async {
     }
     await loader.load();
   }
+}
+
+/// A stand-in for someone's photo: a sunset of bands and soft discs, busy
+/// enough to show what the glass does over a real picture.
+Future<String> _samplePhoto() async {
+  const size = Size(1170, 2532);
+  final rec = ui.PictureRecorder();
+  final c = Canvas(rec);
+  c.drawRect(
+    Offset.zero & size,
+    Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFF2B1B5A), Color(0xFFD9467A), Color(0xFFF6A04D)],
+      ).createShader(Offset.zero & size),
+  );
+  for (final (x, y, r, col) in [
+    (0.75, 0.38, 260.0, const Color(0xFFFFE08A)),
+    (0.2, 0.7, 340.0, const Color(0xFF3DB8F2)),
+    (0.6, 0.85, 220.0, const Color(0xFF5ED6A0)),
+  ]) {
+    c.drawCircle(
+      Offset(x * size.width, y * size.height),
+      r,
+      Paint()..color = col.withValues(alpha: 0.75),
+    );
+  }
+  final image = await rec.endRecording().toImage(
+    size.width.toInt(),
+    size.height.toInt(),
+  );
+  final png = await image.toByteData(format: ui.ImageByteFormat.png);
+  final file = File(
+    '${Directory.systemTemp.createTempSync('tunes_shot').path}'
+    '/photo.png',
+  );
+  await file.writeAsBytes(png!.buffer.asUint8List());
+  return file.path;
 }
 
 const _items = [
@@ -156,7 +196,7 @@ class _Scene extends StatelessWidget {
           padding: EdgeInsets.only(top: 47, bottom: 34),
         ),
         child: Scaffold(
-          backgroundColor: Tones.base,
+          backgroundColor: Tones.page,
           extendBody: glass,
           body: LookGround(
             child: Stack(
@@ -202,9 +242,44 @@ class _Scene extends StatelessWidget {
 void main() {
   final shoot = Platform.environment['TUNES_SHOT'] != null;
   late TunesLook before;
-  setUpAll(_fonts);
+  late String photo;
+  setUpAll(() async {
+    await _fonts();
+    if (shoot) photo = await _samplePhoto();
+  });
   setUp(() => before = Looks.current);
   tearDown(() => Looks.current = before);
+
+  for (final (name, style, tint, dark) in [
+    ('photo_default_dark', GlassStyle.frosted, null, true),
+    ('photo_clear_dark', GlassStyle.clear, null, true),
+    ('photo_tinted_light', GlassStyle.tinted, const Color(0xFFD9467A), false),
+  ]) {
+    testWidgets('shot: $name', skip: !shoot, (tester) async {
+      Looks.current = Looks.glass
+          .of(dark ? Brightness.dark : Brightness.light)
+          .glassed(style, tint, photo);
+      tester.view.physicalSize = const Size(390, 844) * 3;
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      // The photo loads from disk, outside the test's fake clock, so it is
+      // decoded first, at the size the wallpaper asks for (the scene's
+      // MediaQuery says 1x), and the scene then finds it ready.
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(
+        () => precacheImage(
+          ResizeImage(FileImage(File(photo)), height: 844),
+          tester.element(find.byType(SizedBox)),
+        ),
+      );
+      await tester.pumpWidget(const _Scene());
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile('shots/glass/$name.png'),
+      );
+    });
+  }
 
   final cases = <(String, TunesLook, bool)>[
     for (final dark in [true, false]) ...[

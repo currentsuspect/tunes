@@ -19,7 +19,7 @@ ThemeData buildTunesTheme(MediaQueryData mq) {
       onPrimary: Tones.onPrimary,
       outline: Tones.hairline,
     ),
-    scaffoldBackgroundColor: Tones.base,
+    scaffoldBackgroundColor: Tones.page,
     fontFamily: Faces.body,
     splashFactory: InkSparkle.splashFactory,
   );

@@ -29,6 +29,8 @@ import '../../domain/whats_new.dart';
 import '../../core/theme/looks.dart';
 import 'eq_sheet.dart';
 import 'glass_tint_picker.dart';
+import 'wallpaper_tile.dart';
+import '../../core/ui/cover_tint.dart';
 import '../../core/ui/glass.dart';
 import '../../core/ui/dock.dart';
 
@@ -114,6 +116,19 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _name;
   final _avatars = AvatarStore();
+
+  /// The background photo's colour, worked out once per photo.
+  String? _photoTintFor;
+  Future<Color?>? _photoTintOf;
+  Future<Color?> _photoTint(String? path) {
+    if (path == null) return Future.value();
+    if (path != _photoTintFor) {
+      _photoTintFor = path;
+      _photoTintOf = CoverTint.of('photo:$path', File(path));
+    }
+    return _photoTintOf!;
+  }
+
   StorageUsage? _usage;
   ({int count, int bytes})? _covers;
 
@@ -348,7 +363,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final s = widget.settings;
     final art = ArtScope.maybeOf(context);
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       // The list runs on under Glass's dock (dockPad below).
       body: SafeArea(
         bottom: false,
@@ -427,10 +442,15 @@ class _SettingsPageState extends State<SettingsPage> {
                                 onChanged: s.setGlassStyle,
                               ),
                               if (s.glassStyle == 2)
-                                GlassTintPicker(
-                                  value: s.glassTint,
-                                  onChanged: s.setGlassTint,
+                                FutureBuilder<Color?>(
+                                  future: _photoTint(s.wallpaperPath),
+                                  builder: (context, photo) => GlassTintPicker(
+                                    value: s.glassTint,
+                                    onChanged: s.setGlassTint,
+                                    photo: photo.data,
+                                  ),
                                 ),
+                              WallpaperTile(settings: s),
                             ],
                             if (s.themeChoice == 'auto') ...[
                               _LinkTile(

@@ -34,6 +34,9 @@ class SettingsStore extends ChangeNotifier {
   static const _themeBrightness = 'theme.brightness';
   static const _glassStyle = 'theme.glassStyle';
   static const _glassTint = 'theme.glassTint';
+  static const _wallpaper = 'theme.wallpaper';
+  static const _wallpaperDim = 'theme.wallpaperDim';
+  static const _wallpaperBlur = 'theme.wallpaperBlur';
   static const _radioAutoplay = 'radio.autoplay';
   static const _lyricsTapOffsetMs = 'lyrics.tapOffsetMs';
   static const _lyricsEndRangeMs = 'lyrics.endRangeMs';
@@ -292,6 +295,26 @@ class SettingsStore extends ChangeNotifier {
   /// Tinted Glass's colour, as 0xAARRGGBB, or null to take each record's.
   int? get glassTint => int.tryParse(_cache[_glassTint] ?? '');
   Future<void> setGlassTint(int? v) => _put(_glassTint, v == null ? '' : '$v');
+
+  /// Glass's background photo (BYOB): a copy in the app's own storage, or
+  /// null for the room's own ground.
+  String? get wallpaperPath {
+    final v = _cache[_wallpaper];
+    return v == null || v.isEmpty ? null : v;
+  }
+
+  Future<void> setWallpaperPath(String? v) => _put(_wallpaper, v ?? '');
+
+  /// How much the room's ground is laid over the photo so the type on it
+  /// reads, 0 to 1. Half by default.
+  double get wallpaperDim =>
+      (double.tryParse(_cache[_wallpaperDim] ?? '') ?? 0.5).clamp(0.0, 0.9);
+  Future<void> setWallpaperDim(double v) => _put(_wallpaperDim, '$v');
+
+  /// How soft the photo is, as a blur radius. None by default.
+  double get wallpaperBlur =>
+      (double.tryParse(_cache[_wallpaperBlur] ?? '') ?? 0).clamp(0.0, 40.0);
+  Future<void> setWallpaperBlur(double v) => _put(_wallpaperBlur, '$v');
 
   Future<void> setDoubleTapDownloads(bool v) => _put(_doubleTapDownloads, '$v');
 

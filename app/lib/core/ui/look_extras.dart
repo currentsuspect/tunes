@@ -75,10 +75,15 @@ class LookGround extends StatelessWidget {
     final look = Looks.current;
     if (look.kind == LookKind.room) return child;
     if (look.kind == LookKind.glass) {
+      // Your own photo under every page, or the room's two pools of light
+      // over them. Not both: a photo has its own light.
+      final photo = look.wallpaper;
       return Stack(
         children: [
+          if (photo != null)
+            Positioned.fill(child: GlassWallpaper(path: photo)),
           child,
-          const Positioned.fill(child: GlassLight()),
+          if (photo == null) const Positioned.fill(child: GlassLight()),
         ],
       );
     }

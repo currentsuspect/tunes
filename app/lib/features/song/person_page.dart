@@ -94,7 +94,7 @@ class _PersonPageState extends State<PersonPage> {
     );
 
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: SafeArea(
         // The bottom is the list's, so in Glass it runs on under the dock.
         bottom: false,

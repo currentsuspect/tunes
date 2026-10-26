@@ -216,7 +216,7 @@ class _MixPageState extends State<MixPage> {
       if (covers.length == 4) break;
     }
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: covers.isEmpty ? null : covers.first,
         builder: (context, tint) => Stack(

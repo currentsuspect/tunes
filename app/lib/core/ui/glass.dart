@@ -1,10 +1,13 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import '../data/settings_store.dart';
 import '../theme/looks.dart';
 
 /// Where the light catches Glass's panes, as a horizontal position from -1
@@ -30,6 +33,24 @@ abstract final class GlassHaptics {
   static void lift() => HapticFeedback.mediumImpact();
   static void tick() => HapticFeedback.selectionClick();
   static void settle() => HapticFeedback.lightImpact();
+}
+
+/// A spring as a curve, for glass that changes shape on its own (the dock
+/// minimizing and opening): it runs a little past where it is going and
+/// settles back, as poured glass would, rather than easing to a stop.
+class LiquidCurve extends Curve {
+  const LiquidCurve();
+
+  static final _sim = SpringSimulation(
+    SpringDescription.withDampingRatio(mass: 1, stiffness: 170, ratio: 0.68),
+    0,
+    1,
+    0,
+  );
+
+  // The spring's first 0.95 s, by when it has settled, over the animation.
+  @override
+  double transformInternal(double t) => _sim.x(t * 0.95);
 }
 
 /// Glass's lens shader (shaders/glass_lens.frag): the page bends at a
@@ -108,27 +129,90 @@ class GlassPane extends StatefulWidget {
   State<GlassPane> createState() => _GlassPaneState();
 }
 
-class _GlassPaneState extends State<GlassPane> {
+class _GlassPaneState extends State<GlassPane> with TickerProviderStateMixin {
   /// The finger's position across the pane, -1 to 1, while it is down.
   final _touch = ValueNotifier<double?>(null);
   bool _down = false;
 
+  /// The liquid: how far the glass has swelled (0 to 1), and where it has
+  /// been pulled toward the finger (-1 to 1 each way). Springs, not curves:
+  /// they carry their speed when the finger changes its mind, and they
+  /// overshoot and settle when it lets go, the wobble that makes glass read
+  /// as something poured rather than a button.
+  late final _swell = AnimationController.unbounded(vsync: this);
+  late final _pullX = AnimationController.unbounded(vsync: this);
+  late final _pullY = AnimationController.unbounded(vsync: this);
+
+  /// Under the finger: quick and firm. Let go: looser, so it wobbles home.
+  static final _grab = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 520,
+    ratio: 0.8,
+  );
+  static final _release = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 320,
+    ratio: 0.42,
+  );
+
   @override
   void dispose() {
     _touch.dispose();
+    _swell.dispose();
+    _pullX.dispose();
+    _pullY.dispose();
     super.dispose();
   }
+
+  bool get _liquid =>
+      widget.pressable && !MediaQuery.disableAnimationsOf(context);
+
+  void _spring(AnimationController c, double to, SpringDescription how) =>
+      c.animateWith(SpringSimulation(how, c.value, to, c.velocity));
 
   void _at(PointerEvent e) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize || box.size.width == 0) return;
-    _touch.value = (e.localPosition.dx / box.size.width * 2 - 1).clamp(-1, 1);
+    final x = (e.localPosition.dx / box.size.width * 2 - 1).clamp(-1.0, 1.0);
+    final y = (e.localPosition.dy / box.size.height * 2 - 1).clamp(-1.0, 1.0);
+    _touch.value = x;
+    if (_down && _liquid) {
+      _spring(_pullX, x, _grab);
+      _spring(_pullY, y, _grab);
+    }
   }
 
   void _press(bool down) {
     if (!widget.pressable || down == _down) return;
     if (down) GlassHaptics.touch();
-    setState(() => _down = down);
+    _down = down;
+    if (!_liquid) return;
+    _spring(_swell, down ? 1 : 0, down ? _grab : _release);
+    if (!down) {
+      _spring(_pullX, 0, _release);
+      _spring(_pullY, 0, _release);
+    }
+  }
+
+  /// The pane's shape this frame: swollen by [_swell], stretched along the
+  /// way it is pulled and thinned across it (a drop keeps its volume), and
+  /// leaning a few points toward the finger.
+  Matrix4 _shape(Size size) {
+    final swell = _swell.value;
+    final px = _pullX.value * swell;
+    final py = _pullY.value * swell;
+    final grow = 1 + 0.035 * swell;
+    final sx = grow * (1 + 0.035 * px.abs() - 0.015 * py.abs());
+    final sy = grow * (1 + 0.05 * py.abs() - 0.02 * px.abs());
+    return Matrix4.identity()
+      ..translateByDouble(
+        size.width / 2 + px * 5,
+        size.height / 2 + py * 3,
+        0,
+        1,
+      )
+      ..scaleByDouble(sx, sy, 1, 1)
+      ..translateByDouble(-size.width / 2, -size.height / 2, 0, 1);
   }
 
   @override
@@ -184,12 +268,17 @@ class _GlassPaneState extends State<GlassPane> {
         _touch.value = null;
         _press(false);
       },
-      child: AnimatedScale(
-        // Glass under the finger swells, as iOS 26's does: a little more than
-        // a button dips, because it is the material moving, not a key.
-        scale: _down ? 1.035 : 1,
-        duration: still ? Duration.zero : const Duration(milliseconds: 220),
-        curve: Curves.easeOutBack,
+      // Glass under the finger swells, as iOS 26's does, and follows it:
+      // the material moving, not a key going down.
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_swell, _pullX, _pullY]),
+        builder: (context, child) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (_swell.value.abs() < 0.001 || box == null || !box.hasSize) {
+            return child!;
+          }
+          return Transform(transform: _shape(box.size), child: child);
+        },
         child: widget.lift
             ? CustomPaint(
                 painter: _LiftPainter(widget.borderRadius, Looks.current),
@@ -283,8 +372,14 @@ class _RenderFrost extends RenderProxyBox {
     final s = shader;
     var filter = blur;
     if (s != null) {
-      final origin = localToGlobal(Offset.zero) * _dpr;
-      final pane = size * _dpr;
+      // Where the pane is on screen, swollen and stretched included, so the
+      // rim bends where the glass is drawn.
+      final rect = MatrixUtils.transformRect(
+        getTransformTo(null),
+        Offset.zero & size,
+      );
+      final origin = rect.topLeft * _dpr;
+      final pane = rect.size * _dpr;
       // Index 0 and 1 are u_size, which the engine sets.
       s
         ..setFloat(2, origin.dx)
@@ -507,6 +602,59 @@ class GlassTopEdge extends StatelessWidget {
               ],
               stops: const [0, 0.55, 1],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Glass's background photo (BYOB), under every page: the photo filling the
+/// screen, softened by [SettingsStore.wallpaperBlur] and laid under the
+/// room's ground at [SettingsStore.wallpaperDim], so type on it still reads.
+/// Decoded at the screen's size, not the photo's, and drawn once: it sits
+/// behind a repaint boundary and never repaints while pages scroll over it.
+class GlassWallpaper extends StatelessWidget {
+  const GlassWallpaper({super.key, required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    final settings = SettingsScope.maybeOf(context);
+    final dim = settings?.wallpaperDim ?? 0.5;
+    final blur = settings?.wallpaperBlur ?? 0;
+    final mq = MediaQuery.of(context);
+    final long = mq.size.longestSide * mq.devicePixelRatio;
+    Widget photo = Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      cacheHeight: long.isFinite && long > 0 ? long.round() : null,
+      gaplessPlayback: true,
+      // A photo that has gone (storage cleared) leaves the room's ground.
+      errorBuilder: (_, _, _) => const SizedBox.expand(),
+    );
+    if (blur > 0) {
+      photo = ImageFiltered(
+        imageFilter: ImageFilter.blur(
+          sigmaX: blur,
+          sigmaY: blur,
+          tileMode: TileMode.mirror,
+        ),
+        child: photo,
+      );
+    }
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: ColoredBox(
+          color: look.base,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              photo,
+              ColoredBox(color: look.base.withValues(alpha: dim)),
+            ],
           ),
         ),
       ),
