@@ -19,6 +19,7 @@ import 'artist_sections.dart';
 import '../../core/theme/looks.dart';
 import '../album/album_page.dart';
 import '../library/library_widgets.dart';
+import '../../core/ui/dock.dart';
 
 /// An artist, in the order you read them: who they are, what of theirs you
 /// have, then what you do not.
@@ -204,11 +205,11 @@ class _ArtistPageState extends State<ArtistPage> {
     final aboutNav = AboutNav.maybeOf(context);
 
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: photo,
         builder: (context, tint) => SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: Space.xl),
+          padding: const EdgeInsets.only(bottom: Space.xl) + dockPad(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

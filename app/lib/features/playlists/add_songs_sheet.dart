@@ -5,6 +5,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
+import '../../core/ui/glass.dart';
 
 /// The tracks that match what was typed.
 ///
@@ -66,19 +67,22 @@ class AddSongsSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Tones.base,
+      backgroundColor: sheetBackground(Tones.base),
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (_) => AddSongsSheet(
-        playlistId: playlistId,
-        store: store,
-        tracks: tracks,
-        alreadyIn: alreadyIn,
-        artUrlFor: artUrlFor,
+      builder: glassSheet(
+        RadiusTokens.card,
+        (_) => AddSongsSheet(
+          playlistId: playlistId,
+          store: store,
+          tracks: tracks,
+          alreadyIn: alreadyIn,
+          artUrlFor: artUrlFor,
+        ),
       ),
     );
   }

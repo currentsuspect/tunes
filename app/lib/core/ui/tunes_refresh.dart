@@ -7,6 +7,7 @@ import 'package:flutter/cupertino.dart'
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'dock.dart';
 
 /// A scrolling list you can pull down to refresh.
 ///
@@ -52,7 +53,9 @@ class TunesRefreshList extends StatelessWidget {
             builder: _indicator,
           ),
           SliverPadding(
-            padding: padding,
+            padding: padding.copyWith(
+              bottom: padding.bottom + dockClearance(context),
+            ),
             sliver: SliverList(delegate: SliverChildListDelegate(children)),
           ),
         ],

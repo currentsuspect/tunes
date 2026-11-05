@@ -11,6 +11,8 @@ import '../../core/ui/generated_artwork.dart';
 import '../../core/ui/playing_bars.dart';
 import '../../domain/manifest.dart';
 import '../../domain/mixes.dart';
+import '../../core/ui/dock.dart';
+import '../../core/ui/glass.dart';
 
 /// A mix the app made: what it is, why, and the songs, to play or to keep.
 ///
@@ -106,58 +108,64 @@ class _MixPageState extends State<MixPage> {
   Future<void> _ask(ManifestTrack t) async {
     final everywhere = await showModalBottomSheet<bool>(
       context: context,
-      backgroundColor: Tones.surface,
+      backgroundColor: sheetBackground(Tones.surface),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(RadiusTokens.card),
         ),
       ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: Space.sm),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  Space.lg,
-                  Space.sm,
-                  Space.lg,
-                  Space.sm,
+      builder: glassSheet(
+        RadiusTokens.card,
+        (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Space.sm),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Space.lg,
+                    Space.sm,
+                    Space.lg,
+                    Space.sm,
+                  ),
+                  child: Text(
+                    t.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TypeScale.title,
+                  ),
                 ),
-                child: Text(
-                  t.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TypeScale.title,
+                ListTile(
+                  leading: Icon(
+                    Icons.remove_circle_outline_rounded,
+                    color: Tones.text,
+                  ),
+                  title: Text(
+                    'Take out of ${_mix.title}',
+                    style: TypeScale.title,
+                  ),
+                  subtitle: Text(
+                    'It stays out of this mix from now on',
+                    style: TypeScale.caption,
+                  ),
+                  onTap: () => Navigator.of(context).pop(false),
                 ),
-              ),
-              ListTile(
-                leading: Icon(
-                  Icons.remove_circle_outline_rounded,
-                  color: Tones.text,
+                ListTile(
+                  leading: Icon(Icons.block_rounded, color: Tones.text),
+                  title: Text(
+                    'Keep out of all my mixes',
+                    style: TypeScale.title,
+                  ),
+                  subtitle: Text(
+                    'It stays in your library; the app just stops picking it',
+                    style: TypeScale.caption,
+                  ),
+                  onTap: () => Navigator.of(context).pop(true),
                 ),
-                title: Text(
-                  'Take out of ${_mix.title}',
-                  style: TypeScale.title,
-                ),
-                subtitle: Text(
-                  'It stays out of this mix from now on',
-                  style: TypeScale.caption,
-                ),
-                onTap: () => Navigator.of(context).pop(false),
-              ),
-              ListTile(
-                leading: Icon(Icons.block_rounded, color: Tones.text),
-                title: Text('Keep out of all my mixes', style: TypeScale.title),
-                subtitle: Text(
-                  'It stays in your library; the app just stops picking it',
-                  style: TypeScale.caption,
-                ),
-                onTap: () => Navigator.of(context).pop(true),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -208,7 +216,7 @@ class _MixPageState extends State<MixPage> {
       if (covers.length == 4) break;
     }
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: covers.isEmpty ? null : covers.first,
         builder: (context, tint) => Stack(
@@ -241,7 +249,9 @@ class _MixPageState extends State<MixPage> {
                   ),
                   Expanded(
                     child: ListView.builder(
-                      padding: const EdgeInsets.only(bottom: Space.xl),
+                      padding:
+                          const EdgeInsets.only(bottom: Space.xl) +
+                          dockPad(context),
                       itemCount: tracks.length + 1,
                       itemBuilder: (context, i) {
                         if (i == 0) {

@@ -15,6 +15,7 @@ import '../../core/ui/cover_tint.dart';
 import '../../core/ui/generated_artwork.dart';
 import '../../domain/manifest.dart';
 import 'add_songs_sheet.dart';
+import '../../core/ui/dock.dart';
 
 /// One playlist, in the order you made it.
 ///
@@ -233,7 +234,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       if (covers.length == 4) break;
     }
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
       body: TintBuilder(
         artSha: covers.isEmpty ? null : covers.first,
         builder: (context, tint) => Stack(
@@ -292,7 +293,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
                     child: !_loaded
                         ? const SizedBox.shrink()
                         : ReorderableListView.builder(
-                            padding: const EdgeInsets.only(bottom: Space.xl),
+                            padding:
+                                const EdgeInsets.only(bottom: Space.xl) +
+                                dockPad(context),
                             itemCount: _entries.length,
                             buildDefaultDragHandles: false,
                             header: _Header(
@@ -594,7 +597,7 @@ class _Row extends StatelessWidget {
       builder: (context, _) {
         final playing = t != null && player.current?.sha == t.sha;
         return Material(
-          color: Tones.base,
+          color: Tones.page,
           child: PressRow(
             onTap: onTap,
             child: Padding(

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/data/settings_store.dart';
 import '../../core/theme/tokens.dart';
 import '../../domain/eq.dart';
+import '../../core/ui/glass.dart';
 
 /// Settings > Listening > Headphone EQ: pick a profile, turn it off, or paste
 /// one in (AutoEQ / squig.link / Wavelet / Equalizer APO text).
@@ -11,9 +12,9 @@ Future<void> showEqSheet(BuildContext context, SettingsStore s) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Tones.surface,
+    backgroundColor: sheetBackground(Tones.surface),
     showDragHandle: true,
-    builder: (_) => _EqSheet(settings: s),
+    builder: glassSheet(28, (_) => _EqSheet(settings: s)),
   );
 }
 

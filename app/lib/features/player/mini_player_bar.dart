@@ -11,6 +11,7 @@ import '../../core/ui/cover_tint.dart';
 import '../../core/ui/source_pill.dart';
 import '../../core/ui/artwork.dart';
 import '../../core/ui/generated_artwork.dart';
+import '../../core/ui/glass.dart';
 import '../../core/ui/shared_sleeve.dart';
 import '../../core/ui/track_swipe.dart';
 import '../../domain/manifest.dart';
@@ -21,11 +22,21 @@ class MiniPlayerBar extends StatefulWidget {
     required this.player,
     required this.onTap,
     this.artUrlFor,
+    this.glassBacking,
+    this.glassFold = 0,
   });
 
   final TunePlayer player;
   final VoidCallback onTap;
   final String Function(String sha)? artUrlFor;
+
+  /// How thick the bar's pane is in Glass, set by the dock from what is
+  /// scrolling under it. Null elsewhere.
+  final Color? glassBacking;
+
+  /// Glass's dock folding the bar down beside the minimized tabs: 0 is the
+  /// bar on its own row, 1 the inline bar, shorter and with one line.
+  final double glassFold;
 
   @override
   State<MiniPlayerBar> createState() => _MiniPlayerBarState();
@@ -68,38 +79,40 @@ class _MiniPlayerBarState extends State<MiniPlayerBar>
           builder: (context, tint) => Padding(
             // A raised card floating above the tabs, not a strip bolted to
             // them: the bar is the one thing always on screen, so it gets to
-            // be an object.
-            padding: const EdgeInsets.fromLTRB(
-              Space.sm + 2,
-              Space.sm,
-              Space.sm + 2,
-              Space.xs,
-            ),
-            child: DecoratedBox(
-              decoration: _barDecoration(tint),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(_barRadius),
-                child: Stack(
-                  children: [
-                    _SwipeableBody(
+            // be an object. Glass's dock places the bar itself.
+            padding: Looks.current.kind == LookKind.glass
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(
+                    Space.sm + 2,
+                    Space.sm,
+                    Space.sm + 2,
+                    Space.xs,
+                  ),
+            child: _barShell(
+              tint: tint,
+              backing: widget.glassBacking,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  _SwipeableBody(
+                    player: widget.player,
+                    onTap: widget.onTap,
+                    artUrlFor: widget.artUrlFor,
+                    track: current,
+                    source: source,
+                    fold: widget.glassFold,
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _ProgressSeekBar(
                       player: widget.player,
-                      onTap: widget.onTap,
-                      artUrlFor: widget.artUrlFor,
-                      track: current,
-                      source: source,
+                      playhead: _playhead,
+                      accent: tint,
                     ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: _ProgressSeekBar(
-                        player: widget.player,
-                        playhead: _playhead,
-                        accent: tint,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -209,6 +222,7 @@ class _SwipeableBody extends StatelessWidget {
     required this.artUrlFor,
     required this.track,
     required this.source,
+    this.fold = 0,
   });
 
   final TunePlayer player;
@@ -216,6 +230,9 @@ class _SwipeableBody extends StatelessWidget {
   final String Function(String sha)? artUrlFor;
   final ManifestTrack track;
   final TrackSource source;
+
+  /// [MiniPlayerBar.glassFold].
+  final double fold;
 
   @override
   Widget build(BuildContext context) {
@@ -227,11 +244,11 @@ class _SwipeableBody extends StatelessWidget {
       // lives above it, so the gesture that reveals it should be the one that
       // matches the direction it comes from.
       onFlingUp: onTap,
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
+        Space.sm + 2 * fold,
+        Space.sm - 3 * fold,
         Space.sm,
-        Space.sm,
-        Space.sm,
-        Space.sm + 2,
+        Space.sm + 2 - 5 * fold,
       ),
       builder: (context, t, current) => _info(context, t, current: current),
       trailing: _TransportButton(
@@ -248,18 +265,23 @@ class _SwipeableBody extends StatelessWidget {
     ManifestTrack track, {
     required bool current,
   }) {
+    final side = 42 - 8 * fold;
     final art = Artwork(
       shared: current,
       url: track.artSha != null && artUrlFor != null
           ? artUrlFor!(track.artSha!)
           : null,
       artSha: track.artSha,
-      size: 42,
-      borderRadius: 9,
+      size: side,
+      borderRadius: 9 + 2 * fold,
       // The same generated tile the list rows use. A blank square in the one
       // bar that is always on screen made tracks without a cover look like a
       // failed load.
-      fallback: GeneratedArtwork.fromTrack(track, size: 42, borderRadius: 9),
+      fallback: GeneratedArtwork.fromTrack(
+        track,
+        size: side,
+        borderRadius: 9 + 2 * fold,
+      ),
     );
     return Row(
       children: [
@@ -283,44 +305,64 @@ class _SwipeableBody extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
-              // Artist, then where the sound is coming from. The second part
-              // is the only coloured thing in the bar, so a track that will
-              // not play is noticed before it is tapped.
-              Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: track.artistDisplay),
-                    if (current) ...[
-                      const TextSpan(text: '  ·  '),
-                      // Another device's music says so, in the accent: the
-                      // sound is not here, and the buttons are a remote.
-                      if (player.remoteDeviceLabel != null)
-                        TextSpan(
-                          text: 'playing on ${player.remoteDeviceLabel}',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
+              // Inline in Glass's minimized dock there is room for the title
+              // alone; the second line folds away.
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  heightFactor: 1 - fold,
+                  child: Opacity(
+                    opacity: (1 - fold * 1.6).clamp(0.0, 1.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 2),
+                        // Artist, then where the sound is coming from. The second part
+                        // is the only coloured thing in the bar, so a track that will
+                        // not play is noticed before it is tapped.
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: track.artistDisplay),
+                              if (current) ...[
+                                const TextSpan(text: '  ·  '),
+                                // Another device's music says so, in the accent: the
+                                // sound is not here, and the buttons are a remote.
+                                if (player.remoteDeviceLabel != null)
+                                  TextSpan(
+                                    text:
+                                        'playing on ${player.remoteDeviceLabel}',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                    ),
+                                  )
+                                else
+                                  TextSpan(
+                                    text: source.label,
+                                    // On Crayon's sun-yellow bar the state colours
+                                    // (amber, green) all but vanish: ink instead.
+                                    style: TextStyle(
+                                      color:
+                                          Looks.current.kind ==
+                                                  LookKind.crayon &&
+                                              !Looks.current.isDark
+                                          ? Tones.text
+                                          : source.color,
+                                    ),
+                                  ),
+                              ],
+                            ],
                           ),
-                        )
-                      else
-                        TextSpan(
-                          text: source.label,
-                          // On Crayon's sun-yellow bar the state colours
-                          // (amber, green) all but vanish: ink instead.
-                          style: TextStyle(
-                            color:
-                                Looks.current.kind == LookKind.crayon &&
-                                    !Looks.current.isDark
-                                ? Tones.text
-                                : source.color,
-                          ),
+                          style: TypeScale.caption,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                    ],
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
-                style: TypeScale.caption,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -395,7 +437,7 @@ class _TransportButtonState extends State<_TransportButton> {
                   color: switch (Looks.current.kind) {
                     LookKind.noir => Tones.primary,
                     LookKind.crayon => Looks.current.crayons[1],
-                    LookKind.room => Tones.base,
+                    LookKind.room || LookKind.glass => Tones.base,
                   },
                 ),
               ),
@@ -409,12 +451,38 @@ class _TransportButtonState extends State<_TransportButton> {
 
 /// The bar's shape per room (mood board, 9 Oct). Room: a raised card lit by
 /// the cover. Crayon: a sticker on the page, sun yellow on paper, ink edge
-/// and a hard offset shadow. Noir: no card at all, a hairline above.
+/// and a hard offset shadow. Noir: no card at all, a hairline above. Glass:
+/// Room's card as a frosted pane.
 double get _barRadius => switch (Looks.current.kind) {
   LookKind.noir => 0,
   LookKind.crayon => 18,
   LookKind.room => RadiusTokens.card - 2,
+  // A capsule, as iOS 26's player bar is.
+  LookKind.glass => 31,
 };
+
+/// The bar's card around its contents. Glass floats it over the page, so
+/// it frosts what scrolls behind; every other look decorates and clips.
+Widget _barShell({required Color tint, required Widget child, Color? backing}) {
+  if (Looks.current.kind == LookKind.glass) {
+    return GlassPane(
+      borderRadius: BorderRadius.circular(_barRadius),
+      tint: tint,
+      backing: backing,
+      pressable: true,
+      lens: true,
+      lift: true,
+      child: child,
+    );
+  }
+  return DecoratedBox(
+    decoration: _barDecoration(tint),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(_barRadius),
+      child: child,
+    ),
+  );
+}
 
 BoxDecoration _barDecoration(Color tint) {
   final look = Looks.current;
@@ -434,6 +502,13 @@ BoxDecoration _barDecoration(Color tint) {
       return BoxDecoration(
         color: look.base,
         border: Border(top: BorderSide(color: look.hairline)),
+      );
+    // Glass draws through [_barShell]'s pane; this is its fill alone. No
+    // shadow: through a clear fill a shadow shows as a smudge inside.
+    case LookKind.glass:
+      return glassDecoration(
+        borderRadius: BorderRadius.circular(_barRadius),
+        tint: tint,
       );
     case LookKind.room:
       return BoxDecoration(

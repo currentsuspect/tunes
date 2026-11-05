@@ -28,6 +28,11 @@ import '../updates/update_controller.dart';
 import '../../domain/whats_new.dart';
 import '../../core/theme/looks.dart';
 import 'eq_sheet.dart';
+import 'glass_tint_picker.dart';
+import 'wallpaper_tile.dart';
+import '../../core/ui/cover_tint.dart';
+import '../../core/ui/glass.dart';
+import '../../core/ui/dock.dart';
 
 /// Who you are and how the app behaves.
 ///
@@ -111,6 +116,19 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _name;
   final _avatars = AvatarStore();
+
+  /// The background photo's colour, worked out once per photo.
+  String? _photoTintFor;
+  Future<Color?>? _photoTintOf;
+  Future<Color?> _photoTint(String? path) {
+    if (path == null) return Future.value();
+    if (path != _photoTintFor) {
+      _photoTintFor = path;
+      _photoTintOf = CoverTint.of('photo:$path', File(path));
+    }
+    return _photoTintOf!;
+  }
+
   StorageUsage? _usage;
   ({int count, int bytes})? _covers;
 
@@ -345,8 +363,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final s = widget.settings;
     final art = ArtScope.maybeOf(context);
     return Scaffold(
-      backgroundColor: Tones.base,
+      backgroundColor: Tones.page,
+      // The list runs on under Glass's dock (dockPad below).
       body: SafeArea(
+        bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -370,7 +390,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   builder: (context, box) {
                     final side = math.max(Space.lg, (box.maxWidth - 760) / 2);
                     return ListView(
-                      padding: EdgeInsets.fromLTRB(side, 0, side, Space.xl),
+                      padding:
+                          EdgeInsets.fromLTRB(side, 0, side, Space.xl) +
+                          dockPad(context),
                       children: [
                         Text(
                           'Settings',
@@ -412,6 +434,24 @@ class _SettingsPageState extends State<SettingsPage> {
                               brightness: s.themeBrightness,
                               onChoice: s.setThemeChoice,
                             ),
+                            if (s.themeChoice == 'glass') ...[
+                              _ChoiceTile(
+                                title: 'Glass',
+                                choices: const ['Default', 'Clear', 'Tinted'],
+                                selected: s.glassStyle,
+                                onChanged: s.setGlassStyle,
+                              ),
+                              if (s.glassStyle == 2)
+                                FutureBuilder<Color?>(
+                                  future: _photoTint(s.wallpaperPath),
+                                  builder: (context, photo) => GlassTintPicker(
+                                    value: s.glassTint,
+                                    onChanged: s.setGlassTint,
+                                    photo: photo.data,
+                                  ),
+                                ),
+                              WallpaperTile(settings: s),
+                            ],
                             if (s.themeChoice == 'auto') ...[
                               _LinkTile(
                                 title:
@@ -942,22 +982,25 @@ class _SettingsPageState extends State<SettingsPage> {
     if (s.avatarPath != null) {
       final choice = await showModalBottomSheet<String>(
         context: context,
-        backgroundColor: Tones.surfaceRaised,
-        builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.photo_library_outlined),
-                title: Text('Choose a photo', style: TypeScale.body),
-                onTap: () => Navigator.of(context).pop('pick'),
-              ),
-              ListTile(
-                leading: Icon(Icons.delete_outline_rounded),
-                title: Text('Remove photo', style: TypeScale.body),
-                onTap: () => Navigator.of(context).pop('remove'),
-              ),
-            ],
+        backgroundColor: sheetBackground(Tones.surfaceRaised),
+        builder: glassSheet(
+          28,
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: Icon(Icons.photo_library_outlined),
+                  title: Text('Choose a photo', style: TypeScale.body),
+                  onTap: () => Navigator.of(context).pop('pick'),
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete_outline_rounded),
+                  title: Text('Remove photo', style: TypeScale.body),
+                  onTap: () => Navigator.of(context).pop('remove'),
+                ),
+              ],
+            ),
           ),
         ),
       );

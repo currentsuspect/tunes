@@ -3,7 +3,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
-import 'package:flutter/rendering.dart' show HitTestResult, RenderEditable;
+import 'package:flutter/rendering.dart'
+    show HitTestResult, RenderEditable, ScrollDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -60,6 +61,9 @@ import 'core/nav/nav_controller.dart';
 import 'core/nav/root_route_guard.dart';
 import 'core/radio/radio_engine.dart';
 import 'core/theme/looks.dart';
+import 'core/ui/cover_tint.dart';
+import 'core/ui/glass.dart';
+import 'core/ui/glass_dock.dart';
 import 'core/ui/look_extras.dart';
 import 'core/radio/session.dart';
 import 'core/net/tunes_client.dart';
@@ -125,6 +129,8 @@ const _accountUrl = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Glass's lens; panes are plain frost until it lands (core/ui/glass.dart).
+  unawaited(GlassLens.load());
   // Draw behind the system bars. Recent Android does this to apps whether
   // they ask or not, so an app that has not opted in gets the layout without
   // the chance to say what the bars should look like over it.
@@ -697,6 +703,9 @@ class _TunesAppState extends State<TunesApp> {
   void initState() {
     super.initState();
     _theme = ThemeController(widget.settings);
+    widget.player.addListener(_followRecord);
+    widget.artStore.addListener(_followRecord);
+    _followRecord();
     _downloads = DownloadManager(
       client: widget.client,
       store: widget.store,
@@ -704,8 +713,34 @@ class _TunesAppState extends State<TunesApp> {
     )..onSaved = (_) => widget.player.refreshSources();
   }
 
+  /// Tells the theme the playing record's colour, for Tinted Glass that
+  /// matches the record. Cheap when nothing changed: the tint is memoized by
+  /// cover, and the theme ignores a colour it already has.
+  void _followRecord() {
+    final sha = widget.player.current?.artSha;
+    if (sha == null) {
+      _theme.recordTint = null;
+      return;
+    }
+    if (CoverTint.cached(sha) case final c?) {
+      _theme.recordTint = c;
+      return;
+    }
+    final path = widget.artStore.pathFor(sha);
+    if (path == null) return;
+    unawaited(
+      CoverTint.of(sha, File(path)).then((c) {
+        if (mounted && widget.player.current?.artSha == sha) {
+          _theme.recordTint = c;
+        }
+      }),
+    );
+  }
+
   @override
   void dispose() {
+    widget.player.removeListener(_followRecord);
+    widget.artStore.removeListener(_followRecord);
     _theme.dispose();
     _downloads.dispose();
     super.dispose();
@@ -834,6 +869,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// not change its mind every time it rebuilds.
   final _greetingSeed = math.Random().nextInt(1 << 30);
   int _tab = 0;
+
+  /// Glass's dock folds to glyphs while a page is read downwards and opens
+  /// again when it moves up ([_foldDock]).
+  bool _dockCompact = false;
+
+  /// Whether the page has content under Glass's dock right now. The dock's
+  /// panes thicken while it does, so their labels hold up over a busy page,
+  /// and clear again at the end of a list, where only the wall is behind.
+  bool _dockOverContent = true;
 
   /// This device's own player, for everything that is about this device's
   /// listening (history, radio, where to resume). [AppShell.player] is what
@@ -2420,9 +2464,67 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _wideNow(BuildContext context) =>
       usesDesktopShell(MediaQuery.sizeOf(context));
 
+  /// What Glass's dock learns from the page scrolling under it: a downward
+  /// read folds it and an upward one opens it; the offset moves the light on
+  /// every pane's edge ([GlassSheen]); and whether rows remain below sets how
+  /// thick the panes are. Only vertical scrolls count: a sideways shelf is
+  /// not reading the page.
+  bool _onPageScroll(Notification n) {
+    final metrics = switch (n) {
+      ScrollNotification(:final metrics) => metrics,
+      ScrollMetricsNotification(:final metrics) => metrics,
+      _ => null,
+    };
+    if (metrics == null || metrics.axis != Axis.vertical) return false;
+    var fold = _dockCompact;
+    if (n is UserScrollNotification) {
+      fold = switch (n.direction) {
+        ScrollDirection.reverse => true,
+        ScrollDirection.forward => false,
+        ScrollDirection.idle => _dockCompact,
+      };
+    }
+    if (n is ScrollUpdateNotification) GlassSheen.follow(metrics.pixels);
+    final over = metrics.extentAfter > 1;
+    if (fold != _dockCompact) GlassHaptics.settle();
+    if (fold != _dockCompact || over != _dockOverContent) {
+      setState(() {
+        _dockCompact = fold;
+        _dockOverContent = over;
+      });
+    }
+    return false;
+  }
+
   Widget _buildNarrow() {
+    final glass = Looks.current.kind == LookKind.glass;
     return Scaffold(
-      body: NavScope(controller: _nav, child: _buildBody()),
+      // Glass: pages run on under the floating dock, which frosts them
+      // (core/ui/dock.dart says how a page keeps its last row clear).
+      extendBody: glass,
+      body: NavScope(
+        controller: _nav,
+        child: glass
+            ? NotificationListener<Notification>(
+                onNotification: _onPageScroll,
+                child: Stack(
+                  children: [
+                    _buildBody(),
+                    // iOS 26's scroll edge: the page fades out under the
+                    // status bar rather than running into the clock. Not
+                    // over the player, which is lit edge to edge.
+                    if (_nav.current != const PanelDest(TunesPanels.nowPlaying))
+                      const Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        child: GlassTopEdge(),
+                      ),
+                  ],
+                ),
+              )
+            : _buildBody(),
+      ),
       // The player sits above the navigation rather than beside it: it is a
       // layer over the app, and the nav is the app's own furniture. The
       // separation is a hairline and a surface change, not a shadow -- this
@@ -2724,7 +2826,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     voice: switch (Looks.current.kind) {
                                       LookKind.crayon => GreetingVoice.crayon,
                                       LookKind.noir => GreetingVoice.noir,
-                                      LookKind.room => GreetingVoice.room,
+                                      LookKind.room ||
+                                      LookKind.glass => GreetingVoice.room,
                                     },
                                   ),
                                   style: TypeScale.wordmark.copyWith(
@@ -2779,12 +2882,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The mini-player over the tab bar: a layer over the app while the nav is
   /// its furniture. Tab roots only -- panels paint their own chrome.
+  /// How thick Glass's dock panes are: denser with rows under them.
+  Color _dockBacking() {
+    final look = Looks.current;
+    final a = _dockOverContent
+        ? (look.isDark ? 0.42 : 0.34)
+        : (look.isDark ? 0.12 : 0.08);
+    return look.base.withValues(alpha: a);
+  }
+
   Widget _buildBottomNav() {
+    final glass = Looks.current.kind == LookKind.glass;
+    final tabs = TunesNavBar(
+      selectedIndex: _tab,
+      onSelected: _onTabSelected,
+      items: const [
+        TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
+        TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
+        TunesNavItem(glyph: NavGlyph.search, label: 'Search'),
+        TunesNavItem(glyph: NavGlyph.library, label: 'Library'),
+      ],
+    );
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Tones.base,
-        border: Border(top: BorderSide(color: Tones.hairline)),
-      ),
+      // Glass: no strip at all. The mini player and the tabs float over the
+      // page as two frosted capsules.
+      decoration: glass
+          ? const BoxDecoration()
+          : BoxDecoration(
+              color: Tones.base,
+              border: Border(top: BorderSide(color: Tones.hairline)),
+            ),
       // Bottom only: the top edge of this bar is the app's own, and the
       // gesture strip is what would otherwise sit over the labels.
       child: SafeArea(
@@ -2807,21 +2934,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               },
             ),
             GetsBar(gets: _gets, onTap: () => _openGets()),
-            MiniPlayerBar(
-              player: widget.player,
-              onTap: _openNowPlaying,
-              artUrlFor: _artUrlFor,
-            ),
-            TunesNavBar(
-              selectedIndex: _tab,
-              onSelected: _onTabSelected,
-              items: const [
-                TunesNavItem(glyph: NavGlyph.home, label: 'Home'),
-                TunesNavItem(glyph: NavGlyph.discover, label: 'Discover'),
-                TunesNavItem(glyph: NavGlyph.search, label: 'Search'),
-                TunesNavItem(glyph: NavGlyph.library, label: 'Library'),
-              ],
-            ),
+            if (glass)
+              ListenableBuilder(
+                listenable: widget.player,
+                builder: (context, _) => TintBuilder(
+                  artSha: widget.player.current?.artSha,
+                  builder: (context, tint) => GlassDock(
+                    items: tabs.items,
+                    selectedIndex: _tab,
+                    onSelected: _onTabSelected,
+                    minimized: _dockCompact,
+                    onExpand: () {
+                      GlassHaptics.settle();
+                      setState(() => _dockCompact = false);
+                    },
+                    backing: _dockBacking(),
+                    tint: widget.player.current == null ? null : tint,
+                    mini: widget.player.current == null
+                        ? null
+                        : (fold) => MiniPlayerBar(
+                            player: widget.player,
+                            onTap: _openNowPlaying,
+                            artUrlFor: _artUrlFor,
+                            glassBacking: _dockBacking(),
+                            glassFold: fold,
+                          ),
+                  ),
+                ),
+              )
+            else ...[
+              MiniPlayerBar(
+                player: widget.player,
+                onTap: _openNowPlaying,
+                artUrlFor: _artUrlFor,
+              ),
+              tabs,
+            ],
           ],
         ),
       ),

@@ -27,6 +27,7 @@ class SectionHeader extends StatelessWidget {
     final look = Looks.current;
     switch (look.kind) {
       case LookKind.room:
+      case LookKind.glass:
         return [Text(title, style: TypeScale.heading)];
       case LookKind.crayon:
         final c = look.crayons[title.hashCode.abs() % look.crayons.length];

@@ -78,7 +78,7 @@ class _ScrubberState extends State<Scrubber>
                 trackHeight: switch (Looks.current.kind) {
                   LookKind.crayon => 9,
                   LookKind.noir => 8,
-                  LookKind.room => dragging ? 5 : 3,
+                  LookKind.room || LookKind.glass => dragging ? 5 : 3,
                 },
                 activeTrackColor: accent,
                 // A bare Slider inherits a rail colour invisible on this

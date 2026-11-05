@@ -1,0 +1,717 @@
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+
+import '../data/settings_store.dart';
+import '../theme/looks.dart';
+
+/// Where the light catches Glass's panes, as a horizontal position from -1
+/// (left) to 1 (right). The shell moves it as the page scrolls, so every
+/// pane's bright edge glides together, as light does across real glass when
+/// what is under it moves. A notifier, not state: the edges repaint, nothing
+/// rebuilds.
+abstract final class GlassSheen {
+  static final x = ValueNotifier<double>(-0.35);
+
+  /// Called with a vertical scroll's offset. A slow sine, so a long read
+  /// sweeps the light back and forth rather than pinning it at one end.
+  static void follow(double pixels) => x.value = math.sin(pixels / 520) * 0.85;
+}
+
+/// What Glass feels like under the finger. The dock is a material, so it
+/// answers touch the way a thing does: a light knock when glass is touched,
+/// a firmer one when the droplet is picked up, a tick for every tab it passes
+/// over, a soft one as it is set down or the dock settles into a new shape.
+/// iOS turns these off itself when the phone's system haptics are off.
+abstract final class GlassHaptics {
+  static void touch() => HapticFeedback.lightImpact();
+  static void lift() => HapticFeedback.mediumImpact();
+  static void tick() => HapticFeedback.selectionClick();
+  static void settle() => HapticFeedback.lightImpact();
+}
+
+/// A spring as a curve, for glass that changes shape on its own (the dock
+/// minimizing and opening): it runs a little past where it is going and
+/// settles back, as poured glass would, rather than easing to a stop.
+class LiquidCurve extends Curve {
+  const LiquidCurve();
+
+  static final _sim = SpringSimulation(
+    SpringDescription.withDampingRatio(mass: 1, stiffness: 170, ratio: 0.68),
+    0,
+    1,
+    0,
+  );
+
+  // The spring's first 0.95 s, by when it has settled, over the animation.
+  @override
+  double transformInternal(double t) => _sim.x(t * 0.95);
+}
+
+/// Glass's lens shader (shaders/glass_lens.frag): the page bends at a
+/// floating pane's rim. Loaded once at start; until it has loaded, and
+/// wherever the renderer cannot run a shader as a backdrop filter (Skia,
+/// tests), panes are plain frost.
+abstract final class GlassLens {
+  static FragmentProgram? _program;
+
+  static Future<void> load() async {
+    if (!ImageFilter.isShaderFilterSupported) return;
+    try {
+      _program = await FragmentProgram.fromAsset('shaders/glass_lens.frag');
+    } catch (_) {
+      // A pane without a lens is still a pane.
+    }
+  }
+
+  static FragmentShader? shader() => _program?.fragmentShader();
+}
+
+/// Glass's one effect: a pane that frosts what is behind it.
+///
+/// Blur is the most expensive thing this app draws, so panes go only on what
+/// floats -- the dock, sheets, Now Playing's backdrop -- never on rows in a
+/// scrolling list, where a translucent fill ([glassDecoration] without the
+/// blur) reads nearly the same and costs nothing.
+///
+/// The edge has a highlight that follows [GlassSheen], and the finger while
+/// the pane is pressed, when it also swells a little ([pressable]).
+class GlassPane extends StatefulWidget {
+  const GlassPane({
+    super.key,
+    required this.child,
+    this.borderRadius = BorderRadius.zero,
+    this.blur = 24,
+    this.tint,
+    this.backing,
+    this.pressable = false,
+    this.lens = false,
+    this.lift = false,
+    this.keepFrost = false,
+  });
+
+  final Widget child;
+  final BorderRadius borderRadius;
+  final double blur;
+
+  /// A dim layer under the frost, for panes that carry text over busy
+  /// content: the blur alone leaves it too clear to read on. Changes fade,
+  /// so a pane can thicken as content slides under it.
+  final Color? backing;
+
+  /// The record's colour, washed faintly into the pane.
+  final Color? tint;
+
+  /// Swells under the finger. Only for panes that are themselves a control
+  /// (the dock's capsules); a sheet that swelled would read as broken.
+  final bool pressable;
+
+  /// Bends the page at the rim ([GlassLens]). Only for small floating panes
+  /// (the dock's capsules): it is a pass over every pixel the pane covers,
+  /// and a sheet's worth of bending would be hard to read through.
+  final bool lens;
+
+  /// Hovers: a soft shadow under the pane, kept off the glass itself (through
+  /// a clear pane a shadow reads as a smudge inside). For what floats over the
+  /// page, the dock's capsules; a sheet is anchored and stays flat.
+  final bool lift;
+
+  /// Frosted whatever the [GlassStyle]: for a sheet full of small type,
+  /// which Clear would leave hard to read. It still takes the style's tint.
+  final bool keepFrost;
+
+  @override
+  State<GlassPane> createState() => _GlassPaneState();
+}
+
+class _GlassPaneState extends State<GlassPane> with TickerProviderStateMixin {
+  /// The finger's position across the pane, -1 to 1, while it is down.
+  final _touch = ValueNotifier<double?>(null);
+  bool _down = false;
+
+  /// The liquid: how far the glass has swelled (0 to 1), and where it has
+  /// been pulled toward the finger (-1 to 1 each way). Springs, not curves:
+  /// they carry their speed when the finger changes its mind, and they
+  /// overshoot and settle when it lets go, the wobble that makes glass read
+  /// as something poured rather than a button.
+  late final _swell = AnimationController.unbounded(vsync: this);
+  late final _pullX = AnimationController.unbounded(vsync: this);
+  late final _pullY = AnimationController.unbounded(vsync: this);
+
+  /// Under the finger: quick and firm. Let go: looser, so it wobbles home.
+  static final _grab = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 520,
+    ratio: 0.8,
+  );
+  static final _release = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 320,
+    ratio: 0.42,
+  );
+
+  @override
+  void dispose() {
+    _touch.dispose();
+    _swell.dispose();
+    _pullX.dispose();
+    _pullY.dispose();
+    super.dispose();
+  }
+
+  bool get _liquid =>
+      widget.pressable && !MediaQuery.disableAnimationsOf(context);
+
+  void _spring(AnimationController c, double to, SpringDescription how) =>
+      c.animateWith(SpringSimulation(how, c.value, to, c.velocity));
+
+  void _at(PointerEvent e) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || box.size.width == 0) return;
+    final x = (e.localPosition.dx / box.size.width * 2 - 1).clamp(-1.0, 1.0);
+    final y = (e.localPosition.dy / box.size.height * 2 - 1).clamp(-1.0, 1.0);
+    _touch.value = x;
+    if (_down && _liquid) {
+      _spring(_pullX, x, _grab);
+      _spring(_pullY, y, _grab);
+    }
+  }
+
+  void _press(bool down) {
+    if (!widget.pressable || down == _down) return;
+    if (down) GlassHaptics.touch();
+    _down = down;
+    if (!_liquid) return;
+    _spring(_swell, down ? 1 : 0, down ? _grab : _release);
+    if (!down) {
+      _spring(_pullX, 0, _release);
+      _spring(_pullY, 0, _release);
+    }
+  }
+
+  /// The pane's shape this frame: swollen by [_swell], stretched along the
+  /// way it is pulled and thinned across it (a drop keeps its volume), and
+  /// leaning a few points toward the finger.
+  Matrix4 _shape(Size size) {
+    final swell = _swell.value;
+    final px = _pullX.value * swell;
+    final py = _pullY.value * swell;
+    final grow = 1 + 0.035 * swell;
+    final sx = grow * (1 + 0.035 * px.abs() - 0.015 * py.abs());
+    final sy = grow * (1 + 0.05 * py.abs() - 0.02 * px.abs());
+    return Matrix4.identity()
+      ..translateByDouble(
+        size.width / 2 + px * 5,
+        size.height / 2 + py * 3,
+        0,
+        1,
+      )
+      ..scaleByDouble(sx, sy, 1, 1)
+      ..translateByDouble(-size.width / 2, -size.height / 2, 0, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final still = MediaQuery.disableAnimationsOf(context);
+    final look = Looks.current;
+    final frost = widget.keepFrost ? 1.0 : look.glassFrost;
+    final backing = widget.backing;
+    final pane = ClipRRect(
+      borderRadius: widget.borderRadius,
+      child: _Frost(
+        blur: widget.blur * frost,
+        lens: widget.lens,
+        radius: widget.borderRadius.topLeft.x,
+        bend: look.glassBend,
+        dpr: MediaQuery.devicePixelRatioOf(context),
+        child: AnimatedContainer(
+          duration: still ? Duration.zero : const Duration(milliseconds: 260),
+          color: backing == null
+              ? Colors.transparent
+              : backing.withValues(alpha: backing.a * frost),
+          child: DecoratedBox(
+            decoration: glassDecoration(
+              borderRadius: widget.borderRadius,
+              tint: widget.tint,
+              edge: false,
+            ),
+            position: DecorationPosition.background,
+            child: CustomPaint(
+              foregroundPainter: _EdgePainter(
+                radius: widget.borderRadius,
+                look: Looks.current,
+                touch: _touch,
+              ),
+              child: widget.child,
+            ),
+          ),
+        ),
+      ),
+    );
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (e) {
+        _at(e);
+        _press(true);
+      },
+      onPointerMove: _at,
+      onPointerUp: (_) {
+        _touch.value = null;
+        _press(false);
+      },
+      onPointerCancel: (_) {
+        _touch.value = null;
+        _press(false);
+      },
+      // Glass under the finger swells, as iOS 26's does, and follows it:
+      // the material moving, not a key going down.
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_swell, _pullX, _pullY]),
+        builder: (context, child) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (_swell.value.abs() < 0.001 || box == null || !box.hasSize) {
+            return child!;
+          }
+          return Transform(transform: _shape(box.size), child: child);
+        },
+        child: widget.lift
+            ? CustomPaint(
+                painter: _LiftPainter(widget.borderRadius, Looks.current),
+                child: pane,
+              )
+            : pane,
+      ),
+    );
+  }
+}
+
+/// The frost behind a pane: a blur, and through [GlassLens] the bend at its
+/// rim. A render object rather than a BackdropFilter because the lens needs
+/// the pane's place on screen at paint time, mid-animation included (the
+/// dock folding, a capsule swelling under the finger).
+class _Frost extends SingleChildRenderObjectWidget {
+  const _Frost({
+    required this.blur,
+    required this.lens,
+    required this.radius,
+    required this.bend,
+    required this.dpr,
+    required super.child,
+  });
+
+  final double blur;
+  final bool lens;
+  final double radius;
+  final double bend;
+  final double dpr;
+
+  @override
+  _RenderFrost createRenderObject(BuildContext context) =>
+      _RenderFrost(blur, lens ? GlassLens.shader() : null, radius, bend, dpr);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderFrost render) {
+    render
+      ..blur = blur
+      ..radius = radius
+      ..bend = bend
+      ..dpr = dpr;
+    if (lens && render.shader == null) render.shader = GlassLens.shader();
+    if (!lens) render.shader = null;
+  }
+}
+
+class _RenderFrost extends RenderProxyBox {
+  _RenderFrost(this._blur, this.shader, this._radius, this._bend, this._dpr);
+
+  FragmentShader? shader;
+
+  double _blur;
+  set blur(double v) {
+    if (v == _blur) return;
+    _blur = v;
+    markNeedsPaint();
+  }
+
+  double _radius;
+  set radius(double v) {
+    if (v == _radius) return;
+    _radius = v;
+    markNeedsPaint();
+  }
+
+  double _bend;
+  set bend(double v) {
+    if (v == _bend) return;
+    _bend = v;
+    markNeedsPaint();
+  }
+
+  double _dpr;
+  set dpr(double v) {
+    if (v == _dpr) return;
+    _dpr = v;
+    markNeedsPaint();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => child != null;
+
+  @override
+  BackdropFilterLayer? get layer => super.layer as BackdropFilterLayer?;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) return;
+    final blur = ImageFilter.blur(sigmaX: _blur, sigmaY: _blur);
+    final s = shader;
+    var filter = blur;
+    if (s != null) {
+      // Where the pane is on screen, swollen and stretched included, so the
+      // rim bends where the glass is drawn.
+      final rect = MatrixUtils.transformRect(
+        getTransformTo(null),
+        Offset.zero & size,
+      );
+      final origin = rect.topLeft * _dpr;
+      final pane = rect.size * _dpr;
+      // Index 0 and 1 are u_size, which the engine sets.
+      s
+        ..setFloat(2, origin.dx)
+        ..setFloat(3, origin.dy)
+        ..setFloat(4, pane.width)
+        ..setFloat(5, pane.height)
+        ..setFloat(6, _radius * _dpr)
+        ..setFloat(7, _bend * _dpr) // the rim pulls the page this far, at most
+        ..setFloat(8, 14 * _dpr) // over a band this wide
+        ..setFloat(9, 1.2 * _dpr); // with this much colour split
+      filter = ImageFilter.compose(outer: ImageFilter.shader(s), inner: blur);
+    }
+    layer = (layer ?? BackdropFilterLayer())..filter = filter;
+    context.pushLayer(layer!, super.paint, offset);
+  }
+}
+
+/// The pane's edge: a hairline in [TunesLook.glassEdge] that brightens
+/// toward one point, the finger's while it is down and [GlassSheen]'s
+/// otherwise. Brightest along the top, where light lands on glass.
+class _EdgePainter extends CustomPainter {
+  _EdgePainter({required this.radius, required this.look, required this.touch})
+    : super(repaint: Listenable.merge([GlassSheen.x, touch]));
+
+  final BorderRadius radius;
+  final TunesLook look;
+  final ValueNotifier<double?> touch;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = radius.toRRect(rect).deflate(0.5);
+    final at = touch.value ?? GlassSheen.x.value;
+    final edge = look.glassEdge;
+    final hot = Colors.white.withValues(alpha: look.isDark ? 0.85 : 1);
+    final centre = ((at + 1) / 2).clamp(0.0, 1.0);
+    final spread = touch.value == null ? 0.28 : 0.18;
+    final across = LinearGradient(
+      colors: [edge, edge, hot, edge, edge],
+      stops: [
+        0,
+        (centre - spread).clamp(0.0, 1.0),
+        centre,
+        (centre + spread).clamp(0.0, 1.0),
+        1,
+      ],
+    );
+    final top = Rect.fromLTRB(0, 0, size.width, size.height / 2);
+    // The glass's thickness: a soft glow just inside the rim, strongest at
+    // the top, so the pane reads as a slab with volume rather than a cut-out.
+    canvas
+      ..save()
+      ..clipRRect(rrect)
+      ..drawRRect(
+        rrect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.white.withValues(alpha: look.isDark ? 0.16 : 0.5),
+              Colors.white.withValues(alpha: 0),
+              Colors.white.withValues(alpha: look.isDark ? 0.05 : 0.2),
+            ],
+            stops: const [0, 0.55, 1],
+          ).createShader(rect),
+      )
+      ..restore();
+    // Light comes from above: the travelling highlight is on the top half of
+    // the edge, the bottom half a plain, dimmer line.
+    canvas
+      ..save()
+      ..clipRect(top)
+      ..drawRRect(
+        rrect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..shader = across.createShader(rect),
+      )
+      ..restore()
+      ..save()
+      ..clipRect(Rect.fromLTRB(0, size.height / 2, size.width, size.height))
+      ..drawRRect(
+        rrect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = edge.withValues(alpha: edge.a * 0.5),
+      )
+      ..restore();
+  }
+
+  @override
+  bool shouldRepaint(_EdgePainter old) =>
+      old.radius != radius || old.look != look || old.touch != touch;
+}
+
+/// The shadow a hovering pane casts on the page: soft, a little below, and
+/// only outside the pane.
+class _LiftPainter extends CustomPainter {
+  _LiftPainter(this.radius, this.look);
+
+  final BorderRadius radius;
+  final TunesLook look;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = radius.toRRect(Offset.zero & size);
+    canvas
+      ..save()
+      ..clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect((Offset.zero & size).inflate(40))
+          ..addRRect(rrect),
+      )
+      ..drawRRect(
+        rrect.shift(const Offset(0, 6)),
+        Paint()
+          ..color = Colors.black.withValues(alpha: look.isDark ? 0.42 : 0.14)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+      )
+      ..restore();
+  }
+
+  @override
+  bool shouldRepaint(_LiftPainter old) =>
+      old.radius != radius || old.look != look;
+}
+
+/// The pane's fill and edge without the blur, for things that sit on a pane
+/// already (a blur inside a blur costs twice and shows nothing new) or in a
+/// list.
+BoxDecoration glassDecoration({
+  BorderRadius borderRadius = BorderRadius.zero,
+  Color? tint,
+  bool edge = true,
+}) {
+  final look = Looks.current;
+  final fill = look.glassFill;
+  final wash = look.glassWash(tint);
+  return BoxDecoration(
+    borderRadius: borderRadius,
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        if (wash case (final c, final a))
+          Color.alphaBlend(c.withValues(alpha: a), fill[0])
+        else
+          fill[0],
+        if (wash case (final c, final a))
+          Color.alphaBlend(c.withValues(alpha: a * 0.5), fill[1])
+        else
+          fill[1],
+      ],
+    ),
+    border: edge ? Border.all(color: look.glassEdge) : null,
+  );
+}
+
+/// A bottom sheet's background: [solid] ([Tones.surface] unless given) in
+/// every look but Glass, where the sheet is clear and [GlassSheet] frosts it.
+Color sheetBackground([Color? solid]) => Looks.current.kind == LookKind.glass
+    ? Colors.transparent
+    : solid ?? Looks.current.surface;
+
+/// A sheet's builder inside [GlassSheet]:
+/// `builder: glassSheet(radius, (context) => ...)`.
+WidgetBuilder glassSheet(double radius, WidgetBuilder builder) =>
+    (context) => GlassSheet(radius: radius, child: builder(context));
+
+/// A bottom sheet's body, frosted in Glass and unchanged in every other look.
+/// Pair with [sheetBackground] on the `showModalBottomSheet` call.
+class GlassSheet extends StatelessWidget {
+  const GlassSheet({super.key, required this.radius, required this.child});
+
+  final double radius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    if (look.kind != LookKind.glass) return child;
+    return GlassPane(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
+      blur: 30,
+      keepFrost: true,
+      backing: look.base.withValues(alpha: look.isDark ? 0.62 : 0.5),
+      child: child,
+    );
+  }
+}
+
+/// The top of a Glass screen: the page fades into the room's base under the
+/// status bar, as iOS 26's scroll edge does, so rows scrolling up go soft
+/// before they reach the clock instead of running into it.
+class GlassTopEdge extends StatelessWidget {
+  const GlassTopEdge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Looks.current.base;
+    return IgnorePointer(
+      child: SizedBox(
+        height: MediaQuery.paddingOf(context).top + 18,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                base.withValues(alpha: 0.92),
+                base.withValues(alpha: 0.6),
+                base.withValues(alpha: 0),
+              ],
+              stops: const [0, 0.55, 1],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Glass's background photo, under every page: the photo filling the
+/// screen, softened by [SettingsStore.wallpaperBlur] and laid under the
+/// room's ground at [SettingsStore.wallpaperDim], so type on it still reads.
+/// Decoded at the screen's size, not the photo's, and drawn once: it sits
+/// behind a repaint boundary and never repaints while pages scroll over it.
+class GlassWallpaper extends StatelessWidget {
+  const GlassWallpaper({super.key, required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    final settings = SettingsScope.maybeOf(context);
+    final dim = settings?.wallpaperDim ?? 0.5;
+    final blur = settings?.wallpaperBlur ?? 0;
+    final mq = MediaQuery.of(context);
+    final long = mq.size.longestSide * mq.devicePixelRatio;
+    Widget photo = Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      cacheHeight: long.isFinite && long > 0 ? long.round() : null,
+      gaplessPlayback: true,
+      // A photo that has gone (storage cleared) leaves the room's ground.
+      errorBuilder: (_, _, _) => const SizedBox.expand(),
+    );
+    if (blur > 0) {
+      photo = ImageFiltered(
+        imageFilter: ImageFilter.blur(
+          sigmaX: blur,
+          sigmaY: blur,
+          tileMode: TileMode.mirror,
+        ),
+        child: photo,
+      );
+    }
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: ColoredBox(
+          color: look.base,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              photo,
+              ColoredBox(color: look.base.withValues(alpha: dim)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The light in a Glass room: two soft pools, the accent's top right and a
+/// cooler one bottom left, laid over every route like Crayon's paper and
+/// Noir's grain. Painted once and cached; it never repaints while you scroll.
+class GlassLight extends StatelessWidget {
+  const GlassLight({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Looks.current;
+    // Tinted: both pools in the chosen colour, the second turned a little
+    // round the wheel so the room is lit rather than flooded.
+    final tinted = look.glassTint != null;
+    final a = (look.isDark ? 0.16 : 0.12) * (tinted ? 1.5 : 1);
+    final second = tinted
+        ? HSLColor.fromColor(look.primary)
+              .withHue((HSLColor.fromColor(look.primary).hue + 40) % 360)
+              .toColor()
+        : const Color(0xFF8A7CF0);
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.9, -0.85),
+                  radius: 0.9,
+                  colors: [
+                    look.primary.withValues(alpha: a),
+                    look.primary.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(-0.95, 0.75),
+                  radius: 0.85,
+                  colors: [
+                    second.withValues(alpha: a * 0.8),
+                    second.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
