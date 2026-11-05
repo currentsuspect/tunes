@@ -462,9 +462,9 @@ class _LibraryViewState extends State<LibraryView> {
                     Icons.chevron_right_rounded,
                     color: Tones.textMuted,
                   ),
-                  onTap: () => NavScope.of(
-                    context,
-                  ).openPanel(TunesPanels.liked, () => _likedPage()),
+                  onTap: () =>
+                      NavScope.of(context)
+                          .openPanel(TunesPanels.liked, () => _likedPage()),
                 );
               }
               if (index == 1) {

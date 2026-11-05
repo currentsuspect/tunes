@@ -167,9 +167,8 @@ class TrackActionsSheet extends StatelessWidget {
                 await Clipboard.setData(ClipboardData(text: track.sha));
                 if (!context.mounted) return;
                 Navigator.of(context).pop();
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('sha copied')));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text('sha copied')));
               },
             ),
             const SizedBox(height: Space.sm),

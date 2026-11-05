@@ -972,9 +972,8 @@ class _SearchViewState extends State<SearchView> {
         final total = r.totalTracks;
         if (total == null || r.trackShas.length >= total) continue;
         if (foldForSearch(r.title) == a &&
-            foldForSearch(
-              r.artist,
-            ).contains(foldForSearch(s.artist).split(' ').first)) {
+            foldForSearch(r.artist)
+                .contains(foldForSearch(s.artist).split(' ').first)) {
           return r;
         }
       }
